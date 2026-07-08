@@ -1,0 +1,415 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1A2B3C4D5E6F700100000001 /* OtterApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000101 /* OtterApp.swift */; };
+		1A2B3C4D5E6F700100000002 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000102 /* AppModel.swift */; };
+		1A2B3C4D5E6F700100000003 /* NetworkShare.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000103 /* NetworkShare.swift */; };
+		1A2B3C4D5E6F700100000004 /* ShareStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000104 /* ShareStatus.swift */; };
+		1A2B3C4D5E6F700100000005 /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000105 /* AppPreferences.swift */; };
+		1A2B3C4D5E6F700100000006 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000106 /* SettingsStore.swift */; };
+		1A2B3C4D5E6F700100000007 /* MountService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000107 /* MountService.swift */; };
+		1A2B3C4D5E6F700100000008 /* NetworkReachabilityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000108 /* NetworkReachabilityService.swift */; };
+		1A2B3C4D5E6F700100000009 /* LoginItemService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000109 /* LoginItemService.swift */; };
+		1A2B3C4D5E6F70010000000A /* ShareMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000010A /* ShareMonitor.swift */; };
+		1A2B3C4D5E6F70010000000B /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000010B /* MenuBarView.swift */; };
+		1A2B3C4D5E6F70010000000C /* PreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000010C /* PreferencesView.swift */; };
+		1A2B3C4D5E6F70010000000D /* ShareEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000010D /* ShareEditorView.swift */; };
+		1A2B3C4D5E6F70010000000E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000010E /* Assets.xcassets */; };
+		1A2B3C4D5E6F70010000000F /* Otter.icon in Resources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000010F /* Otter.icon */; };
+		1A2B3C4D5E6F700100000010 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000110 /* NotificationService.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		1A2B3C4D5E6F700100000020 /* Otter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Otter.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A2B3C4D5E6F700100000100 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000101 /* OtterApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtterApp.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000102 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000103 /* NetworkShare.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkShare.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000104 /* ShareStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareStatus.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000105 /* AppPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferences.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000106 /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000107 /* MountService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MountService.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000108 /* NetworkReachabilityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkReachabilityService.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000109 /* LoginItemService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginItemService.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F70010000010A /* ShareMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareMonitor.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F70010000010B /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F70010000010C /* PreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesView.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F70010000010D /* ShareEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareEditorView.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F70010000010E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		1A2B3C4D5E6F70010000010F /* Otter.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = Otter.icon; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000110 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		1A2B3C4D5E6F700100000030 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1A2B3C4D5E6F700100000040 = {
+			isa = PBXGroup;
+			children = (
+				1A2B3C4D5E6F700100000041 /* Otter */,
+				1A2B3C4D5E6F70010000010F /* Otter.icon */,
+				1A2B3C4D5E6F700100000050 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		1A2B3C4D5E6F700100000041 /* Otter */ = {
+			isa = PBXGroup;
+			children = (
+				1A2B3C4D5E6F700100000100 /* Info.plist */,
+				1A2B3C4D5E6F70010000010E /* Assets.xcassets */,
+				1A2B3C4D5E6F700100000042 /* App */,
+				1A2B3C4D5E6F700100000043 /* Models */,
+				1A2B3C4D5E6F700100000044 /* Services */,
+				1A2B3C4D5E6F700100000045 /* Views */,
+			);
+			path = Otter;
+			sourceTree = "<group>";
+		};
+		1A2B3C4D5E6F700100000042 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				1A2B3C4D5E6F700100000101 /* OtterApp.swift */,
+				1A2B3C4D5E6F700100000102 /* AppModel.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		1A2B3C4D5E6F700100000043 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				1A2B3C4D5E6F700100000103 /* NetworkShare.swift */,
+				1A2B3C4D5E6F700100000104 /* ShareStatus.swift */,
+				1A2B3C4D5E6F700100000105 /* AppPreferences.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		1A2B3C4D5E6F700100000044 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				1A2B3C4D5E6F700100000106 /* SettingsStore.swift */,
+				1A2B3C4D5E6F700100000107 /* MountService.swift */,
+				1A2B3C4D5E6F700100000108 /* NetworkReachabilityService.swift */,
+				1A2B3C4D5E6F700100000110 /* NotificationService.swift */,
+				1A2B3C4D5E6F700100000109 /* LoginItemService.swift */,
+				1A2B3C4D5E6F70010000010A /* ShareMonitor.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		1A2B3C4D5E6F700100000045 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				1A2B3C4D5E6F70010000010B /* MenuBarView.swift */,
+				1A2B3C4D5E6F70010000010C /* PreferencesView.swift */,
+				1A2B3C4D5E6F70010000010D /* ShareEditorView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		1A2B3C4D5E6F700100000050 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1A2B3C4D5E6F700100000020 /* Otter.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1A2B3C4D5E6F700100000060 /* Otter */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A2B3C4D5E6F700100000080 /* Build configuration list for PBXNativeTarget "Otter" */;
+			buildPhases = (
+				1A2B3C4D5E6F700100000070 /* Sources */,
+				1A2B3C4D5E6F700100000030 /* Frameworks */,
+				1A2B3C4D5E6F700100000071 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Otter;
+			productName = Otter;
+			productReference = 1A2B3C4D5E6F700100000020 /* Otter.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1A2B3C4D5E6F700100000061 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					1A2B3C4D5E6F700100000060 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+				};
+			};
+			buildConfigurationList = 1A2B3C4D5E6F700100000081 /* Build configuration list for PBXProject "Otter" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 1A2B3C4D5E6F700100000040;
+			productRefGroup = 1A2B3C4D5E6F700100000050 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				1A2B3C4D5E6F700100000060 /* Otter */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1A2B3C4D5E6F700100000071 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A2B3C4D5E6F70010000000E /* Assets.xcassets in Resources */,
+				1A2B3C4D5E6F70010000000F /* Otter.icon in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1A2B3C4D5E6F700100000070 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A2B3C4D5E6F700100000001 /* OtterApp.swift in Sources */,
+				1A2B3C4D5E6F700100000002 /* AppModel.swift in Sources */,
+				1A2B3C4D5E6F700100000003 /* NetworkShare.swift in Sources */,
+				1A2B3C4D5E6F700100000004 /* ShareStatus.swift in Sources */,
+				1A2B3C4D5E6F700100000005 /* AppPreferences.swift in Sources */,
+				1A2B3C4D5E6F700100000006 /* SettingsStore.swift in Sources */,
+				1A2B3C4D5E6F700100000007 /* MountService.swift in Sources */,
+				1A2B3C4D5E6F700100000008 /* NetworkReachabilityService.swift in Sources */,
+				1A2B3C4D5E6F700100000009 /* LoginItemService.swift in Sources */,
+				1A2B3C4D5E6F70010000000A /* ShareMonitor.swift in Sources */,
+				1A2B3C4D5E6F70010000000B /* MenuBarView.swift in Sources */,
+				1A2B3C4D5E6F70010000000C /* PreferencesView.swift in Sources */,
+				1A2B3C4D5E6F70010000000D /* ShareEditorView.swift in Sources */,
+				1A2B3C4D5E6F700100000010 /* NotificationService.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		1A2B3C4D5E6F700100000090 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		1A2B3C4D5E6F700100000091 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		1A2B3C4D5E6F700100000092 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = Otter;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Otter/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Otter;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.otter;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		1A2B3C4D5E6F700100000093 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = Otter;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Otter/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Otter;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.otter;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1A2B3C4D5E6F700100000080 /* Build configuration list for PBXNativeTarget "Otter" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A2B3C4D5E6F700100000092 /* Debug */,
+				1A2B3C4D5E6F700100000093 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1A2B3C4D5E6F700100000081 /* Build configuration list for PBXProject "Otter" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A2B3C4D5E6F700100000090 /* Debug */,
+				1A2B3C4D5E6F700100000091 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 1A2B3C4D5E6F700100000061 /* Project object */;
+}
