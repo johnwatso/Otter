@@ -10,13 +10,13 @@ struct PreferencesView: View {
         TabView(selection: $selectedTab) {
             GeneralPreferencesView()
                 .tabItem {
-                    Label(PreferencesTab.general.title, systemImage: PreferencesTab.general.systemImage)
+                    PreferencesTabItem(tab: .general)
                 }
                 .tag(PreferencesTab.general)
 
             UpdatesPreferencesView()
                 .tabItem {
-                    Label(PreferencesTab.updates.title, systemImage: PreferencesTab.updates.systemImage)
+                    PreferencesTabItem(tab: .updates)
                 }
                 .tag(PreferencesTab.updates)
         }
@@ -184,6 +184,26 @@ private enum PreferencesTab: String, CaseIterable, Hashable, Identifiable {
     }
 }
 
+// Custom tab-item label with precise optical centering and tight spacing,
+// matching the SwiftMiner settings style. On macOS the system extracts the
+// Image and Text from .tabItem to build the segmented control; explicit
+// sizing here ensures every icon sits consistently.
+private struct PreferencesTabItem: View {
+    let tab: PreferencesTab
+
+    var body: some View {
+        VStack(spacing: 1) {
+            Image(systemName: tab.systemImage)
+                .font(.system(size: 12, weight: .medium))
+                .imageScale(.small)
+                .symbolRenderingMode(.hierarchical)
+                .frame(height: 14, alignment: .center)
+            Text(tab.title)
+                .font(.system(size: 10, weight: .medium))
+        }
+    }
+}
+
 private struct GeneralPreferencesView: View {
     @EnvironmentObject private var appModel: AppModel
     @EnvironmentObject private var settings: SettingsStore
@@ -211,13 +231,13 @@ private struct GeneralPreferencesView: View {
 
                 if loginItemService.requiresApproval {
                     Label("Approve Otter in System Settings to finish enabling login launch.", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(.orange)
                 }
 
                 if let error = loginItemService.lastError {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(.red)
                 }
             } header: {
@@ -261,7 +281,7 @@ private struct GeneralPreferencesView: View {
 
                 if networkService.wifiNameRequiresLocationPermission {
                     Label("macOS requires Location Services access to show the Wi-Fi network name.", systemImage: "location.slash")
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
 
                     Button {
@@ -282,13 +302,13 @@ private struct GeneralPreferencesView: View {
 
                 if networkService.isVPNNameUnavailable {
                     Label("VPN profile name is unavailable to Otter.", systemImage: "info.circle")
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 if networkService.knownVPNNames.isEmpty {
                     Label("No VPNs found", systemImage: "lock.slash")
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
                     LabeledContent("Known VPNs") {
@@ -606,19 +626,19 @@ private struct SettingsSecondaryText: View {
 
     var body: some View {
         Text(text)
-            .font(.caption2)
+            .font(.caption)
             .foregroundStyle(tint)
             .padding(.vertical, 0)
     }
 }
 
+// Form styling shared with the SwiftMiner settings window.
 private extension View {
     func compactPreferencesForm() -> some View {
         self
             .formStyle(.grouped)
-            .controlSize(.small)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 12)
-            .padding(.top, 6)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 20)
+            .padding(.top, 10)
     }
 }
