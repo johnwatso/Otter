@@ -1,0 +1,544 @@
+import AppKit
+import SwiftUI
+
+struct ShareEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var networkService: NetworkReachabilityService
+    @State private var draft: DraftShare
+    @State private var validationMessage: String?
+    @State private var mountedShareSuggestions: [MountedShareSuggestion] = []
+    @State private var isShowingFinderImportHelp = false
+    @State private var isShowingAdvanced = false
+
+    private let sourceShare: NetworkShare?
+    let onSave: (NetworkShare) -> Void
+    let onCancel: () -> Void
+
+    init(
+        share: NetworkShare?,
+        onSave: @escaping (NetworkShare) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.sourceShare = share
+        _draft = State(initialValue: DraftShare(share: share))
+        self.onSave = onSave
+        self.onCancel = onCancel
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    if isEditing {
+                        replaceFromFinderButton
+                    } else {
+                        if mountedShareSuggestions.isEmpty {
+                            Button {
+                                chooseMountedShare()
+                            } label: {
+                                Label("Choose Mounted Share...", systemImage: "externaldrive.badge.plus")
+                            }
+                        } else {
+                            ForEach(mountedShareSuggestions) { suggestion in
+                                Button {
+                                    apply(suggestion)
+                                } label: {
+                                    HStack {
+                                        Label(suggestion.displayName, systemImage: "externaldrive.fill")
+                                        Spacer()
+                                        Text(suggestion.mountPath)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                            }
+
+                            Button {
+                                chooseMountedShare()
+                            } label: {
+                                Label("Choose Other...", systemImage: "folder")
+                            }
+                        }
+
+                        Button {
+                            refreshMountedShares()
+                        } label: {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                    }
+                } header: {
+                    finderSectionHeader
+                }
+
+                Section("Share") {
+                    TextField("Name", text: $draft.displayName, prompt: Text(inferredDisplayName ?? "Dawn"))
+                    TextField("Network address", text: $draft.urlString, prompt: Text("smb://server.local/Dawn"))
+                }
+
+                Section {
+                    DisclosureGroup("Advanced", isExpanded: $isShowingAdvanced) {
+                        TextField("Finder location", text: $draft.mountPath, prompt: Text(inferredMountPath))
+                    }
+                }
+
+                Section("Behavior") {
+                    Toggle("Keep mounted", isOn: $draft.keepMounted)
+                    Toggle("Mount at launch", isOn: $draft.mountAtLaunch)
+                }
+
+                Section("Rules") {
+                    Toggle("Use Wi-Fi network rule", isOn: $draft.usesWiFiNetworkRule)
+
+                    if draft.usesWiFiNetworkRule {
+                        TextField("Wi-Fi network name", text: $draft.wifiNetworkName)
+
+                        Picker("When connected", selection: $draft.wifiNetworkAction) {
+                            ForEach(ShareRuleAction.allCases) { action in
+                                Text(action.title).tag(action)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        HStack {
+                            LabeledContent("Current Wi-Fi", value: currentWiFiNetworkLabel)
+
+                            Button {
+                                useCurrentWiFiNetwork()
+                            } label: {
+                                Label("Use Current", systemImage: "wifi")
+                            }
+                            .disabled(networkService.currentWiFiNetworkName == nil)
+                        }
+                    }
+
+                    Toggle("Use VPN rule", isOn: $draft.usesVPNRule)
+
+                    if draft.usesVPNRule {
+                        Toggle("Match any VPN", isOn: $draft.matchesAnyVPN)
+
+                        if !draft.matchesAnyVPN {
+                            if networkService.knownVPNNames.isEmpty {
+                                TextField("VPN name", text: $draft.vpnName)
+                            } else {
+                                Picker("Known VPN", selection: $draft.vpnName) {
+                                    Text("Choose VPN").tag("")
+
+                                    if !draft.vpnName.isEmpty, !networkService.knownVPNNames.contains(draft.vpnName) {
+                                        Text(draft.vpnName).tag(draft.vpnName)
+                                    }
+
+                                    ForEach(networkService.knownVPNNames, id: \.self) { vpnName in
+                                        Text(vpnName).tag(vpnName)
+                                    }
+                                }
+
+                                TextField("VPN name", text: $draft.vpnName)
+                            }
+
+                            HStack {
+                                LabeledContent("Current VPN", value: currentVPNLabel)
+
+                                Button {
+                                    useCurrentVPN()
+                                } label: {
+                                    Label("Use Current", systemImage: "lock.shield")
+                                }
+                                .disabled(!networkService.isVPNConnected)
+                            }
+
+                            if networkService.isVPNNameUnavailable {
+                                Text("macOS has not exposed this VPN's name. This rule will match any active unnamed VPN.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else {
+                            LabeledContent("Current VPN", value: currentVPNLabel)
+                        }
+
+                        Picker("When connected", selection: $draft.vpnAction) {
+                            ForEach(ShareRuleAction.allCases) { action in
+                                Text(action.title).tag(action)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                }
+
+                if let validationMessage {
+                    Text(validationMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                Text("Credentials stay in macOS Keychain or Finder.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .formStyle(.grouped)
+            .padding(20)
+
+            Divider()
+
+            HStack {
+                Button("Cancel") {
+                    onCancel()
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Spacer()
+
+                Button("Save") {
+                    save()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(20)
+        }
+        .frame(width: 540)
+        .onAppear {
+            resetDraftIfNeeded()
+            networkService.refreshNetworkDetails()
+            if !isEditing {
+                refreshMountedShares()
+            }
+        }
+    }
+
+    private var finderSectionHeader: some View {
+        HStack(spacing: 6) {
+            Text("From Finder")
+
+            Button {
+                isShowingFinderImportHelp.toggle()
+            } label: {
+                Image(systemName: "info.circle")
+                    .imageScale(.small)
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .help("About mounted shares")
+            .accessibilityLabel("About mounted shares")
+            .popover(isPresented: $isShowingFinderImportHelp, arrowEdge: .trailing) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Choose a mounted SMB share to fill the share fields from Finder.")
+                    Text("Nothing changes until you click Save.")
+                        .foregroundStyle(.secondary)
+                }
+                .font(.callout)
+                .padding(14)
+                .frame(width: 260, alignment: .leading)
+            }
+        }
+    }
+
+    private var isEditing: Bool {
+        sourceShare != nil
+    }
+
+    private var replaceFromFinderButton: some View {
+        Button {
+            chooseMountedShare()
+        } label: {
+            Label("Choose Mounted Share...", systemImage: "externaldrive.badge.plus")
+        }
+    }
+
+    private func resetDraftIfNeeded() {
+        guard draft.id != sourceShare?.id else { return }
+        draft = DraftShare(share: sourceShare)
+        validationMessage = nil
+    }
+
+    private func chooseMountedShare() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Mounted Share"
+        panel.message = "Choose a mounted SMB share."
+        panel.prompt = "Choose"
+        panel.directoryURL = URL(fileURLWithPath: "/Volumes", isDirectory: true)
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = false
+        panel.allowsMultipleSelection = false
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            apply(try MountedShareSuggestion.make(from: url))
+            refreshMountedShares()
+        } catch {
+            validationMessage = error.localizedDescription
+        }
+    }
+
+    private func refreshMountedShares() {
+        mountedShareSuggestions = MountedShareSuggestion.discover()
+    }
+
+    private func apply(_ suggestion: MountedShareSuggestion) {
+        draft.displayName = suggestion.displayName
+        draft.urlString = suggestion.urlString
+        draft.mountPath = suggestion.mountPath
+        validationMessage = nil
+    }
+
+    private func useCurrentWiFiNetwork() {
+        networkService.refreshNetworkDetails()
+        guard let networkName = networkService.currentWiFiNetworkName else { return }
+        draft.wifiNetworkName = networkName
+    }
+
+    private func useCurrentVPN() {
+        networkService.refreshNetworkDetails()
+        guard let vpnName = networkService.activeVPNNames.first ?? (networkService.isVPNConnected ? "Unnamed VPN" : nil) else { return }
+        draft.matchesAnyVPN = false
+        draft.vpnName = vpnName
+    }
+
+    private func save() {
+        validationMessage = validate()
+        guard validationMessage == nil,
+              let normalizedURLString = normalizedSMBURLString(from: draft.urlString)
+        else { return }
+
+        let now = Date()
+        let displayName = resolvedDisplayName(for: normalizedURLString)
+        let mountPath = NetworkShare.normalizedMountPath(
+            draft.mountPath,
+            displayName: displayName,
+            urlString: normalizedURLString
+        )
+        let share = NetworkShare(
+            id: draft.id ?? UUID(),
+            displayName: displayName,
+            urlString: normalizedURLString,
+            mountPath: mountPath,
+            keepMounted: draft.keepMounted,
+            mountAtLaunch: draft.mountAtLaunch,
+            rules: draft.rules,
+            createdAt: draft.createdAt ?? now,
+            updatedAt: now
+        )
+
+        onSave(share)
+        dismiss()
+    }
+
+    private func validate() -> String? {
+        guard let components = smbURLComponents(from: draft.urlString) else {
+            return "Use a network address like smb://server.local/Dawn."
+        }
+
+        if components.user != nil || components.password != nil {
+            return "Remove credentials from the address."
+        }
+
+        if components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty {
+            return "Include the share name in the address."
+        }
+
+        if draft.usesWiFiNetworkRule && draft.wifiNetworkName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Add a Wi-Fi network name, or turn off the network rule."
+        }
+
+        if draft.usesVPNRule && !draft.matchesAnyVPN && draft.vpnName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Choose a VPN, or match any VPN."
+        }
+
+        return nil
+    }
+
+    private var inferredDisplayName: String? {
+        guard let normalizedURLString = normalizedSMBURLString(from: draft.urlString) else { return nil }
+        return NetworkShare.inferredShareName(from: normalizedURLString)
+    }
+
+    private var inferredMountPath: String {
+        guard let normalizedURLString = normalizedSMBURLString(from: draft.urlString) else {
+            return "/Volumes/Dawn"
+        }
+
+        return NetworkShare.defaultMountPath(
+            displayName: resolvedDisplayName(for: normalizedURLString),
+            urlString: normalizedURLString
+        )
+    }
+
+    private func resolvedDisplayName(for normalizedURLString: String) -> String {
+        let trimmedName = draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty {
+            return trimmedName
+        }
+
+        return NetworkShare.inferredShareName(from: normalizedURLString) ?? "Share"
+    }
+
+    private func normalizedSMBURLString(from rawValue: String) -> String? {
+        guard var components = smbURLComponents(from: rawValue),
+              !components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty
+        else { return nil }
+
+        components.scheme = "smb"
+        return components.string
+    }
+
+    private func smbURLComponents(from rawValue: String) -> URLComponents? {
+        var value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if value.hasPrefix("//") {
+            value = "smb:\(value)"
+        } else if !value.lowercased().hasPrefix("smb://") {
+            value = "smb://\(value)"
+        }
+
+        guard var components = URLComponents(string: value),
+              components.scheme?.lowercased() == "smb",
+              let host = components.host?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !host.isEmpty
+        else {
+            return nil
+        }
+
+        components.scheme = "smb"
+        components.host = host
+        return components
+    }
+
+    private var currentWiFiNetworkLabel: String {
+        networkService.currentWiFiNetworkName ?? "Unavailable"
+    }
+
+    private var currentVPNLabel: String {
+        networkService.currentVPNDisplayName
+    }
+}
+
+private struct MountedShareSuggestion: Identifiable, Hashable {
+    var id: String { mountPath }
+
+    let displayName: String
+    let urlString: String
+    let mountPath: String
+
+    static func discover() -> [MountedShareSuggestion] {
+        let fileManager = FileManager.default
+        let keys = resourceKeys
+
+        guard let volumeURLs = fileManager.mountedVolumeURLs(includingResourceValuesForKeys: Array(keys), options: []) else {
+            return []
+        }
+
+        return volumeURLs
+            .compactMap { try? make(from: $0) }
+            .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+    }
+
+    static func make(from selectedURL: URL) throws -> MountedShareSuggestion {
+        let values = try selectedURL.resourceValues(forKeys: resourceKeys)
+        let volumeURL = values.volume ?? selectedURL
+        let volumeValues = try volumeURL.resourceValues(forKeys: resourceKeys)
+        let remountURL = values.volumeURLForRemounting ?? volumeValues.volumeURLForRemounting
+
+        guard let remountURL else {
+            throw MountedShareSuggestionError.notNetworkShare
+        }
+
+        guard let urlString = sanitizedSMBURLString(from: remountURL) else {
+            throw MountedShareSuggestionError.notSMBShare
+        }
+
+        let displayName = values.volumeLocalizedName
+            ?? volumeValues.volumeLocalizedName
+            ?? values.volumeName
+            ?? volumeValues.volumeName
+            ?? volumeURL.lastPathComponent
+
+        return MountedShareSuggestion(
+            displayName: displayName,
+            urlString: urlString,
+            mountPath: volumeURL.standardizedFileURL.resolvingSymlinksInPath().path
+        )
+    }
+
+    private static var resourceKeys: Set<URLResourceKey> {
+        [
+            .volumeURLKey,
+            .volumeURLForRemountingKey,
+            .volumeLocalizedNameKey,
+            .volumeNameKey
+        ]
+    }
+
+    private static func sanitizedSMBURLString(from url: URL) -> String? {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "smb",
+              components.host?.isEmpty == false,
+              !components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty
+        else {
+            return nil
+        }
+
+        components.scheme = "smb"
+        components.user = nil
+        components.password = nil
+        return components.string
+    }
+}
+
+private enum MountedShareSuggestionError: LocalizedError {
+    case notNetworkShare
+    case notSMBShare
+
+    var errorDescription: String? {
+        switch self {
+        case .notNetworkShare:
+            "Choose a mounted network share."
+        case .notSMBShare:
+            "Choose a mounted SMB share."
+        }
+    }
+}
+
+private struct DraftShare {
+    var id: UUID?
+    var displayName: String
+    var urlString: String
+    var mountPath: String
+    var keepMounted: Bool
+    var mountAtLaunch: Bool
+    var usesWiFiNetworkRule: Bool
+    var wifiNetworkName: String
+    var wifiNetworkAction: ShareRuleAction
+    var usesVPNRule: Bool
+    var matchesAnyVPN: Bool
+    var vpnName: String
+    var vpnAction: ShareRuleAction
+    var createdAt: Date?
+
+    init(share: NetworkShare?) {
+        id = share?.id
+        displayName = share?.displayName ?? ""
+        urlString = share?.urlString ?? ""
+        mountPath = share?.mountPath ?? ""
+        keepMounted = share?.keepMounted ?? true
+        mountAtLaunch = share?.mountAtLaunch ?? true
+        usesWiFiNetworkRule = share?.rules.hasWiFiNetworkRule ?? false
+        wifiNetworkName = share?.rules.wifiNetworkName ?? ""
+        wifiNetworkAction = share?.rules.wifiNetworkAction ?? .connect
+        usesVPNRule = share?.rules.hasVPNRule ?? false
+        matchesAnyVPN = share?.rules.hasVPNRule == true ? share?.rules.requiredVPNName == nil : true
+        vpnName = share?.rules.vpnName ?? ""
+        vpnAction = share?.rules.vpnAction ?? .connect
+        createdAt = share?.createdAt
+    }
+
+    var rules: ShareRules {
+        ShareRules(
+            wifiNetworkName: usesWiFiNetworkRule ? wifiNetworkName : "",
+            wifiNetworkAction: wifiNetworkAction,
+            vpnRuleEnabled: usesVPNRule,
+            vpnName: usesVPNRule && !matchesAnyVPN ? vpnName : "",
+            vpnAction: vpnAction
+        )
+    }
+}
