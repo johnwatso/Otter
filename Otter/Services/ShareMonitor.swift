@@ -59,7 +59,8 @@ final class ShareMonitor: ObservableObject {
         syncStates(with: settings.shares)
     }
 
-    var menuBarSystemImage: String {
+    // Small SF Symbol shown next to the otter mark when something is happening.
+    var menuBarBadgeSystemImage: String? {
         let visibleStates = settings.shares.map { status(for: $0) }
 
         if visibleStates.contains(where: { $0 == .reconnecting }) {
@@ -67,14 +68,10 @@ final class ShareMonitor: ObservableObject {
         }
 
         if visibleStates.contains(where: \.needsAttention) {
-            return "externaldrive.fill.badge.exclamationmark"
+            return "exclamationmark.triangle.fill"
         }
 
-        if visibleStates.contains(.connected) {
-            return "externaldrive.fill"
-        }
-
-        return "externaldrive"
+        return nil
     }
 
     func start() {

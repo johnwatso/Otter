@@ -58,10 +58,18 @@ private struct MenuBarLabel: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Image(systemName: monitor.menuBarSystemImage)
-            .onAppear {
-                openManageSharesOnFirstRun()
+        HStack(spacing: 3) {
+            Image("MenuBarOtter")
+                .renderingMode(.template)
+
+            if let badgeSystemImage = monitor.menuBarBadgeSystemImage {
+                Image(systemName: badgeSystemImage)
+                    .imageScale(.small)
             }
+        }
+        .onAppear {
+            openManageSharesOnFirstRun()
+        }
     }
 
     // A fresh install is just an empty menu bar icon; open Manage Shares so
