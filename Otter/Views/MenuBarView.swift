@@ -7,7 +7,7 @@ struct MenuBarView: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var monitor: ShareMonitor
     @EnvironmentObject private var networkService: NetworkReachabilityService
-    @EnvironmentObject private var updateService: UpdateService
+    @EnvironmentObject private var updaterViewModel: UpdaterViewModel
 
     var body: some View {
         if settings.shares.isEmpty {
@@ -62,13 +62,12 @@ struct MenuBarView: View {
             Label("Preferences", systemImage: "gearshape")
         }
 
-        if updateService.updateAvailable, let latestVersion = updateService.latestVersion {
-            Button {
-                NSWorkspace.shared.open(updateService.releaseURL)
-            } label: {
-                Label("Update Available (\(latestVersion))...", systemImage: "arrow.down.circle")
-            }
+        Button {
+            updaterViewModel.checkForUpdates()
+        } label: {
+            Label("Check for Updates...", systemImage: "arrow.down.circle")
         }
+        .disabled(!updaterViewModel.canCheckForUpdates)
 
         Button {
             NSApp.terminate(nil)

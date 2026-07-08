@@ -382,42 +382,32 @@ private struct GeneralPreferencesView: View {
 }
 
 private struct UpdatesPreferencesView: View {
-    @EnvironmentObject private var updateService: UpdateService
+    @EnvironmentObject private var updaterViewModel: UpdaterViewModel
 
     var body: some View {
         Form {
             Section {
-                LabeledContent("Version", value: versionText)
-                LabeledContent("Build", value: buildText)
+                LabeledContent("Version", value: updaterViewModel.currentVersion)
+                LabeledContent("Build", value: updaterViewModel.currentBuild)
             } header: {
                 Text("Installed Version")
             }
 
             Section {
-                LabeledContent("Status", value: updateStatusText)
+                Toggle("Check for updates automatically", isOn: automaticChecksBinding)
 
-                if let lastCheckedAt = updateService.lastCheckedAt {
-                    LabeledContent("Last checked", value: lastCheckedAt, format: .dateTime.hour().minute())
+                if let lastUpdateCheckDate = updaterViewModel.lastUpdateCheckDate {
+                    LabeledContent("Last checked", value: lastUpdateCheckDate, format: .dateTime.day().month().hour().minute())
                 }
 
-                HStack {
-                    Button {
-                        Task { await updateService.checkForUpdates() }
-                    } label: {
-                        Label("Check for Updates", systemImage: "arrow.clockwise")
-                    }
-                    .disabled(updateService.isChecking)
-
-                    if updateService.updateAvailable {
-                        Button {
-                            NSWorkspace.shared.open(updateService.releaseURL)
-                        } label: {
-                            Label("Download", systemImage: "arrow.down.circle")
-                        }
-                    }
+                Button {
+                    updaterViewModel.checkForUpdates()
+                } label: {
+                    Label("Check for Updates...", systemImage: "arrow.clockwise")
                 }
+                .disabled(!updaterViewModel.canCheckForUpdates)
 
-                SettingsSecondaryText("Otter checks GitHub Releases and opens the download page in your browser.")
+                SettingsSecondaryText("Updates are delivered by Sparkle and installed in place.")
             } header: {
                 Text("Updates")
             }
@@ -425,32 +415,12 @@ private struct UpdatesPreferencesView: View {
         .compactPreferencesForm()
     }
 
-    private var updateStatusText: String {
-        if updateService.isChecking {
-            return "Checking..."
+    private var automaticChecksBinding: Binding<Bool> {
+        Binding {
+            updaterViewModel.automaticallyChecksForUpdates
+        } set: { enabled in
+            updaterViewModel.automaticallyChecksForUpdates = enabled
         }
-
-        if updateService.updateAvailable, let latestVersion = updateService.latestVersion {
-            return "\(latestVersion) available"
-        }
-
-        if let error = updateService.lastCheckError {
-            return error
-        }
-
-        if updateService.lastCheckedAt != nil {
-            return "Up to date"
-        }
-
-        return "Not checked yet"
-    }
-
-    private var versionText: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
-    }
-
-    private var buildText: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown"
     }
 }
 

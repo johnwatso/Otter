@@ -22,7 +22,7 @@ final class AppModel: ObservableObject {
     let mountService: MountService
     let notificationService: NotificationService
     let loginItemService: LoginItemService
-    let updateService = UpdateService()
+    let updaterViewModel = UpdaterViewModel()
     let monitor: ShareMonitor
 
     @Published var editorRequest: ShareEditorRequest?
@@ -60,10 +60,6 @@ final class AppModel: ObservableObject {
         monitor.start()
         observePreferences()
         refreshDockIconVisibility()
-
-        Task {
-            await updateService.checkForUpdates()
-        }
     }
 
     func requestNewShare() {

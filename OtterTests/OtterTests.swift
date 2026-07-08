@@ -163,24 +163,6 @@ final class RetryBackoffTests: XCTestCase {
     }
 }
 
-final class UpdateServiceVersionTests: XCTestCase {
-    func testVersionComparison() {
-        XCTAssertTrue(UpdateService.isVersion("0.2.0", newerThan: "0.1.0"))
-        XCTAssertTrue(UpdateService.isVersion("v0.2.0", newerThan: "0.1.9"))
-        XCTAssertTrue(UpdateService.isVersion("v0.10.0", newerThan: "0.9.0"))
-        XCTAssertTrue(UpdateService.isVersion("1.0", newerThan: "0.99.99"))
-
-        XCTAssertFalse(UpdateService.isVersion("0.1.0", newerThan: "0.1.0"))
-        XCTAssertFalse(UpdateService.isVersion("v0.1", newerThan: "0.1.0"))
-        XCTAssertFalse(UpdateService.isVersion("0.1.0", newerThan: "0.2.0"))
-    }
-
-    func testVersionComparisonToleratesSuffixes() {
-        XCTAssertTrue(UpdateService.isVersion("0.2.0-beta", newerThan: "0.1.0"))
-        XCTAssertFalse(UpdateService.isVersion("0.1.0-beta", newerThan: "0.1.0"))
-    }
-}
-
 final class AppPreferencesTests: XCTestCase {
     func testFallbackIntervalIsClamped() {
         XCTAssertEqual(AppPreferences(fallbackCheckInterval: 1).fallbackCheckInterval, 15)

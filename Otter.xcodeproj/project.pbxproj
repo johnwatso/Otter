@@ -23,8 +23,9 @@
 		1A2B3C4D5E6F70010000000E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000010E /* Assets.xcassets */; };
 		1A2B3C4D5E6F70010000000F /* Otter.icon in Resources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000010F /* Otter.icon */; };
 		1A2B3C4D5E6F700100000010 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000110 /* NotificationService.swift */; };
-		1A2B3C4D5E6F700100000011 /* UpdateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000111 /* UpdateService.swift */; };
+		1A2B3C4D5E6F700100000011 /* UpdaterViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000111 /* UpdaterViewModel.swift */; };
 		1A2B3C4D5E6F700100000202 /* OtterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000203 /* OtterTests.swift */; };
+		1A2B3C4D5E6F700100000302 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F700100000301 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -46,7 +47,7 @@
 		1A2B3C4D5E6F70010000010E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		1A2B3C4D5E6F70010000010F /* Otter.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = Otter.icon; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000110 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
-		1A2B3C4D5E6F700100000111 /* UpdateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateService.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000111 /* UpdaterViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterViewModel.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000201 /* OtterTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OtterTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A2B3C4D5E6F700100000203 /* OtterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtterTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -56,6 +57,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A2B3C4D5E6F700100000302 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -113,7 +115,7 @@
 				1A2B3C4D5E6F700100000110 /* NotificationService.swift */,
 				1A2B3C4D5E6F700100000109 /* LoginItemService.swift */,
 				1A2B3C4D5E6F70010000010A /* ShareMonitor.swift */,
-				1A2B3C4D5E6F700100000111 /* UpdateService.swift */,
+				1A2B3C4D5E6F700100000111 /* UpdaterViewModel.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -161,6 +163,9 @@
 			dependencies = (
 			);
 			name = Otter;
+			packageProductDependencies = (
+				1A2B3C4D5E6F700100000301 /* Sparkle */,
+			);
 			productName = Otter;
 			productReference = 1A2B3C4D5E6F700100000020 /* Otter.app */;
 			productType = "com.apple.product-type.application";
@@ -223,6 +228,9 @@
 				Base,
 			);
 			mainGroup = 1A2B3C4D5E6F700100000040;
+			packageReferences = (
+				1A2B3C4D5E6F700100000300 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			productRefGroup = 1A2B3C4D5E6F700100000050 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -264,7 +272,7 @@
 				1A2B3C4D5E6F70010000000C /* PreferencesView.swift in Sources */,
 				1A2B3C4D5E6F70010000000D /* ShareEditorView.swift in Sources */,
 				1A2B3C4D5E6F700100000010 /* NotificationService.swift in Sources */,
-				1A2B3C4D5E6F700100000011 /* UpdateService.swift in Sources */,
+				1A2B3C4D5E6F700100000011 /* UpdaterViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -515,6 +523,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		1A2B3C4D5E6F700100000300 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.7.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1A2B3C4D5E6F700100000301 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A2B3C4D5E6F700100000300 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 1A2B3C4D5E6F700100000061 /* Project object */;
 }

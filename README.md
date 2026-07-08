@@ -21,6 +21,7 @@ Built entirely in Swift, Otter is designed to feel at home on macOS: fast, effic
 - ⚡ Lightweight with minimal resource usage
 - 🔐 Uses macOS Keychain for credentials — Otter never stores them
 - 🚀 Launch at login
+- 🔄 Automatic updates via Sparkle
 - 🔔 Optional notifications for connection changes and problems
 - 📊 Simple menu bar status
 - 🍎 Designed to feel like a built-in macOS utility
@@ -42,7 +43,7 @@ Adding a share is easiest from Finder: mount it once the normal way, then let Ot
 
 ## Building
 
-Open `Otter.xcodeproj` in Xcode and run the `Otter` scheme. No external dependencies.
+Open `Otter.xcodeproj` in Xcode and run the `Otter` scheme. The only dependency is [Sparkle](https://sparkle-project.org), fetched automatically via Swift Package Manager.
 
 Run the tests with:
 

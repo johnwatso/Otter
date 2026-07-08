@@ -19,7 +19,7 @@ struct OtterApp: App {
                 .environmentObject(appModel.settings)
                 .environmentObject(appModel.monitor)
                 .environmentObject(appModel.networkService)
-                .environmentObject(appModel.updateService)
+                .environmentObject(appModel.updaterViewModel)
         } label: {
             MenuBarLabel()
                 .environmentObject(appModel.monitor)
@@ -44,7 +44,7 @@ struct OtterApp: App {
                 .environmentObject(appModel.networkService)
                 .environmentObject(appModel.notificationService)
                 .environmentObject(appModel.loginItemService)
-                .environmentObject(appModel.updateService)
+                .environmentObject(appModel.updaterViewModel)
         }
         .defaultSize(width: 520, height: 420)
         .windowStyle(.titleBar)

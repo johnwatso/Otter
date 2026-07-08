@@ -52,6 +52,9 @@ jobs:
           DEVELOPER_ID_IDENTITY: ${{ secrets.DEVELOPER_ID_IDENTITY }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          # Sparkle compares CFBundleVersion, so every release needs a higher
+          # build number; the commit count is monotonic.
+          BUILD_NUMBER="$(git rev-list --count HEAD)"
           IDENTITY="-"
           if [ "$SIGNING_ENABLED" = "true" ]; then
             IDENTITY="$DEVELOPER_ID_IDENTITY"
@@ -62,16 +65,18 @@ jobs:
             -configuration Release \
             -derivedDataPath build \
             MARKETING_VERSION="$VERSION" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             CODE_SIGN_IDENTITY="$IDENTITY" \
             CODE_SIGNING_ALLOWED=YES \
             OTHER_CODE_SIGN_FLAGS="--timestamp --options=runtime"
 
       - name: Create DMG
         run: |
-          mkdir -p dist/dmg
-          cp -R build/Build/Products/Release/Otter.app dist/dmg/
-          ln -s /Applications dist/dmg/Applications
-          hdiutil create -volname "Otter" -srcfolder dist/dmg -ov -format UDZO "dist/Otter-${GITHUB_REF_NAME#v}.dmg"
+          STAGING="$RUNNER_TEMP/dmg"
+          mkdir -p "$STAGING" dist
+          cp -R build/Build/Products/Release/Otter.app "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create -volname "Otter" -srcfolder "$STAGING" -ov -format UDZO "dist/Otter-${GITHUB_REF_NAME#v}.dmg"
 
       - name: Notarize DMG
         if: steps.signing.outputs.enabled == 'true'
@@ -88,11 +93,28 @@ jobs:
             --wait
           xcrun stapler staple "$DMG"
 
+      # Sparkle's SUFeedURL points at releases/latest/download/appcast.xml, so
+      # each release ships its own EdDSA-signed appcast next to the DMG.
+      - name: Generate Sparkle appcast
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          KEY_FILE="$RUNNER_TEMP/sparkle_ed_key"
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" > "$KEY_FILE"
+          GENERATE_APPCAST="$(find build/SourcePackages/artifacts -type f -name generate_appcast | head -1)"
+          "$GENERATE_APPCAST" \
+            --ed-key-file "$KEY_FILE" \
+            --download-url-prefix "https://github.com/johnwatso/Otter/releases/download/$GITHUB_REF_NAME/" \
+            -o dist/appcast.xml \
+            dist
+          rm "$KEY_FILE"
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
             "dist/Otter-${GITHUB_REF_NAME#v}.dmg" \
+            dist/appcast.xml \
             --title "Otter $GITHUB_REF_NAME" \
             --generate-notes
