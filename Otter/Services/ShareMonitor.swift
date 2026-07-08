@@ -237,7 +237,7 @@ final class ShareMonitor: ObservableObject {
 
         var state = states[share.id] ?? ShareRuntimeState()
         state.lastCheckedAt = Date()
-        networkService.refreshNetworkDetailsIfStale()
+        await networkService.refreshNetworkDetailsIfStale()
 
         let mountedURL = await mountService.mountedURL(for: share)
         let isMounted = mountedURL != nil

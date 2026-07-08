@@ -341,7 +341,13 @@ struct ShareEditorView: View {
     }
 
     private func refreshMountedShares() {
-        mountedShareSuggestions = MountedShareSuggestion.discover()
+        // Reading volume resource values can hang for seconds when a network
+        // mount is unresponsive, so discovery runs off the main thread.
+        Task {
+            mountedShareSuggestions = await Task.detached(priority: .userInitiated) {
+                MountedShareSuggestion.discover()
+            }.value
+        }
     }
 
     private func apply(_ suggestion: MountedShareSuggestion) {
@@ -352,25 +358,29 @@ struct ShareEditorView: View {
     }
 
     private func useCurrentWiFiNetwork() {
-        networkService.refreshNetworkDetails()
-        guard let networkName = networkService.currentWiFiNetworkName else { return }
-        draft.wifiNetworkName = networkName
+        Task {
+            await networkService.refreshNetworkDetailsNow()
+            guard let networkName = networkService.currentWiFiNetworkName else { return }
+            draft.wifiNetworkName = networkName
+        }
     }
 
     private func useCurrentVPN() {
-        networkService.refreshNetworkDetails()
+        Task {
+            await networkService.refreshNetworkDetailsNow()
 
-        // Without a name to match, the only rule that can work is "any VPN".
-        guard let vpnName = networkService.activeVPNNames.first else {
-            if networkService.isVPNConnected {
-                draft.matchesAnyVPN = true
+            // Without a name to match, the only rule that can work is "any VPN".
+            guard let vpnName = networkService.activeVPNNames.first else {
+                if networkService.isVPNConnected {
+                    draft.matchesAnyVPN = true
+                }
+                return
             }
-            return
-        }
 
-        draft.matchesAnyVPN = false
-        draft.vpnName = vpnName
-        usesCustomVPNName = !networkService.knownVPNNames.contains(vpnName)
+            draft.matchesAnyVPN = false
+            draft.vpnName = vpnName
+            usesCustomVPNName = !networkService.knownVPNNames.contains(vpnName)
+        }
     }
 
     private func save() {
