@@ -85,6 +85,13 @@ struct ShareEditorView: View {
                 Section("Behavior") {
                     Toggle("Keep mounted", isOn: $draft.keepMounted)
                     Toggle("Mount at launch", isOn: $draft.mountAtLaunch)
+                    Toggle("Connect when server is reachable", isOn: $draft.autoConnectWhenReachable)
+
+                    if draft.autoConnectWhenReachable {
+                        Text("Mounts automatically whenever the server answers — handy when the server is only visible on certain networks or VPNs.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Rules") {
@@ -386,6 +393,7 @@ struct ShareEditorView: View {
             mountPath: mountPath,
             keepMounted: draft.keepMounted,
             mountAtLaunch: draft.mountAtLaunch,
+            autoConnectWhenReachable: draft.autoConnectWhenReachable,
             rules: draft.rules,
             createdAt: draft.createdAt ?? now,
             updatedAt: now
@@ -583,6 +591,7 @@ private struct DraftShare {
     var mountPath: String
     var keepMounted: Bool
     var mountAtLaunch: Bool
+    var autoConnectWhenReachable: Bool
     var usesWiFiNetworkRule: Bool
     var wifiNetworkName: String
     var wifiNetworkAction: ShareRuleAction
@@ -599,6 +608,7 @@ private struct DraftShare {
         mountPath = share?.mountPath ?? ""
         keepMounted = share?.keepMounted ?? true
         mountAtLaunch = share?.mountAtLaunch ?? true
+        autoConnectWhenReachable = share?.autoConnectWhenReachable ?? false
         usesWiFiNetworkRule = share?.rules.hasWiFiNetworkRule ?? false
         wifiNetworkName = share?.rules.wifiNetworkName ?? ""
         wifiNetworkAction = share?.rules.wifiNetworkAction ?? .connect

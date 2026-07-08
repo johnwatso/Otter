@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @main
@@ -18,9 +19,11 @@ struct OtterApp: App {
                 .environmentObject(appModel.settings)
                 .environmentObject(appModel.monitor)
                 .environmentObject(appModel.networkService)
+                .environmentObject(appModel.updateService)
         } label: {
             MenuBarLabel()
                 .environmentObject(appModel.monitor)
+                .environmentObject(appModel.settings)
         }
         .menuBarExtraStyle(.menu)
 
@@ -41,6 +44,7 @@ struct OtterApp: App {
                 .environmentObject(appModel.networkService)
                 .environmentObject(appModel.notificationService)
                 .environmentObject(appModel.loginItemService)
+                .environmentObject(appModel.updateService)
         }
         .defaultSize(width: 520, height: 420)
         .windowStyle(.titleBar)
@@ -50,8 +54,26 @@ struct OtterApp: App {
 
 private struct MenuBarLabel: View {
     @EnvironmentObject private var monitor: ShareMonitor
+    @EnvironmentObject private var settings: SettingsStore
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Image(systemName: monitor.menuBarSystemImage)
+            .onAppear {
+                openManageSharesOnFirstRun()
+            }
+    }
+
+    // A fresh install is just an empty menu bar icon; open Manage Shares so
+    // there's something to do. The delay lets the window scenes register first.
+    private func openManageSharesOnFirstRun() {
+        guard settings.shares.isEmpty else { return }
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard settings.shares.isEmpty else { return }
+            openWindow(id: AppModel.sharesWindowID)
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 }

@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      # Developer ID signing and notarization run only when the secrets are
+      # configured (DEVELOPER_ID_P12, DEVELOPER_ID_P12_PASSWORD, DEVELOPER_ID_IDENTITY,
+      # NOTARY_APPLE_ID, NOTARY_TEAM_ID, NOTARY_PASSWORD). Without them the build
+      # is ad-hoc signed: fine for personal use, Gatekeeper will warn other users.
+      - name: Detect signing secrets
+        id: signing
+        env:
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+        run: |
+          if [ -n "$DEVELOPER_ID_P12" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Import Developer ID certificate
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$DEVELOPER_ID_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/cert.p12" -P "$DEVELOPER_ID_P12_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          rm "$RUNNER_TEMP/cert.p12"
+
+      - name: Build Release
+        env:
+          SIGNING_ENABLED: ${{ steps.signing.outputs.enabled }}
+          DEVELOPER_ID_IDENTITY: ${{ secrets.DEVELOPER_ID_IDENTITY }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          IDENTITY="-"
+          if [ "$SIGNING_ENABLED" = "true" ]; then
+            IDENTITY="$DEVELOPER_ID_IDENTITY"
+          fi
+          xcodebuild build \
+            -project Otter.xcodeproj \
+            -scheme Otter \
+            -configuration Release \
+            -derivedDataPath build \
+            MARKETING_VERSION="$VERSION" \
+            CODE_SIGN_IDENTITY="$IDENTITY" \
+            CODE_SIGNING_ALLOWED=YES \
+            OTHER_CODE_SIGN_FLAGS="--timestamp --options=runtime"
+
+      - name: Create DMG
+        run: |
+          mkdir -p dist/dmg
+          cp -R build/Build/Products/Release/Otter.app dist/dmg/
+          ln -s /Applications dist/dmg/Applications
+          hdiutil create -volname "Otter" -srcfolder dist/dmg -ov -format UDZO "dist/Otter-${GITHUB_REF_NAME#v}.dmg"
+
+      - name: Notarize DMG
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: |
+          DMG="dist/Otter-${GITHUB_REF_NAME#v}.dmg"
+          xcrun notarytool submit "$DMG" \
+            --apple-id "$NOTARY_APPLE_ID" \
+            --team-id "$NOTARY_TEAM_ID" \
+            --password "$NOTARY_PASSWORD" \
+            --wait
+          xcrun stapler staple "$DMG"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/Otter-${GITHUB_REF_NAME#v}.dmg" \
+            --title "Otter $GITHUB_REF_NAME" \
+            --generate-notes

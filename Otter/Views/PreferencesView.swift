@@ -382,6 +382,8 @@ private struct GeneralPreferencesView: View {
 }
 
 private struct UpdatesPreferencesView: View {
+    @EnvironmentObject private var updateService: UpdateService
+
     var body: some View {
         Form {
             Section {
@@ -392,14 +394,55 @@ private struct UpdatesPreferencesView: View {
             }
 
             Section {
-                Label("Automatic updates are not configured for this build.", systemImage: "info.circle")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                LabeledContent("Status", value: updateStatusText)
+
+                if let lastCheckedAt = updateService.lastCheckedAt {
+                    LabeledContent("Last checked", value: lastCheckedAt, format: .dateTime.hour().minute())
+                }
+
+                HStack {
+                    Button {
+                        Task { await updateService.checkForUpdates() }
+                    } label: {
+                        Label("Check for Updates", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(updateService.isChecking)
+
+                    if updateService.updateAvailable {
+                        Button {
+                            NSWorkspace.shared.open(updateService.releaseURL)
+                        } label: {
+                            Label("Download", systemImage: "arrow.down.circle")
+                        }
+                    }
+                }
+
+                SettingsSecondaryText("Otter checks GitHub Releases and opens the download page in your browser.")
             } header: {
                 Text("Updates")
             }
         }
         .compactPreferencesForm()
+    }
+
+    private var updateStatusText: String {
+        if updateService.isChecking {
+            return "Checking..."
+        }
+
+        if updateService.updateAvailable, let latestVersion = updateService.latestVersion {
+            return "\(latestVersion) available"
+        }
+
+        if let error = updateService.lastCheckError {
+            return error
+        }
+
+        if updateService.lastCheckedAt != nil {
+            return "Up to date"
+        }
+
+        return "Not checked yet"
     }
 
     private var versionText: String {
@@ -483,6 +526,16 @@ private struct ShareDetailView: View {
                     LabeledContent(status.detailTitle, value: detail)
                 }
 
+                if runtimeState.needsCredentials, let url = currentShare.url {
+                    LabeledContent("Credentials") {
+                        Button {
+                            NSWorkspace.shared.open(url)
+                        } label: {
+                            Label("Connect Once in Finder...", systemImage: "person.badge.key")
+                        }
+                    }
+                }
+
                 if let nextRetryDate = runtimeState.nextRetryDate {
                     LabeledContent("Next retry", value: nextRetryDate, format: .dateTime.hour().minute().second())
                 }
@@ -494,6 +547,7 @@ private struct ShareDetailView: View {
             Section {
                 Toggle("Keep mounted", isOn: binding(\.keepMounted))
                 Toggle("Mount at launch", isOn: binding(\.mountAtLaunch))
+                Toggle("Connect when server is reachable", isOn: binding(\.autoConnectWhenReachable))
             }
 
             if currentShare.rules.hasWiFiNetworkRule || currentShare.rules.hasVPNRule {

@@ -7,6 +7,7 @@ struct MenuBarView: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var monitor: ShareMonitor
     @EnvironmentObject private var networkService: NetworkReachabilityService
+    @EnvironmentObject private var updateService: UpdateService
 
     var body: some View {
         if settings.shares.isEmpty {
@@ -59,6 +60,14 @@ struct MenuBarView: View {
             showPreferences()
         } label: {
             Label("Preferences", systemImage: "gearshape")
+        }
+
+        if updateService.updateAvailable, let latestVersion = updateService.latestVersion {
+            Button {
+                NSWorkspace.shared.open(updateService.releaseURL)
+            } label: {
+                Label("Update Available (\(latestVersion))...", systemImage: "arrow.down.circle")
+            }
         }
 
         Button {
@@ -139,6 +148,14 @@ private struct ShareMenu: View {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: share.mountPath)])
                 } label: {
                     Label("Show in Finder", systemImage: "finder")
+                }
+            }
+
+            if monitor.runtimeState(for: share).needsCredentials, let url = share.url {
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Label("Connect Once in Finder...", systemImage: "person.badge.key")
                 }
             }
         } label: {

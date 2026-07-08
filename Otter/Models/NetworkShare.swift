@@ -7,6 +7,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
     var mountPath: String
     var keepMounted: Bool
     var mountAtLaunch: Bool
+    var autoConnectWhenReachable: Bool
     var rules: ShareRules
     var createdAt: Date
     var updatedAt: Date
@@ -18,6 +19,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         mountPath: String,
         keepMounted: Bool = true,
         mountAtLaunch: Bool = true,
+        autoConnectWhenReachable: Bool = false,
         rules: ShareRules = ShareRules(),
         createdAt: Date = Date(),
         updatedAt: Date = Date()
@@ -28,6 +30,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         self.mountPath = mountPath
         self.keepMounted = keepMounted
         self.mountAtLaunch = mountAtLaunch
+        self.autoConnectWhenReachable = autoConnectWhenReachable
         self.rules = rules
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -41,6 +44,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         case mountPath
         case keepMounted
         case mountAtLaunch
+        case autoConnectWhenReachable
         case rules
         case createdAt
         case updatedAt
@@ -54,6 +58,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         mountPath = try container.decode(String.self, forKey: .mountPath)
         keepMounted = try container.decode(Bool.self, forKey: .keepMounted)
         mountAtLaunch = try container.decode(Bool.self, forKey: .mountAtLaunch)
+        autoConnectWhenReachable = try container.decodeIfPresent(Bool.self, forKey: .autoConnectWhenReachable) ?? false
         rules = try container.decodeIfPresent(ShareRules.self, forKey: .rules) ?? ShareRules()
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
@@ -215,6 +220,91 @@ struct ShareRules: Codable, Hashable {
     mutating func normalize() {
         wifiNetworkName = wifiNetworkName.trimmingCharacters(in: .whitespacesAndNewlines)
         vpnName = vpnName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+struct ShareRuleEvaluation: Equatable {
+    var allowsConnection: Bool
+    var blockedStatus: ShareStatus?
+    var shouldDisconnectMountedShare: Bool
+    var shouldAttemptMount: Bool
+
+    static let noRules = ShareRuleEvaluation(
+        allowsConnection: true,
+        blockedStatus: nil,
+        shouldDisconnectMountedShare: false,
+        shouldAttemptMount: false
+    )
+}
+
+extension ShareRules {
+    // Pure rule evaluation over a snapshot of network state, so it can be unit
+    // tested without the monitor or live services.
+    func evaluate(
+        currentWiFiNetworkName: String?,
+        isVPNConnected: Bool,
+        activeVPNNames: [String]
+    ) -> ShareRuleEvaluation {
+        var conditions: [(action: ShareRuleAction, matches: Bool, requirement: String)] = []
+
+        if let requiredWiFiNetworkName {
+            let currentNetworkName = currentWiFiNetworkName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let matches = currentNetworkName?.localizedCaseInsensitiveCompare(requiredWiFiNetworkName) == .orderedSame
+            conditions.append((wifiNetworkAction, matches, "Wi-Fi \(requiredWiFiNetworkName)"))
+        }
+
+        if hasVPNRule {
+            let matches: Bool
+            if let requiredVPNName {
+                // Named rules only match the VPN that is actually connected. An
+                // unnamed active VPN must not match, or rules for different VPNs
+                // become indistinguishable.
+                matches = activeVPNNames.contains { activeVPNName in
+                    activeVPNName.localizedCaseInsensitiveCompare(requiredVPNName) == .orderedSame
+                }
+            } else {
+                matches = isVPNConnected
+            }
+
+            let requirement = requiredVPNName.map { "VPN \($0)" } ?? "a VPN"
+            conditions.append((vpnAction, matches, requirement))
+        }
+
+        guard !conditions.isEmpty else { return .noRules }
+
+        var shouldAttemptMount = false
+
+        for condition in conditions {
+            switch condition.action {
+            case .connect:
+                guard condition.matches else {
+                    return ShareRuleEvaluation(
+                        allowsConnection: false,
+                        blockedStatus: .waitingForAllowedNetwork(condition.requirement),
+                        shouldDisconnectMountedShare: true,
+                        shouldAttemptMount: false
+                    )
+                }
+
+                shouldAttemptMount = true
+            case .disconnect:
+                if condition.matches {
+                    return ShareRuleEvaluation(
+                        allowsConnection: false,
+                        blockedStatus: .pausedByRule(condition.requirement),
+                        shouldDisconnectMountedShare: true,
+                        shouldAttemptMount: false
+                    )
+                }
+            }
+        }
+
+        return ShareRuleEvaluation(
+            allowsConnection: true,
+            blockedStatus: nil,
+            shouldDisconnectMountedShare: false,
+            shouldAttemptMount: shouldAttemptMount
+        )
     }
 }
 

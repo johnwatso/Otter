@@ -18,19 +18,15 @@ struct ShareRuntimeState: Equatable {
     var failureCount: Int = 0
     var nextRetryDate: Date?
     var lastCheckedAt: Date?
+    var needsCredentials: Bool = false
 }
 
-private struct ShareRuleEvaluation {
-    var allowsConnection: Bool
-    var blockedStatus: ShareStatus?
-    var shouldDisconnectMountedShare: Bool
-    var shouldAttemptMount: Bool
-}
+enum RetryBackoff {
+    static let delays: [TimeInterval] = [10, 30, 120, 300]
 
-private struct ShareRuleCondition {
-    var action: ShareRuleAction
-    var matches: Bool
-    var requirement: String
+    static func delay(afterFailures failures: Int) -> TimeInterval {
+        delays[min(max(failures - 1, 0), delays.count - 1)]
+    }
 }
 
 @MainActor
@@ -245,12 +241,17 @@ final class ShareMonitor: ObservableObject {
 
         let mountedURL = await mountService.mountedURL(for: share)
         let isMounted = mountedURL != nil
-        let ruleEvaluation = evaluateRules(for: share)
+        let ruleEvaluation = share.rules.evaluate(
+            currentWiFiNetworkName: networkService.currentWiFiNetworkName,
+            isVPNConnected: networkService.isVPNConnected,
+            activeVPNNames: networkService.activeVPNNames
+        )
         if !ruleEvaluation.allowsConnection {
             cancelRetry(for: share.id)
             state.status = ruleEvaluation.blockedStatus ?? .disconnected
             state.failureCount = 0
             state.nextRetryDate = nil
+            state.needsCredentials = false
             saveState(state, for: share)
 
             if isMounted && ruleEvaluation.shouldDisconnectMountedShare {
@@ -273,6 +274,7 @@ final class ShareMonitor: ObservableObject {
             state.status = .connected
             state.failureCount = 0
             state.nextRetryDate = nil
+            state.needsCredentials = false
             saveState(state, for: share)
             cancelRetry(for: share.id)
             return
@@ -282,7 +284,12 @@ final class ShareMonitor: ObservableObject {
             || share.keepMounted
             || (reason == .launch && share.mountAtLaunch)
             || ruleEvaluation.shouldAttemptMount
-        guard shouldAttemptMount else {
+
+        // Opportunistic shares mount whenever their server answers, but an
+        // unreachable server is a normal condition for them, not an error.
+        let isOpportunistic = !shouldAttemptMount && share.autoConnectWhenReachable
+
+        guard shouldAttemptMount || isOpportunistic else {
             state.status = .disconnected
             state.nextRetryDate = nil
             saveState(state, for: share)
@@ -291,7 +298,7 @@ final class ShareMonitor: ObservableObject {
         }
 
         guard networkService.isOnline else {
-            state.status = .waitingForNetwork
+            state.status = isOpportunistic ? .disconnected : .waitingForNetwork
             saveState(state, for: share)
             return
         }
@@ -302,21 +309,30 @@ final class ShareMonitor: ObservableObject {
             return
         }
 
-        state.status = .reconnecting
-        saveState(state, for: share)
-
         guard let url = share.url else {
             registerFailure("The network address is invalid.", for: share.id)
             return
         }
 
+        if !isOpportunistic {
+            state.status = .reconnecting
+            saveState(state, for: share)
+        }
+
         let reachable = await networkService.canReachServer(for: url)
         guard reachable else {
-            state = states[share.id] ?? state
-            state.status = .waitingForNetwork
-            state.nextRetryDate = nextRetryDate(afterFailures: max(state.failureCount, 1))
-            saveState(state, for: share)
-            scheduleRetry(for: share.id, at: state.nextRetryDate)
+            if isOpportunistic {
+                state.status = .disconnected
+                state.nextRetryDate = nil
+                saveState(state, for: share)
+                cancelRetry(for: share.id)
+            } else {
+                state = states[share.id] ?? state
+                state.status = .waitingForNetwork
+                state.nextRetryDate = nextRetryDate(afterFailures: max(state.failureCount, 1))
+                saveState(state, for: share)
+                scheduleRetry(for: share.id, at: state.nextRetryDate)
+            }
             return
         }
 
@@ -332,7 +348,12 @@ final class ShareMonitor: ObservableObject {
                 registerFailure("macOS mounted the share, but Otter could not find the mounted volume.", for: share.id)
             }
         } catch {
-            registerFailure(error.localizedDescription, for: share.id)
+            var needsCredentials = false
+            if case MountServiceError.authenticationFailed = error {
+                needsCredentials = true
+            }
+
+            registerFailure(error.localizedDescription, for: share.id, needsCredentials: needsCredentials)
         }
     }
 
@@ -346,101 +367,13 @@ final class ShareMonitor: ObservableObject {
         }
     }
 
-    private func evaluateRules(for share: NetworkShare) -> ShareRuleEvaluation {
-        let conditions = ruleConditions(for: share)
-
-        guard !conditions.isEmpty else {
-            return ShareRuleEvaluation(
-                allowsConnection: true,
-                blockedStatus: nil,
-                shouldDisconnectMountedShare: false,
-                shouldAttemptMount: false
-            )
-        }
-
-        var shouldAttemptMount = false
-
-        for condition in conditions {
-            switch condition.action {
-            case .connect:
-                guard condition.matches else {
-                    return ShareRuleEvaluation(
-                        allowsConnection: false,
-                        blockedStatus: .waitingForAllowedNetwork(condition.requirement),
-                        shouldDisconnectMountedShare: true,
-                        shouldAttemptMount: false
-                    )
-                }
-
-                shouldAttemptMount = true
-            case .disconnect:
-                if condition.matches {
-                    return ShareRuleEvaluation(
-                        allowsConnection: false,
-                        blockedStatus: .pausedByRule(condition.requirement),
-                        shouldDisconnectMountedShare: true,
-                        shouldAttemptMount: false
-                    )
-                }
-            }
-        }
-
-        return ShareRuleEvaluation(
-            allowsConnection: true,
-            blockedStatus: nil,
-            shouldDisconnectMountedShare: false,
-            shouldAttemptMount: shouldAttemptMount
-        )
-    }
-
-    private func ruleConditions(for share: NetworkShare) -> [ShareRuleCondition] {
-        var conditions: [ShareRuleCondition] = []
-
-        if let requiredNetworkName = share.rules.requiredWiFiNetworkName {
-            let currentNetworkName = networkService.currentWiFiNetworkName?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let matches = currentNetworkName?.localizedCaseInsensitiveCompare(requiredNetworkName) == .orderedSame
-
-            conditions.append(ShareRuleCondition(
-                action: share.rules.wifiNetworkAction,
-                matches: matches,
-                requirement: "Wi-Fi \(requiredNetworkName)"
-            ))
-        }
-
-        if share.rules.hasVPNRule {
-            let requiredVPNName = share.rules.requiredVPNName
-            let matches = vpnMatches(requiredVPNName)
-            let requirement = requiredVPNName.map { "VPN \($0)" } ?? "a VPN"
-
-            conditions.append(ShareRuleCondition(
-                action: share.rules.vpnAction,
-                matches: matches,
-                requirement: requirement
-            ))
-        }
-
-        return conditions
-    }
-
-    private func vpnMatches(_ requiredVPNName: String?) -> Bool {
-        guard let requiredVPNName else {
-            return networkService.isVPNConnected
-        }
-
-        // Named rules only match the VPN that is actually connected. An unnamed
-        // active VPN must not match, or rules for different VPNs become
-        // indistinguishable and every named rule fires for any VPN.
-        return networkService.activeVPNNames.contains { activeVPNName in
-            activeVPNName.localizedCaseInsensitiveCompare(requiredVPNName) == .orderedSame
-        }
-    }
-
-    private func registerFailure(_ message: String, for shareID: NetworkShare.ID) {
+    private func registerFailure(_ message: String, for shareID: NetworkShare.ID, needsCredentials: Bool = false) {
         var state = states[shareID] ?? ShareRuntimeState()
         state.status = .failed(message)
         state.failureCount += 1
         state.lastCheckedAt = Date()
         state.nextRetryDate = nextRetryDate(afterFailures: state.failureCount)
+        state.needsCredentials = needsCredentials
         saveState(state, for: shareID)
         scheduleRetry(for: shareID, at: state.nextRetryDate)
     }
@@ -474,12 +407,7 @@ final class ShareMonitor: ObservableObject {
     }
 
     private func nextRetryDate(afterFailures failures: Int) -> Date {
-        Date().addingTimeInterval(backoffDelay(afterFailures: failures))
-    }
-
-    private func backoffDelay(afterFailures failures: Int) -> TimeInterval {
-        let delays: [TimeInterval] = [10, 30, 120, 300]
-        return delays[min(max(failures - 1, 0), delays.count - 1)]
+        Date().addingTimeInterval(RetryBackoff.delay(afterFailures: failures))
     }
 
     private func scheduleRetry(for shareID: NetworkShare.ID, at date: Date?) {

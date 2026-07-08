@@ -17,6 +17,7 @@ Built entirely in Swift, Otter is designed to feel at home on macOS: fast, effic
 - 🌙 Recovers after sleep and wake
 - 🌐 Responds to network and VPN changes
 - 📶 Per-share rules — connect or disconnect based on Wi-Fi network or VPN
+- 🛰️ Optional "connect when reachable" mode — mounts whenever the server answers
 - ⚡ Lightweight with minimal resource usage
 - 🔐 Uses macOS Keychain for credentials — Otter never stores them
 - 🚀 Launch at login
@@ -42,3 +43,13 @@ Adding a share is easiest from Finder: mount it once the normal way, then let Ot
 ## Building
 
 Open `Otter.xcodeproj` in Xcode and run the `Otter` scheme. No external dependencies.
+
+Run the tests with:
+
+```sh
+xcodebuild test -project Otter.xcodeproj -scheme Otter -destination 'platform=macOS'
+```
+
+## License
+
+Otter is open source under the [MIT License](LICENSE). You're free to use, modify, and redistribute it — just keep the copyright notice, which credits the original app.

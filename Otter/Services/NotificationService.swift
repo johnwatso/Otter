@@ -8,6 +8,11 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
     private let settings: SettingsStore
     private let center = UNUserNotificationCenter.current()
 
+    // Shares that already got a problem notification for the current outage.
+    // Retry cycles flip between "waiting" and "failed" states, and without this
+    // every retry would fire another notification.
+    private var problemNotifiedShareIDs = Set<NetworkShare.ID>()
+
     init(settings: SettingsStore) {
         self.settings = settings
         super.init()
@@ -71,6 +76,13 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
               let message = notificationMessage(for: share, previous: previous, current: current)
         else {
             return
+        }
+
+        if message.kind.isProblem {
+            guard !problemNotifiedShareIDs.contains(share.id) else { return }
+            problemNotifiedShareIDs.insert(share.id)
+        } else {
+            problemNotifiedShareIDs.remove(share.id)
         }
 
         Task {
@@ -211,4 +223,13 @@ private enum ShareNotificationKind: String {
     case waitingForAllowedNetwork
     case pausedByRule
     case failed
+
+    var isProblem: Bool {
+        switch self {
+        case .waitingForNetwork, .failed:
+            true
+        case .connected, .disconnected, .waitingForAllowedNetwork, .pausedByRule:
+            false
+        }
+    }
 }
