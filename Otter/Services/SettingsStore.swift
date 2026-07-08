@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 @MainActor
 final class SettingsStore: ObservableObject {
@@ -93,8 +94,18 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    private static let logger = Logger(subsystem: "com.example.otter", category: "SettingsStore")
+
     private static func load<T: Decodable>(_ type: T.Type, from defaults: UserDefaults, key: String) -> T? {
         guard let data = defaults.data(forKey: key) else { return nil }
-        return try? JSONDecoder().decode(type, from: data)
+
+        do {
+            return try JSONDecoder().decode(type, from: data)
+        } catch {
+            // Keep the unreadable payload so it isn't destroyed by the next save.
+            logger.error("Couldn't decode \(key, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            defaults.set(data, forKey: "\(key).corrupted")
+            return nil
+        }
     }
 }

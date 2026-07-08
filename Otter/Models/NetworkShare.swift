@@ -233,5 +233,3 @@ enum ShareRuleAction: String, Codable, CaseIterable, Hashable, Identifiable {
         }
     }
 }
-
-typealias ShareWiFiNetworkAction = ShareRuleAction

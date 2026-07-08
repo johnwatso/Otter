@@ -258,6 +258,26 @@ private struct GeneralPreferencesView: View {
 
             Section {
                 LabeledContent("Current Wi-Fi", value: networkService.currentWiFiNetworkName ?? "Unavailable")
+
+                if networkService.wifiNameRequiresLocationPermission {
+                    Label("macOS requires Location Services access to show the Wi-Fi network name.", systemImage: "location.slash")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+
+                    Button {
+                        if networkService.canRequestLocationAuthorization {
+                            networkService.requestLocationAuthorization()
+                        } else {
+                            openLocationPrivacySettings()
+                        }
+                    } label: {
+                        Label(
+                            networkService.canRequestLocationAuthorization ? "Allow Location Access" : "Open Location Settings",
+                            systemImage: "location"
+                        )
+                    }
+                }
+
                 LabeledContent("Active VPN", value: activeVPNLabel)
 
                 if networkService.isVPNNameUnavailable {
@@ -353,6 +373,11 @@ private struct GeneralPreferencesView: View {
 
     private var activeVPNLabel: String {
         networkService.currentVPNDisplayName
+    }
+
+    private func openLocationPrivacySettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices") else { return }
+        NSWorkspace.shared.open(url)
     }
 }
 

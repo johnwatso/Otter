@@ -37,6 +37,7 @@ Adding a share is easiest from Finder: mount it once the normal way, then let Ot
 ## Requirements
 
 - macOS 26.0 or later
+- Wi-Fi based rules need Location Services access (macOS only exposes Wi-Fi network names to apps with location permission — Otter will ask when needed)
 
 ## Building
 

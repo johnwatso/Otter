@@ -9,6 +9,7 @@ struct ShareEditorView: View {
     @State private var mountedShareSuggestions: [MountedShareSuggestion] = []
     @State private var isShowingFinderImportHelp = false
     @State private var isShowingAdvanced = false
+    @State private var usesCustomVPNName = false
 
     private let sourceShare: NetworkShare?
     let onSave: (NetworkShare) -> Void
@@ -109,6 +110,10 @@ struct ShareEditorView: View {
                             }
                             .disabled(networkService.currentWiFiNetworkName == nil)
                         }
+
+                        if networkService.wifiNameRequiresLocationPermission {
+                            locationPermissionNotice
+                        }
                     }
 
                     Toggle("Use VPN rule", isOn: $draft.usesVPNRule)
@@ -120,19 +125,19 @@ struct ShareEditorView: View {
                             if networkService.knownVPNNames.isEmpty {
                                 TextField("VPN name", text: $draft.vpnName)
                             } else {
-                                Picker("Known VPN", selection: $draft.vpnName) {
-                                    Text("Choose VPN").tag("")
-
-                                    if !draft.vpnName.isEmpty, !networkService.knownVPNNames.contains(draft.vpnName) {
-                                        Text(draft.vpnName).tag(draft.vpnName)
-                                    }
+                                Picker("VPN", selection: vpnSelection) {
+                                    Text("Choose VPN").tag(VPNNameSelection.none)
 
                                     ForEach(networkService.knownVPNNames, id: \.self) { vpnName in
-                                        Text(vpnName).tag(vpnName)
+                                        Text(vpnName).tag(VPNNameSelection.known(vpnName))
                                     }
+
+                                    Text("Other...").tag(VPNNameSelection.custom)
                                 }
 
-                                TextField("VPN name", text: $draft.vpnName)
+                                if vpnSelection.wrappedValue == .custom {
+                                    TextField("VPN name", text: $draft.vpnName)
+                                }
                             }
 
                             HStack {
@@ -247,7 +252,64 @@ struct ShareEditorView: View {
     private func resetDraftIfNeeded() {
         guard draft.id != sourceShare?.id else { return }
         draft = DraftShare(share: sourceShare)
+        usesCustomVPNName = !draft.vpnName.isEmpty && !networkService.knownVPNNames.contains(draft.vpnName)
         validationMessage = nil
+    }
+
+    private var vpnSelection: Binding<VPNNameSelection> {
+        Binding {
+            if usesCustomVPNName {
+                return .custom
+            }
+
+            if draft.vpnName.isEmpty {
+                return .none
+            }
+
+            if networkService.knownVPNNames.contains(draft.vpnName) {
+                return .known(draft.vpnName)
+            }
+
+            return .custom
+        } set: { selection in
+            switch selection {
+            case .none:
+                usesCustomVPNName = false
+                draft.vpnName = ""
+            case let .known(vpnName):
+                usesCustomVPNName = false
+                draft.vpnName = vpnName
+            case .custom:
+                usesCustomVPNName = true
+            }
+        }
+    }
+
+    private var locationPermissionNotice: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("macOS requires Location Services access to read the Wi-Fi network name.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            if networkService.canRequestLocationAuthorization {
+                Button {
+                    networkService.requestLocationAuthorization()
+                } label: {
+                    Label("Allow Location Access", systemImage: "location")
+                }
+            } else {
+                Button {
+                    openLocationPrivacySettings()
+                } label: {
+                    Label("Open Location Settings", systemImage: "gearshape")
+                }
+            }
+        }
+    }
+
+    private func openLocationPrivacySettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func chooseMountedShare() {
@@ -293,6 +355,7 @@ struct ShareEditorView: View {
         guard let vpnName = networkService.activeVPNNames.first ?? (networkService.isVPNConnected ? "Unnamed VPN" : nil) else { return }
         draft.matchesAnyVPN = false
         draft.vpnName = vpnName
+        usesCustomVPNName = !networkService.knownVPNNames.contains(vpnName)
     }
 
     private func save() {
@@ -483,6 +546,12 @@ private struct MountedShareSuggestion: Identifiable, Hashable {
         components.password = nil
         return components.string
     }
+}
+
+private enum VPNNameSelection: Hashable {
+    case none
+    case known(String)
+    case custom
 }
 
 private enum MountedShareSuggestionError: LocalizedError {

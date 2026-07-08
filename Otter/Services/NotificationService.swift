@@ -39,6 +39,12 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
 
         Task {
             await refreshAuthorizationStatus()
+
+            // Ask at launch rather than from a background status change, so the
+            // permission dialog appears at a predictable moment.
+            if authorizationStatus == .notDetermined && settings.preferences.notificationsEnabled {
+                await requestAuthorization()
+            }
         }
     }
 
@@ -115,9 +121,7 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
         switch authorizationStatus {
         case .authorized, .provisional, .ephemeral:
             return true
-        case .notDetermined:
-            return await requestAuthorization()
-        case .denied:
+        case .notDetermined, .denied:
             return false
         @unknown default:
             return false

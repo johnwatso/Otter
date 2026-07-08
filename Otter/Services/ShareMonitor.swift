@@ -47,6 +47,7 @@ final class ShareMonitor: ObservableObject {
     private var fallbackTimer: Timer?
     private var retryTasks: [NetworkShare.ID: Task<Void, Never>] = [:]
     private var activeChecks = Set<NetworkShare.ID>()
+    private var pendingChecks: [NetworkShare.ID: (reason: MonitorReason, force: Bool)] = [:]
     private var hasStarted = false
 
     init(
@@ -124,7 +125,6 @@ final class ShareMonitor: ObservableObject {
         }
 
         cancelRetry(for: share.id)
-        updateStatus(.disconnected, for: share.id)
 
         do {
             try await mountService.unmount(share)
@@ -218,17 +218,30 @@ final class ShareMonitor: ObservableObject {
     }
 
     private func evaluate(_ share: NetworkShare, reason: MonitorReason, force: Bool = false) async {
-        guard !activeChecks.contains(share.id) else { return }
+        // A check for this share is already running; remember the request and
+        // re-run once it finishes so events arriving mid-check aren't lost.
+        guard !activeChecks.contains(share.id) else {
+            let pendingForce = (pendingChecks[share.id]?.force ?? false) || force
+            pendingChecks[share.id] = (reason, pendingForce)
+            return
+        }
+
         activeChecks.insert(share.id)
         isChecking = true
         defer {
             activeChecks.remove(share.id)
             isChecking = !activeChecks.isEmpty
+
+            if let pending = pendingChecks.removeValue(forKey: share.id) {
+                Task { [weak self] in
+                    await self?.evaluateShare(id: share.id, reason: pending.reason, force: pending.force)
+                }
+            }
         }
 
         var state = states[share.id] ?? ShareRuntimeState()
         state.lastCheckedAt = Date()
-        networkService.refreshNetworkDetails()
+        networkService.refreshNetworkDetailsIfStale()
 
         let mountedURL = await mountService.mountedURL(for: share)
         let isMounted = mountedURL != nil
@@ -308,10 +321,7 @@ final class ShareMonitor: ObservableObject {
         }
 
         do {
-            try await mountService.mount(share)
-            try? await Task.sleep(nanoseconds: 600_000_000)
-
-            if let mountedURL = await mountService.mountedURL(for: share) {
+            if let mountedURL = try await mountService.mount(share) {
                 syncMountPathIfNeeded(mountedURL, for: share)
                 state.status = .connected
                 state.failureCount = 0

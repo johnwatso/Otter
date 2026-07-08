@@ -4,7 +4,23 @@ import NetFS
 enum MountServiceError: LocalizedError {
     case invalidURL
     case passwordInURL
+    case cancelled
+    case authenticationFailed
+    case serverUnreachable
     case netFSFailed(Int32)
+
+    static func failure(status: Int32) -> MountServiceError {
+        switch status {
+        case ECANCELED:
+            .cancelled
+        case EAUTH, EACCES, EPERM:
+            .authenticationFailed
+        case ETIMEDOUT, EHOSTUNREACH, EHOSTDOWN, ENETUNREACH, ENOENT:
+            .serverUnreachable
+        default:
+            .netFSFailed(status)
+        }
+    }
 
     var errorDescription: String? {
         switch self {
@@ -12,6 +28,12 @@ enum MountServiceError: LocalizedError {
             "The network address is invalid."
         case .passwordInURL:
             "Remove the username or password from the URL and let macOS handle credentials."
+        case .cancelled:
+            "The connection was canceled."
+        case .authenticationFailed:
+            "macOS couldn't authenticate with the server. Connect once in Finder to save the credentials."
+        case .serverUnreachable:
+            "The server didn't respond."
         case let .netFSFailed(status):
             "macOS returned mount error \(status)."
         }
@@ -19,6 +41,11 @@ enum MountServiceError: LocalizedError {
 }
 
 actor MountService {
+    // NetFSMountURLSync blocks until the mount finishes (or the user dismisses a
+    // credentials dialog), so it runs on a dedicated queue instead of tying up a
+    // Swift-concurrency cooperative thread.
+    private let mountQueue = DispatchQueue(label: "Otter.MountService")
+
     func isMounted(_ share: NetworkShare) -> Bool {
         mountedURL(for: share) != nil
     }
@@ -27,7 +54,8 @@ actor MountService {
         mountedVolumeURL(for: share)
     }
 
-    func mount(_ share: NetworkShare) throws {
+    @discardableResult
+    func mount(_ share: NetworkShare) async throws -> URL? {
         guard let url = share.url else {
             throw MountServiceError.invalidURL
         }
@@ -36,21 +64,36 @@ actor MountService {
             throw MountServiceError.passwordInURL
         }
 
-        var mountPoints: Unmanaged<CFArray>?
-        let status = NetFSMountURLSync(
-            url as CFURL,
-            nil,
-            nil,
-            nil,
-            nil,
-            nil,
-            &mountPoints
-        )
-        mountPoints?.release()
-
-        guard status == noErr else {
-            throw MountServiceError.netFSFailed(status)
+        let result: (status: Int32, mountPaths: [String]) = await withCheckedContinuation { continuation in
+            mountQueue.async {
+                var mountPoints: Unmanaged<CFArray>?
+                let status = NetFSMountURLSync(
+                    url as CFURL,
+                    nil,
+                    nil,
+                    nil,
+                    nil,
+                    nil,
+                    &mountPoints
+                )
+                let mountPaths = mountPoints?.takeRetainedValue() as? [String] ?? []
+                continuation.resume(returning: (status, mountPaths))
+            }
         }
+
+        if result.status == EEXIST {
+            return mountedVolumeURL(for: share)
+        }
+
+        guard result.status == noErr else {
+            throw MountServiceError.failure(status: result.status)
+        }
+
+        if let mountPath = result.mountPaths.first {
+            return URL(fileURLWithPath: mountPath, isDirectory: true)
+        }
+
+        return mountedVolumeURL(for: share)
     }
 
     func unmount(_ share: NetworkShare) async throws {

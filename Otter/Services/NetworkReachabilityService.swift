@@ -1,16 +1,19 @@
-import Foundation
+import AppKit
+import CoreLocation
 import CoreWLAN
 import Darwin
+import Foundation
 import Network
 import SystemConfiguration
 
 @MainActor
-final class NetworkReachabilityService: ObservableObject {
+final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published private(set) var isOnline = true
     @Published private(set) var currentWiFiNetworkName: String?
     @Published private(set) var isVPNConnected = false
     @Published private(set) var activeVPNNames: [String] = []
     @Published private(set) var knownVPNNames: [String] = []
+    @Published private(set) var locationAuthorizationStatus: CLAuthorizationStatus = .notDetermined
 
     var currentVPNDisplayName: String {
         if !activeVPNNames.isEmpty {
@@ -24,12 +27,29 @@ final class NetworkReachabilityService: ObservableObject {
         isVPNConnected && activeVPNNames.isEmpty
     }
 
+    // macOS only exposes the Wi-Fi network name to apps with Location Services access.
+    var wifiNameRequiresLocationPermission: Bool {
+        currentWiFiNetworkName == nil && locationAuthorizationStatus != .authorizedAlways
+    }
+
+    var canRequestLocationAuthorization: Bool {
+        locationAuthorizationStatus == .notDetermined
+    }
+
     var onPathChange: (() -> Void)?
     private let pathMonitor = NWPathMonitor()
     private let pathQueue = DispatchQueue(label: "Otter.NetworkPathMonitor")
     private let reachabilityQueue = DispatchQueue(label: "Otter.ServerReachability")
+    private let locationManager = CLLocationManager()
     private var hasStarted = false
     private var hasReceivedPathUpdate = false
+    private var lastDetailsRefresh: Date?
+
+    override init() {
+        super.init()
+        locationManager.delegate = self
+        locationAuthorizationStatus = locationManager.authorizationStatus
+    }
 
     func start() {
         guard !hasStarted else { return }
@@ -83,12 +103,51 @@ final class NetworkReachabilityService: ObservableObject {
         refreshNetworkDetails()
     }
 
+    func requestLocationAuthorization() {
+        guard canRequestLocationAuthorization else { return }
+        locationManager.requestWhenInUseAuthorization()
+    }
+
+    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let status = manager.authorizationStatus
+        Task { @MainActor in
+            self.locationAuthorizationStatus = status
+            self.refreshNetworkDetails()
+            self.onPathChange?()
+        }
+    }
+
+    // Reading VPN details walks SystemConfiguration and the running-app list, so the
+    // monitor uses this throttled variant when checking several shares in a row.
+    func refreshNetworkDetailsIfStale(maxAge: TimeInterval = 2) {
+        if let lastDetailsRefresh, Date().timeIntervalSince(lastDetailsRefresh) < maxAge {
+            return
+        }
+
+        refreshNetworkDetails()
+    }
+
     func refreshNetworkDetails() {
+        lastDetailsRefresh = Date()
         currentWiFiNetworkName = Self.readCurrentWiFiNetworkName()
+
         let activeVPNInterfaceNames = Self.activeVPNInterfaceNames()
-        activeVPNNames = Self.vpnServiceNames(for: activeVPNInterfaceNames)
+        let connectedServiceNames = Self.connectedVPNServiceNames()
+        let hasActiveTunnel = !activeVPNInterfaceNames.isEmpty
+
+        var names = Set(Self.vpnServiceNames(for: activeVPNInterfaceNames))
+        names.formUnion(connectedServiceNames)
+
+        // Network Extension VPNs (Tailscale, WireGuard, ...) don't appear as
+        // SystemConfiguration services, so fall back to naming them by the VPN
+        // apps that are currently running while a tunnel interface is active.
+        if hasActiveTunnel && names.isEmpty {
+            names.formUnion(Self.runningVPNAppNames())
+        }
+
+        activeVPNNames = Self.sorted(names)
         knownVPNNames = Self.readKnownVPNNames(including: activeVPNNames)
-        isVPNConnected = !activeVPNInterfaceNames.isEmpty || !activeVPNNames.isEmpty
+        isVPNConnected = hasActiveTunnel || !connectedServiceNames.isEmpty
     }
 
     private func handlePathUpdate(_ path: NWPath) {
@@ -105,7 +164,7 @@ final class NetworkReachabilityService: ObservableObject {
         let vpnChanged = wasVPNConnected != isVPNConnected
             || previousVPNNames != activeVPNNames
             || previousKnownVPNNames != knownVPNNames
-        let shouldNotify = changed || wifiNetworkChanged || vpnChanged || hasReceivedPathUpdate
+        let shouldNotify = changed || wifiNetworkChanged || vpnChanged || !hasReceivedPathUpdate
         hasReceivedPathUpdate = true
 
         if shouldNotify {
@@ -208,6 +267,73 @@ final class NetworkReachabilityService: ObservableObject {
         let isMulticast = bytes.first == 0xff
 
         return !isUnspecified && !isLoopback && !isLinkLocal && !isMulticast
+    }
+
+    // Personal VPNs configured in System Settings (IKEv2, L2TP, ...) report a live
+    // connection status through SCNetworkConnection, which tells us exactly which
+    // configured VPN is connected rather than inferring it from tunnel interfaces.
+    private static func connectedVPNServiceNames() -> Set<String> {
+        guard let preferences = SCPreferencesCreate(nil, "Otter.NetworkDetails" as CFString, nil),
+              let services = SCNetworkServiceCopyAll(preferences) as? [SCNetworkService]
+        else {
+            return []
+        }
+
+        var names = Set<String>()
+
+        for service in services {
+            guard let serviceName = SCNetworkServiceGetName(service) as String?,
+                  !serviceName.isEmpty,
+                  isVPNService(service, serviceName: serviceName),
+                  let serviceID = SCNetworkServiceGetServiceID(service) as String?,
+                  let connection = SCNetworkConnectionCreateWithServiceID(nil, serviceID as CFString, nil, nil),
+                  SCNetworkConnectionGetStatus(connection) == .connected
+            else {
+                continue
+            }
+
+            names.insert(serviceName)
+        }
+
+        return names
+    }
+
+    private static let vpnAppBundleIDPrefixes: [(prefix: String, name: String)] = [
+        ("com.tailscale", "Tailscale"),
+        ("io.tailscale", "Tailscale"),
+        ("com.wireguard", "WireGuard"),
+        ("com.nordvpn", "NordVPN"),
+        ("com.nordsec", "NordVPN"),
+        ("net.mullvad", "Mullvad VPN"),
+        ("ch.protonvpn", "Proton VPN"),
+        ("com.protonvpn", "Proton VPN"),
+        ("com.expressvpn", "ExpressVPN"),
+        ("com.privateinternetaccess", "Private Internet Access"),
+        ("com.surfshark", "Surfshark"),
+        ("com.windscribe", "Windscribe"),
+        ("com.cloudflare", "Cloudflare WARP"),
+        ("com.cisco.anyconnect", "Cisco AnyConnect"),
+        ("com.cisco.secureclient", "Cisco Secure Client"),
+        ("com.paloaltonetworks", "GlobalProtect"),
+        ("com.fortinet", "FortiClient"),
+        ("com.zscaler", "Zscaler"),
+        ("net.openvpn", "OpenVPN Connect"),
+        ("com.viscosityvpn", "Viscosity"),
+        ("net.tunnelblick", "Tunnelblick")
+    ]
+
+    private static func runningVPNAppNames() -> Set<String> {
+        var names = Set<String>()
+
+        for application in NSWorkspace.shared.runningApplications {
+            guard let bundleID = application.bundleIdentifier?.lowercased() else { continue }
+
+            for entry in vpnAppBundleIDPrefixes where bundleID.hasPrefix(entry.prefix) {
+                names.insert(entry.name)
+            }
+        }
+
+        return names
     }
 
     private static func readKnownVPNNames(including activeVPNNames: [String]) -> [String] {
