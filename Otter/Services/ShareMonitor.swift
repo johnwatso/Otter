@@ -427,13 +427,12 @@ final class ShareMonitor: ObservableObject {
             return networkService.isVPNConnected
         }
 
-        if networkService.activeVPNNames.contains(where: { activeVPNName in
+        // Named rules only match the VPN that is actually connected. An unnamed
+        // active VPN must not match, or rules for different VPNs become
+        // indistinguishable and every named rule fires for any VPN.
+        return networkService.activeVPNNames.contains { activeVPNName in
             activeVPNName.localizedCaseInsensitiveCompare(requiredVPNName) == .orderedSame
-        }) {
-            return true
         }
-
-        return networkService.isVPNConnected && networkService.activeVPNNames.isEmpty
     }
 
     private func registerFailure(_ message: String, for shareID: NetworkShare.ID) {

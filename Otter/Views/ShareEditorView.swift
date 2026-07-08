@@ -152,7 +152,7 @@ struct ShareEditorView: View {
                             }
 
                             if networkService.isVPNNameUnavailable {
-                                Text("macOS has not exposed this VPN's name. This rule will match any active unnamed VPN.")
+                                Text("macOS has not exposed this VPN's name, so Otter can't match it by name. Use \"Match any VPN\" instead.")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
@@ -352,7 +352,15 @@ struct ShareEditorView: View {
 
     private func useCurrentVPN() {
         networkService.refreshNetworkDetails()
-        guard let vpnName = networkService.activeVPNNames.first ?? (networkService.isVPNConnected ? "Unnamed VPN" : nil) else { return }
+
+        // Without a name to match, the only rule that can work is "any VPN".
+        guard let vpnName = networkService.activeVPNNames.first else {
+            if networkService.isVPNConnected {
+                draft.matchesAnyVPN = true
+            }
+            return
+        }
+
         draft.matchesAnyVPN = false
         draft.vpnName = vpnName
         usesCustomVPNName = !networkService.knownVPNNames.contains(vpnName)
