@@ -167,7 +167,7 @@ final class ShareRulesEvaluationTests: XCTestCase {
         let blocked = rules.evaluate(currentWiFiNetworkName: "Coffee Shop", isVPNConnected: false, activeVPNNames: [])
         XCTAssertFalse(blocked.allowsConnection)
         XCTAssertTrue(blocked.shouldDisconnectMountedShare)
-        XCTAssertEqual(blocked.blockedStatus, .waitingForAllowedNetwork("Wi-Fi home"))
+        XCTAssertEqual(blocked.blockedStatus, .waitingForAllowedNetwork("Home network or VPN"))
     }
 
     func testNamedVPNRuleOnlyMatchesThatVPN() {
@@ -204,15 +204,26 @@ final class ShareRulesEvaluationTests: XCTestCase {
         rules.vpnName = "Work VPN"
         rules.vpnAction = .connect
 
-        // Wifi matches, but VPN is not connected -> fails
-        let wifiOnlyNotEnough = rules.evaluate(currentWiFiNetworkName: "Home", isVPNConnected: false, activeVPNNames: [])
-        XCTAssertFalse(wifiOnlyNotEnough.allowsConnection)
-        XCTAssertEqual(wifiOnlyNotEnough.blockedStatus, .waitingForAllowedNetwork("VPN Work VPN"))
+        // Wifi matches -> succeeds directly
+        let wifiOnlyIsEnough = rules.evaluate(currentWiFiNetworkName: "Home", isVPNConnected: false, activeVPNNames: [])
+        XCTAssertTrue(wifiOnlyIsEnough.allowsConnection)
 
-        // Both match -> succeeds
-        let bothMatch = rules.evaluate(currentWiFiNetworkName: "Home", isVPNConnected: true, activeVPNNames: ["Work VPN"])
-        XCTAssertTrue(bothMatch.allowsConnection)
-        XCTAssertTrue(bothMatch.shouldAttemptMount)
+        // Wired Ethernet -> succeeds directly
+        let ethernetOnlyIsEnough = rules.evaluate(currentWiFiNetworkName: nil, isVPNConnected: false, activeVPNNames: [])
+        XCTAssertTrue(ethernetOnlyIsEnough.allowsConnection)
+
+        // Untrusted Wifi, no VPN -> blocked
+        let foreignWifiNoVPN = rules.evaluate(currentWiFiNetworkName: "Coffee Shop", isVPNConnected: false, activeVPNNames: [])
+        XCTAssertFalse(foreignWifiNoVPN.allowsConnection)
+        XCTAssertEqual(foreignWifiNoVPN.blockedStatus, .waitingForAllowedNetwork("Home network or VPN Work VPN"))
+
+        // Untrusted Wifi, correct VPN -> succeeds
+        let foreignWifiWithVPN = rules.evaluate(currentWiFiNetworkName: "Coffee Shop", isVPNConnected: true, activeVPNNames: ["Work VPN"])
+        XCTAssertTrue(foreignWifiWithVPN.allowsConnection)
+
+        // Untrusted Wifi, wrong VPN -> blocked
+        let foreignWifiWithWrongVPN = rules.evaluate(currentWiFiNetworkName: "Coffee Shop", isVPNConnected: true, activeVPNNames: ["Other VPN"])
+        XCTAssertFalse(foreignWifiWithWrongVPN.allowsConnection)
     }
 }
 

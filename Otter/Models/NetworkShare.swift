@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 struct NetworkShare: Identifiable, Codable, Hashable {
     var id: UUID
@@ -106,6 +107,57 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         var sin6 = in6_addr()
         return host.withCString { inet_pton(AF_INET, $0, &sin) } == 1
             || host.withCString { inet_pton(AF_INET6, $0, &sin6) } == 1
+    }
+
+    static func checkKeychainHasCredentials(for host: String) -> Bool {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassInternetPassword,
+            kSecAttrServer as String: host,
+            kSecAttrProtocol as String: kSecAttrProtocolSMB,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        let status = SecItemCopyMatching(query as CFDictionary, nil)
+        return status == errSecSuccess || status == errSecInteractionNotAllowed
+    }
+
+    static func syncKeychainCredentials(fromHost: String, toHost: String) {
+        guard !fromHost.isEmpty, !toHost.isEmpty, fromHost != toHost else { return }
+        
+        // If the destination host already has credentials, do nothing
+        if checkKeychainHasCredentials(for: toHost) {
+            return
+        }
+        
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassInternetPassword,
+            kSecAttrServer as String: fromHost,
+            kSecAttrProtocol as String: kSecAttrProtocolSMB,
+            kSecReturnAttributes as String: true,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess,
+              let dict = result as? [String: Any],
+              let account = dict[kSecAttrAccount as String] as? String,
+              let passwordData = dict[kSecValueData as String] as? Data
+        else {
+            return
+        }
+        
+        let newQuery: [String: Any] = [
+            kSecClass as String: kSecClassInternetPassword,
+            kSecAttrServer as String: toHost,
+            kSecAttrProtocol as String: kSecAttrProtocolSMB,
+            kSecAttrAccount as String: account,
+            kSecValueData as String: passwordData,
+            kSecAttrLabel as String: "Otter: \(toHost)",
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+        ]
+        
+        _ = SecItemAdd(newQuery as CFDictionary, nil)
     }
 
     static func resolveIPAddress(for hostname: String) async -> String? {
@@ -400,20 +452,47 @@ extension ShareRules {
         isVPNConnected: Bool,
         activeVPNNames: [String]
     ) -> ShareRuleEvaluation {
-        var conditions: [(action: ShareRuleAction, matches: Bool, requirement: String)] = []
-
         if let requiredWiFiNetworkName {
             let currentNetworkName = currentWiFiNetworkName?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let matches = currentNetworkName?.localizedCaseInsensitiveCompare(requiredWiFiNetworkName) == .orderedSame
-            conditions.append((wifiNetworkAction, matches, "Wi-Fi \(requiredWiFiNetworkName)"))
+            let isHomeWiFi = currentNetworkName?.localizedCaseInsensitiveCompare(requiredWiFiNetworkName) == .orderedSame
+            let isEthernet = currentNetworkName == nil && !isVPNConnected
+            
+            let isVPNActive: Bool
+            if vpnRuleEnabled {
+                if let requiredVPNName = requiredVPNName {
+                    isVPNActive = activeVPNNames.contains { activeVPNName in
+                        activeVPNName.localizedCaseInsensitiveCompare(requiredVPNName) == .orderedSame
+                    }
+                } else {
+                    isVPNActive = isVPNConnected
+                }
+            } else {
+                isVPNActive = isVPNConnected
+            }
+
+            let matches = isHomeWiFi || isEthernet || isVPNActive
+
+            if !matches {
+                let vpnSuffix = vpnRuleEnabled && !vpnName.isEmpty ? " \(vpnName)" : ""
+                return ShareRuleEvaluation(
+                    allowsConnection: false,
+                    blockedStatus: .waitingForAllowedNetwork("Home network or VPN\(vpnSuffix)"),
+                    shouldDisconnectMountedShare: true,
+                    shouldAttemptMount: false
+                )
+            }
+            
+            return ShareRuleEvaluation(
+                allowsConnection: true,
+                blockedStatus: nil,
+                shouldDisconnectMountedShare: false,
+                shouldAttemptMount: true
+            )
         }
 
-        if hasVPNRule {
+        if vpnRuleEnabled {
             let matches: Bool
             if let requiredVPNName {
-                // Named rules only match the VPN that is actually connected. An
-                // unnamed active VPN must not match, or rules for different VPNs
-                // become indistinguishable.
                 matches = activeVPNNames.contains { activeVPNName in
                     activeVPNName.localizedCaseInsensitiveCompare(requiredVPNName) == .orderedSame
                 }
@@ -421,45 +500,25 @@ extension ShareRules {
                 matches = isVPNConnected
             }
 
-            let requirement = requiredVPNName.map { "VPN \($0)" } ?? "a VPN"
-            conditions.append((vpnAction, matches, requirement))
-        }
-
-        guard !conditions.isEmpty else { return .noRules }
-
-        var shouldAttemptMount = false
-
-        for condition in conditions {
-            switch condition.action {
-            case .connect:
-                guard condition.matches else {
-                    return ShareRuleEvaluation(
-                        allowsConnection: false,
-                        blockedStatus: .waitingForAllowedNetwork(condition.requirement),
-                        shouldDisconnectMountedShare: true,
-                        shouldAttemptMount: false
-                    )
-                }
-
-                shouldAttemptMount = true
-            case .disconnect:
-                if condition.matches {
-                    return ShareRuleEvaluation(
-                        allowsConnection: false,
-                        blockedStatus: .pausedByRule(condition.requirement),
-                        shouldDisconnectMountedShare: true,
-                        shouldAttemptMount: false
-                    )
-                }
+            if !matches {
+                let requirement = requiredVPNName.map { "VPN \($0)" } ?? "a VPN"
+                return ShareRuleEvaluation(
+                    allowsConnection: false,
+                    blockedStatus: .waitingForAllowedNetwork(requirement),
+                    shouldDisconnectMountedShare: true,
+                    shouldAttemptMount: false
+                )
             }
+            
+            return ShareRuleEvaluation(
+                allowsConnection: true,
+                blockedStatus: nil,
+                shouldDisconnectMountedShare: false,
+                shouldAttemptMount: true
+            )
         }
 
-        return ShareRuleEvaluation(
-            allowsConnection: true,
-            blockedStatus: nil,
-            shouldDisconnectMountedShare: false,
-            shouldAttemptMount: shouldAttemptMount
-        )
+        return .noRules
     }
 }
 

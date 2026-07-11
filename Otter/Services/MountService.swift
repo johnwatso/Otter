@@ -60,6 +60,13 @@ actor MountService {
             throw MountServiceError.invalidURL
         }
 
+        if let urlOverride,
+           let originalHost = share.url?.host(percentEncoded: false),
+           let fallbackHost = urlOverride.host(percentEncoded: false),
+           originalHost != fallbackHost {
+            NetworkShare.syncKeychainCredentials(fromHost: originalHost, toHost: fallbackHost)
+        }
+
         if url.user(percentEncoded: false) != nil || url.password(percentEncoded: false) != nil {
             throw MountServiceError.passwordInURL
         }

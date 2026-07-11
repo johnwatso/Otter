@@ -29,6 +29,21 @@ struct ShareEditorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            HStack {
+                Text(isEditing ? "Settings" : "New Share")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                if isEditing {
+                    Text("— \(draft.displayName)")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .padding(.bottom, 10)
+
             Form {
                 if !isEditing {
                     Section {
@@ -70,37 +85,160 @@ struct ShareEditorView: View {
                     }
                 }
 
-                Section("Share") {
-                    TextField("Name", text: $draft.displayName, prompt: Text(inferredDisplayName ?? "Dawn"))
-                    TextField("Network address", text: $draft.urlString, prompt: Text("smb://server.local/Dawn"))
+                // General Section
+                Section("General") {
+                    TextField("Share name", text: $draft.displayName, prompt: Text(inferredDisplayName ?? "Dawn"))
+                    TextField("Server address", text: $draft.urlString, prompt: Text("smb://server.local/Dawn"))
+                    TextField("Share path", text: $draft.mountPath, prompt: Text(inferredMountPath))
+                    LabeledContent("Protocol", value: "SMB")
+                    
+                    if isEditing {
+                        Button {
+                            chooseMountedShare()
+                        } label: {
+                            Label("Auto-fill details from Finder...", systemImage: "arrow.down.doc.fill")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .padding(.vertical, 2)
+                    }
                 }
 
-                Section {
-                    DisclosureGroup("Advanced", isExpanded: $isShowingAdvanced) {
-                        TextField("Finder location", text: $draft.mountPath, prompt: Text(inferredMountPath))
-
-                        if isEditing {
-                            Button {
-                                chooseMountedShare()
-                            } label: {
-                                Label("Auto-fill details from Finder...", systemImage: "arrow.down.doc.fill")
+                // Automation Section
+                Section("Automation") {
+                    Toggle("Reconnect automatically", isOn: $draft.keepMounted)
+                    Toggle("Mount at login", isOn: $draft.mountAtLaunch)
+                    Toggle("Connect when server becomes available", isOn: $draft.autoConnectWhenReachable)
+                    Toggle("Wake server automatically", isOn: $draft.wakeOnLANEnabled)
+                    
+                    if draft.wakeOnLANEnabled {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Send a Wake-on-LAN packet before attempting to connect.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            
+                            TextField("MAC address", text: $draft.wakeOnLANMACAddress, prompt: Text("AA:BB:CC:DD:EE:FF"))
+                            TextField(
+                                "Broadcast address",
+                                text: $draft.wakeOnLANBroadcastAddress,
+                                prompt: Text(WakeOnLANConfiguration.defaultBroadcastAddress)
+                            )
+                            
+                            Stepper(value: $draft.wakeOnLANPort, in: 1...65_535, step: 1) {
+                                Text("Port: \(draft.wakeOnLANPort)")
                             }
-                            .buttonStyle(.borderless)
-                            .controlSize(.small)
-                            .padding(.vertical, 2)
                         }
+                        .padding(.leading, 20)
+                    }
+                }
 
-                        if let fallbackURL = fallbackURLString {
-                            LabeledContent("Fallback IP", value: fallbackURL)
+                // Conditions Section
+                Section("Conditions") {
+                    Toggle("Limit connections to home network or VPN", isOn: Binding(
+                        get: { draft.usesWiFiNetworkRule },
+                        set: { newValue in
+                            draft.usesWiFiNetworkRule = newValue
+                            if newValue {
+                                if draft.wifiNetworkName.isEmpty, let currentSSID = networkService.currentWiFiNetworkName {
+                                    draft.wifiNetworkName = currentSSID
+                                }
+                                draft.usesVPNRule = true
+                                draft.matchesAnyVPN = true
+                            } else {
+                                draft.usesVPNRule = false
+                                draft.wifiNetworkName = ""
+                                draft.vpnName = ""
+                                draft.matchesAnyVPN = false
+                            }
                         }
+                    ))
+                    
+                    if draft.usesWiFiNetworkRule {
+                        VStack(alignment: .leading, spacing: 6) {
+                            if !draft.wifiNetworkName.isEmpty {
+                                LabeledContent("Home Wi-Fi", value: draft.wifiNetworkName)
+                            } else {
+                                LabeledContent("Home Wi-Fi", value: "Not registered")
+                                Text("Connect to your home Wi-Fi while configuring to automatically register it.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            Toggle("Require specific VPN profile", isOn: Binding(
+                                get: { !draft.matchesAnyVPN },
+                                set: { newValue in
+                                    draft.matchesAnyVPN = !newValue
+                                    if !newValue {
+                                        draft.vpnName = ""
+                                    }
+                                }
+                            ))
+                            .font(.subheadline)
+                            .padding(.top, 4)
+                            
+                            if !draft.matchesAnyVPN {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    if networkService.knownVPNNames.isEmpty {
+                                        TextField("VPN profile name", text: $draft.vpnName, prompt: Text("Office VPN"))
+                                            .textFieldStyle(.roundedBorder)
+                                    } else {
+                                        Picker("VPN Profile", selection: vpnSelection) {
+                                            Text("Choose VPN...").tag(VPNNameSelection.none)
+                                            
+                                            ForEach(networkService.knownVPNNames, id: \.self) { vpnName in
+                                                Text(vpnName).tag(VPNNameSelection.known(vpnName))
+                                            }
+                                            
+                                            Text("Other...").tag(VPNNameSelection.custom)
+                                        }
+                                        .pickerStyle(.menu)
+                                        
+                                        if vpnSelection.wrappedValue == .custom {
+                                            TextField("VPN name", text: $draft.vpnName, prompt: Text("Other VPN"))
+                                                .textFieldStyle(.roundedBorder)
+                                        }
+                                    }
+                                }
+                                .padding(.leading, 12)
+                            }
+                            
+                            Text("Ethernet and allowed VPN connections are trusted.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .padding(.top, 2)
+                        }
+                        .padding(.leading, 20)
+                    }
+                }
 
+                // Credentials Section
+                Section("Credentials") {
+                    HStack(spacing: 8) {
+                        Image(systemName: hasKeychainCredentials ? "checkmark.circle.fill" : "minus.circle")
+                            .foregroundStyle(hasKeychainCredentials ? .green : .secondary)
+                        Text(hasKeychainCredentials ? "Credentials found in macOS Keychain." : "No credentials found in macOS Keychain.")
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                    }
+                    if !hasKeychainCredentials {
+                        Text("To mount this share, connect once in Finder and select \"Remember this password in my keychain\".")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                // Advanced Section
+                if let fallbackURL = fallbackURLString {
+                    Section("Advanced") {
+                        LabeledContent("Fallback IP", value: fallbackURL)
+                        
                         if let host = hostFromURL, !NetworkShare.isIPAddress(host) {
                             VStack(alignment: .leading, spacing: 4) {
                                 Label("VPN IP Fallback", systemImage: "info.circle")
-                                    .font(.caption)
+                                    .font(.subheadline)
                                     .fontWeight(.medium)
                                 Text("Otter will resolve and cache this server's local IP address when connected locally. If you connect to your VPN later, Otter will use the cached IP address to bypass mDNS limits. Ensure your server has a static IP address, or this fallback may fail if the IP changes.")
-                                    .font(.caption2)
+                                    .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }
                             .padding(.top, 4)
@@ -108,116 +246,13 @@ struct ShareEditorView: View {
                     }
                 }
 
-                Section("Behavior") {
-                    Toggle("Keep mounted", isOn: $draft.keepMounted)
-                    Toggle("Mount at launch", isOn: $draft.mountAtLaunch)
-                    Toggle("Connect when server is reachable", isOn: $draft.autoConnectWhenReachable)
-
-                    if draft.autoConnectWhenReachable {
-                        Text("Mounts automatically whenever the server answers — handy when the server is only visible on certain networks or VPNs.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section("Wake on LAN") {
-                    Toggle("Wake server before mounting", isOn: $draft.wakeOnLANEnabled)
-
-                    if draft.wakeOnLANEnabled {
-                        TextField("MAC address", text: $draft.wakeOnLANMACAddress, prompt: Text("AA:BB:CC:DD:EE:FF"))
-                        TextField(
-                            "Broadcast address",
-                            text: $draft.wakeOnLANBroadcastAddress,
-                            prompt: Text(WakeOnLANConfiguration.defaultBroadcastAddress)
-                        )
-
-                        Stepper(value: $draft.wakeOnLANPort, in: 1...65_535, step: 1) {
-                            Text("Port: \(draft.wakeOnLANPort)")
-                        }
-
-                        Text("Sends a magic packet when Otter is about to mount and the server does not answer.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section("Rules") {
-                    Toggle("Use Wi-Fi network rule", isOn: $draft.usesWiFiNetworkRule)
-
-                    if draft.usesWiFiNetworkRule {
-                        TextField("Wi-Fi network name", text: $draft.wifiNetworkName)
-
-                        HStack {
-                            LabeledContent("Current Wi-Fi", value: currentWiFiNetworkLabel)
-
-                            Button {
-                                useCurrentWiFiNetwork()
-                            } label: {
-                                Label("Use Current", systemImage: "wifi")
-                            }
-                            .disabled(networkService.currentWiFiNetworkName == nil)
-                        }
-
-                        if networkService.wifiNameRequiresLocationPermission {
-                            locationPermissionNotice
-                        }
-                    }
-
-                    Toggle("Use VPN rule", isOn: $draft.usesVPNRule)
-
-                    if draft.usesVPNRule {
-                        Toggle("Match any VPN", isOn: $draft.matchesAnyVPN)
-
-                        if !draft.matchesAnyVPN {
-                            if networkService.knownVPNNames.isEmpty {
-                                TextField("VPN name", text: $draft.vpnName)
-                            } else {
-                                Picker("VPN", selection: vpnSelection) {
-                                    Text("Choose VPN").tag(VPNNameSelection.none)
-
-                                    ForEach(networkService.knownVPNNames, id: \.self) { vpnName in
-                                        Text(vpnName).tag(VPNNameSelection.known(vpnName))
-                                    }
-
-                                    Text("Other...").tag(VPNNameSelection.custom)
-                                }
-
-                                if vpnSelection.wrappedValue == .custom {
-                                    TextField("VPN name", text: $draft.vpnName)
-                                }
-                            }
-
-                            HStack {
-                                LabeledContent("Current VPN", value: currentVPNLabel)
-
-                                Button {
-                                    useCurrentVPN()
-                                } label: {
-                                    Label("Use Current", systemImage: "lock.shield")
-                                }
-                                .disabled(!networkService.isVPNConnected)
-                            }
-
-                            if networkService.isVPNNameUnavailable {
-                                Text("macOS has not exposed this VPN's name, so Otter can't match it by name. Use \"Match any VPN\" instead.")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        } else {
-                            LabeledContent("Current VPN", value: currentVPNLabel)
-                        }
-                    }
-                }
-
                 if let validationMessage {
-                    Text(validationMessage)
-                        .font(.caption)
-                        .foregroundStyle(.red)
+                    Section {
+                        Text(validationMessage)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                 }
-
-                Text("Credentials stay in macOS Keychain or Finder.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
             .formStyle(.grouped)
             .padding(20)
@@ -233,7 +268,7 @@ struct ShareEditorView: View {
 
                 Spacer()
 
-                Button("Save") {
+                Button("Done") {
                     save()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -277,8 +312,35 @@ struct ShareEditorView: View {
         }
     }
 
+    private var hasKeychainCredentials: Bool {
+        guard let url = URL(string: draft.urlString.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let host = url.host(percentEncoded: false)
+        else { return false }
+        
+        if NetworkShare.checkKeychainHasCredentials(for: host) {
+            return true
+        }
+        if let cachedIP = draft.cachedIPAddress, NetworkShare.checkKeychainHasCredentials(for: cachedIP) {
+            return true
+        }
+        return false
+    }
+
     private var isEditing: Bool {
         sourceShare != nil
+    }
+
+    private enum NetworkConstraint: Hashable {
+        case any
+        case wifi
+    }
+
+    private var networkConstraintBinding: Binding<NetworkConstraint> {
+        Binding {
+            draft.usesWiFiNetworkRule ? .wifi : .any
+        } set: { constraint in
+            draft.usesWiFiNetworkRule = (constraint == .wifi)
+        }
     }
 
     private var hostFromURL: String? {

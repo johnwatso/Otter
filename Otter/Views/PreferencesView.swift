@@ -64,7 +64,7 @@ struct ShareManagementView: View {
                         appModel.requestEditShare(selectedShare)
                     }
                 } label: {
-                    Label("Edit Share", systemImage: "pencil")
+                    Label("Settings…", systemImage: "gearshape")
                 }
                 .disabled(selectedShare == nil)
 
@@ -132,7 +132,18 @@ struct ShareManagementView: View {
 
     @ViewBuilder
     private var detail: some View {
-        if let selectedShare {
+        if settings.shares.isEmpty {
+            ContentUnavailableView {
+                Label("No Network Shares", systemImage: "externaldrive.badge.plus")
+            } description: {
+                Text("Add a network share to keep it automatically mounted.")
+            } actions: {
+                Button("Add Share...") {
+                    appModel.requestNewShare()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        } else if let selectedShare {
             ShareDetailView(share: selectedShare)
         } else {
             EmptyShareDetailView()
@@ -448,27 +459,16 @@ private struct EmptyShareDetailView: View {
     @EnvironmentObject private var appModel: AppModel
 
     var body: some View {
-        Form {
-            Section {
-                VStack(spacing: 14) {
-                    Image(systemName: "externaldrive")
-                        .font(.system(size: 40))
-                        .foregroundStyle(.secondary)
-                    Text("No share selected")
-                        .font(.title3)
-                        .fontWeight(.medium)
-                    Button {
-                        appModel.requestNewShare()
-                    } label: {
-                        Label("Add Share", systemImage: "plus")
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 28)
+        ContentUnavailableView {
+            Label("No Share Selected", systemImage: "externaldrive")
+        } description: {
+            Text("Select a network share from the sidebar or add a new one.")
+        } actions: {
+            Button("Add Share...") {
+                appModel.requestNewShare()
             }
+            .buttonStyle(.borderedProminent)
         }
-        .formStyle(.grouped)
-        .padding(24)
     }
 }
 
@@ -480,17 +480,54 @@ private struct ShareListRow: View {
     var body: some View {
         let status = monitor.status(for: share)
 
-        Label {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 8) {
+            Image(systemName: isSelected ? "externaldrive.fill" : "externaldrive")
+                .font(.title3)
+                .foregroundStyle(isSelected ? .primary : .secondary)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 1) {
                 Text(share.displayName)
+                    .font(.body)
+                    .fontWeight(.medium)
                     .lineLimit(1)
-                Text(status.label)
-                    .font(.caption)
-                    .foregroundStyle(isSelected ? .primary : .secondary)
+                
+                HStack(spacing: 4) {
+                    Image(systemName: statusSymbol(for: status))
+                        .font(.caption2)
+                        .foregroundStyle(isSelected ? .primary : statusColor(for: status))
+                    Text(status.label)
+                        .font(.caption)
+                        .foregroundStyle(isSelected ? .primary : .secondary)
+                }
             }
-        } icon: {
-            Image(systemName: status.systemImage)
-                .foregroundStyle(isSelected ? .primary : status.color)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func statusColor(for status: ShareStatus) -> Color {
+        switch status {
+        case .connected:
+            return .green
+        case .reconnecting:
+            return .blue
+        case .failed:
+            return .red
+        case .waitingForNetwork, .waitingForAllowedNetwork:
+            return .orange
+        default:
+            return .secondary
+        }
+    }
+
+    private func statusSymbol(for status: ShareStatus) -> String {
+        switch status {
+        case .connected:
+            return "circle.fill"
+        case .reconnecting, .wakePacketSent:
+            return "circle.fill"
+        default:
+            return "circle"
         }
     }
 }
@@ -506,131 +543,178 @@ private struct ShareDetailView: View {
         let status = monitor.status(for: currentShare)
         let runtimeState = monitor.runtimeState(for: currentShare)
 
-        Form {
-            Section {
-                LabeledContent("Status") {
-                    Label(status.label, systemImage: status.systemImage)
-                        .foregroundStyle(status.color)
-                }
-
-                if let detail = status.detail {
-                    LabeledContent(status.detailTitle, value: detail)
-                }
-
-                if runtimeState.needsCredentials, let url = currentShare.url {
-                    LabeledContent("Credentials") {
-                        Button {
-                            NSWorkspace.shared.open(url)
-                        } label: {
-                            Label("Connect Once in Finder...", systemImage: "person.badge.key")
-                        }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                
+                // Status Section
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "circle.fill")
+                            .font(.system(size: 8))
+                            .foregroundStyle(statusColor(for: status))
+                        
+                        Text(status.label)
+                            .font(.headline)
+                            .foregroundStyle(.primary)
                     }
-                }
-
-                if let nextRetryDate = runtimeState.nextRetryDate {
-                    LabeledContent("Next retry", value: nextRetryDate, format: .dateTime.hour().minute().second())
-                }
-
-                LabeledContent("Address", value: currentShare.urlString)
-                LabeledContent("Location", value: currentShare.mountPath)
-            }
-
-            Section {
-                Toggle("Keep mounted", isOn: binding(\.keepMounted))
-                Toggle("Mount at launch", isOn: binding(\.mountAtLaunch))
-                Toggle("Connect when server is reachable", isOn: binding(\.autoConnectWhenReachable))
-            }
-
-            if currentShare.wakeOnLAN.isEnabled {
-                Section("Wake on LAN") {
-                    LabeledContent("MAC address", value: currentShare.wakeOnLAN.macAddress)
-                    LabeledContent("Broadcast", value: "\(currentShare.wakeOnLAN.broadcastAddress):\(currentShare.wakeOnLAN.port)")
-                }
-            }
-
-            if currentShare.rules.hasWiFiNetworkRule || currentShare.rules.hasVPNRule {
-                Section("Rules") {
-                    if let requiredWiFiNetworkName = currentShare.rules.requiredWiFiNetworkName {
-                        LabeledContent("Wi-Fi network", value: requiredWiFiNetworkName)
-                    }
-
-                    if currentShare.rules.hasVPNRule {
-                        LabeledContent("VPN", value: currentShare.rules.vpnRuleTitle)
-                    }
-
-                    LabeledContent("Current Wi-Fi", value: networkService.currentWiFiNetworkName ?? "Unavailable")
-                    LabeledContent("Current VPN", value: currentVPNLabel)
-
-                    if currentShare.rules.hasVPNRule || (currentShare.host?.hasSuffix(".local") ?? false) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "info.circle")
-                                Text("Static IP Warning")
+                    
+                    VStack(alignment: .leading, spacing: 1) {
+                        if case .connected = status {
+                            if let mountedAt = runtimeState.mountedAt {
+                                Text("Mounted since \(mountedAt, format: .dateTime.hour().minute())")
                             }
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            Text("Ensure this server has a static IP address, or VPN IP fallback might fail if the IP changes.")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                        } else {
+                            if let detail = status.detail {
+                                Text(detail)
+                            } else {
+                                Text("Retrying automatically")
+                            }
                         }
-                        .padding(.vertical, 2)
+                        
+                        if let lastConnected = runtimeState.lastConnectedAt {
+                            Text(formatLastConnected(lastConnected))
+                        }
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 14)
+                }
+                
+                Divider()
+                
+                // Server / Connection Details Section
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Details")
+                        .font(.subheadline)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.secondary)
+
+                    VStack(spacing: 6) {
+                        DetailRow(label: "Server", value: currentShare.host ?? "Unknown")
+                        DetailRow(label: "Share", value: NetworkShare.inferredShareName(from: currentShare.urlString) ?? currentShare.displayName)
+                        DetailRow(label: "Mount location", value: currentShare.mountPath)
+                        DetailRow(label: "Protocol", value: "SMB")
+                        DetailRow(label: "Keychain credentials", value: hasKeychainCredentials ? "✓ Saved" : "✕ Not found")
                     }
                 }
-            }
-
-            if let fallbackURL = fallbackURLString {
-                Section("Advanced") {
-                    LabeledContent("Fallback IP", value: fallbackURL)
+                
+                Divider()
+                
+                // Configuration Section (Read-Only)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Configuration")
+                        .font(.subheadline)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.secondary)
+                    
+                    VStack(spacing: 6) {
+                        ConfigStatusRow(label: "Reconnect automatically", isEnabled: currentShare.keepMounted)
+                        ConfigStatusRow(label: "Connect when server becomes available", isEnabled: currentShare.autoConnectWhenReachable)
+                        ConfigStatusRow(label: "Mount at login", isEnabled: currentShare.mountAtLaunch)
+                        ConfigStatusRow(label: "Wake sleeping server", isEnabled: currentShare.wakeOnLAN.isEnabled)
+                    }
                 }
-            }
-
-            Section {
-                HStack {
-                    if currentShare.wakeOnLAN.isEnabled {
-                        Button {
-                            Task { await monitor.wake(currentShare) }
-                        } label: {
-                            Label("Wake Server", systemImage: "power")
+                
+                Divider()
+                
+                // Conditions Section (Read-Only)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Conditions")
+                        .font(.subheadline)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.secondary)
+                    
+                    VStack(spacing: 6) {
+                        if currentShare.rules.hasWiFiNetworkRule {
+                            if currentShare.rules.hasVPNRule && !currentShare.rules.vpnName.isEmpty {
+                                DetailRow(label: "Limit connections", value: "Home network or VPN \(currentShare.rules.vpnName) only")
+                            } else {
+                                DetailRow(label: "Limit connections", value: "Home network or VPN only")
+                            }
+                            if let ssid = currentShare.rules.requiredWiFiNetworkName {
+                                DetailRow(label: "Home Wi-Fi", value: ssid)
+                            }
+                        } else {
+                            DetailRow(label: "Limit connections", value: "None (any network)")
                         }
                     }
-
-                    Button {
-                        Task { await monitor.mount(currentShare) }
-                    } label: {
-                        Label("Mount Now", systemImage: "arrow.triangle.2.circlepath")
-                    }
-
-                    if !currentShare.autoConnectWhenReachable {
-                        Button {
-                            Task { await monitor.disconnect(currentShare) }
-                        } label: {
-                            Label("Disconnect", systemImage: "eject")
-                        }
-                    }
-
-                    Button {
-                        appModel.requestEditShare(currentShare)
-                    } label: {
-                        Label("Edit", systemImage: "pencil")
-                    }
-
-                    Spacer()
-
+                }
+                
+                Divider()
+                
+                // Actions Block
+                HStack(spacing: 8) {
                     if case .connected = status {
-                        Button {
+                        Button(action: {
                             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: currentShare.mountPath)])
-                        } label: {
+                        }) {
                             Label("Show in Finder", systemImage: "finder")
                         }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        
+                        if !currentShare.autoConnectWhenReachable {
+                            Button(action: {
+                                Task { await monitor.disconnect(currentShare) }
+                            }) {
+                                Label("Disconnect", systemImage: "eject")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    } else {
+                        Button(action: {
+                            Task { await monitor.mount(currentShare) }
+                        }) {
+                            Label("Mount Now", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
                     }
+                    
+                    Button(action: {
+                        appModel.requestEditShare(currentShare)
+                    }) {
+                        Label("Settings…", systemImage: "gearshape")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    
+                    Spacer()
                 }
+                .padding(.top, 2)
             }
+            .padding(20)
         }
-        .formStyle(.grouped)
-        .padding(24)
+        .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
             networkService.refreshNetworkDetails()
         }
+    }
+
+    private func formatLastConnected(_ date: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) {
+            return "Last connected Today at \(date.formatted(.dateTime.hour().minute()))"
+        } else if calendar.isDateInYesterday(date) {
+            return "Last connected Yesterday at \(date.formatted(.dateTime.hour().minute()))"
+        } else {
+            return "Last connected on \(date.formatted(.dateTime.month().day().hour().minute()))"
+        }
+    }
+
+    private var hasKeychainCredentials: Bool {
+        guard let url = currentShare.url,
+              let host = url.host(percentEncoded: false)
+        else { return false }
+        
+        if NetworkShare.checkKeychainHasCredentials(for: host) {
+            return true
+        }
+        if let cachedIP = currentShare.cachedIPAddress, NetworkShare.checkKeychainHasCredentials(for: cachedIP) {
+            return true
+        }
+        return false
     }
 
     private var currentShare: NetworkShare {
@@ -661,6 +745,96 @@ private struct ShareDetailView: View {
                 share[keyPath: keyPath] = value
             }
         }
+    }
+
+    private func statusColor(for status: ShareStatus) -> Color {
+        switch status {
+        case .connected:
+            return .green
+        case .reconnecting:
+            return .blue
+        case .failed:
+            return .red
+        case .waitingForNetwork, .waitingForAllowedNetwork:
+            return .orange
+        default:
+            return .secondary
+        }
+    }
+
+    private func statusIcon(for status: ShareStatus) -> String {
+        switch status {
+        case .connected:
+            return "checkmark.circle.fill"
+        case .reconnecting:
+            return "arrow.triangle.2.circlepath.circle.fill"
+        case .failed:
+            return "exclamationmark.circle.fill"
+        case .waitingForNetwork, .waitingForAllowedNetwork:
+            return "wifi.circle.fill"
+        default:
+            return "circle.fill"
+        }
+    }
+}
+
+private struct DetailRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+        }
+        .padding(.vertical, 1)
+    }
+}
+
+private struct ConfigStatusRow: View {
+    let label: String
+    let isEnabled: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: isEnabled ? "checkmark.circle.fill" : "minus.circle")
+                .foregroundStyle(isEnabled ? .green : .secondary)
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+            Spacer()
+        }
+        .padding(.vertical, 1)
+    }
+}
+
+private struct ToggleRow: View {
+    let label: String
+    let description: String
+    let isOn: Binding<Bool>
+
+    var body: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                Text(description)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        }
+        .padding(.vertical, 1)
     }
 }
 
