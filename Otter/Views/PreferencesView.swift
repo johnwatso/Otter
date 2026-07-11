@@ -600,10 +600,12 @@ private struct ShareDetailView: View {
                         Label("Mount Now", systemImage: "arrow.triangle.2.circlepath")
                     }
 
-                    Button {
-                        Task { await monitor.disconnect(currentShare) }
-                    } label: {
-                        Label("Disconnect", systemImage: "eject")
+                    if !currentShare.autoConnectWhenReachable {
+                        Button {
+                            Task { await monitor.disconnect(currentShare) }
+                        } label: {
+                            Label("Disconnect", systemImage: "eject")
+                        }
                     }
 
                     Button {

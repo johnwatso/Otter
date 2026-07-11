@@ -19,6 +19,8 @@ struct ShareRuntimeState: Equatable {
     var nextRetryDate: Date?
     var lastCheckedAt: Date?
     var needsCredentials: Bool = false
+    var mountedAt: Date?
+    var lastConnectedAt: Date?
 }
 
 enum RetryBackoff {
@@ -487,9 +489,24 @@ final class ShareMonitor: ObservableObject {
     }
 
     private func saveState(_ state: ShareRuntimeState, for share: NetworkShare) {
-        let previousStatus = states[share.id]?.status ?? .disconnected
-        states[share.id] = state
-        notificationService.notifyStatusChange(for: share, previous: previousStatus, current: state.status)
+        var updatedState = state
+        let previousState = states[share.id]
+        let previousStatus = previousState?.status ?? .disconnected
+
+        if case .connected = updatedState.status {
+            if previousState?.mountedAt == nil {
+                updatedState.mountedAt = Date()
+            } else {
+                updatedState.mountedAt = previousState?.mountedAt
+            }
+            updatedState.lastConnectedAt = Date()
+        } else {
+            updatedState.mountedAt = nil
+            updatedState.lastConnectedAt = previousState?.lastConnectedAt
+        }
+
+        states[share.id] = updatedState
+        notificationService.notifyStatusChange(for: share, previous: previousStatus, current: updatedState.status)
     }
 
     private func saveState(_ state: ShareRuntimeState, for shareID: NetworkShare.ID) {

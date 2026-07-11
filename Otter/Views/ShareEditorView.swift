@@ -30,15 +30,13 @@ struct ShareEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             Form {
-                Section {
-                    if isEditing {
-                        replaceFromFinderButton
-                    } else {
+                if !isEditing {
+                    Section {
                         if mountedShareSuggestions.isEmpty {
                             Button {
                                 chooseMountedShare()
                             } label: {
-                                Label("Choose Mounted Share...", systemImage: "externaldrive.badge.plus")
+                                Label("Select a mounted volume...", systemImage: "externaldrive.badge.plus")
                             }
                         } else {
                             ForEach(mountedShareSuggestions) { suggestion in
@@ -67,9 +65,9 @@ struct ShareEditorView: View {
                         } label: {
                             Label("Refresh", systemImage: "arrow.clockwise")
                         }
+                    } header: {
+                        finderSectionHeader
                     }
-                } header: {
-                    finderSectionHeader
                 }
 
                 Section("Share") {
@@ -80,6 +78,17 @@ struct ShareEditorView: View {
                 Section {
                     DisclosureGroup("Advanced", isExpanded: $isShowingAdvanced) {
                         TextField("Finder location", text: $draft.mountPath, prompt: Text(inferredMountPath))
+
+                        if isEditing {
+                            Button {
+                                chooseMountedShare()
+                            } label: {
+                                Label("Auto-fill details from Finder...", systemImage: "arrow.down.doc.fill")
+                            }
+                            .buttonStyle(.borderless)
+                            .controlSize(.small)
+                            .padding(.vertical, 2)
+                        }
 
                         if let fallbackURL = fallbackURLString {
                             LabeledContent("Fallback IP", value: fallbackURL)
@@ -243,7 +252,7 @@ struct ShareEditorView: View {
 
     private var finderSectionHeader: some View {
         HStack(spacing: 6) {
-            Text("From Finder")
+            Text("Quick Start: Auto-Fill from Finder")
 
             Button {
                 isShowingFinderImportHelp.toggle()
@@ -253,11 +262,11 @@ struct ShareEditorView: View {
             }
             .buttonStyle(.borderless)
             .controlSize(.small)
-            .help("About mounted shares")
-            .accessibilityLabel("About mounted shares")
+            .help("About auto-filling shares")
+            .accessibilityLabel("About auto-filling shares")
             .popover(isPresented: $isShowingFinderImportHelp, arrowEdge: .trailing) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Choose a mounted SMB share to fill the share fields from Finder.")
+                    Text("Choose a mounted SMB share to automatically populate the name, network address, and Finder path fields.")
                     Text("Nothing changes until you click Save.")
                         .foregroundStyle(.secondary)
                 }
@@ -286,14 +295,6 @@ struct ShareEditorView: View {
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         components?.host = cachedIP
         return components?.string
-    }
-
-    private var replaceFromFinderButton: some View {
-        Button {
-            chooseMountedShare()
-        } label: {
-            Label("Choose Mounted Share...", systemImage: "externaldrive.badge.plus")
-        }
     }
 
     private func resetDraftIfNeeded() {
