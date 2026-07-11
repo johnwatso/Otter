@@ -42,5 +42,7 @@
 	<true/>
 	<key>NSUserNotificationAlertStyle</key>
 	<string>banner</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Otter requires local network access to check reachability and automatically mount SMB network shares.</string>
 </dict>
 </plist>

@@ -18,6 +18,7 @@ Built entirely in Swift, Otter is designed to feel at home on macOS: fast, effic
 - 🌐 Responds to network and VPN changes
 - 📶 Per-share rules — connect or disconnect based on Wi-Fi network or VPN
 - 🛰️ Optional "connect when reachable" mode — mounts whenever the server answers
+- 🔌 Optional Wake-on-LAN — wakes a sleeping server before retrying a mount
 - ⚡ Lightweight with minimal resource usage
 - 🔐 Uses macOS Keychain for credentials — Otter never stores them
 - 🚀 Launch at login
@@ -32,7 +33,7 @@ Just an otter that never lets go.
 
 ## How it works
 
-Otter watches for the moments shares tend to drop—wake from sleep, network path changes, volumes mounting or unmounting—and checks that each configured share is still where it should be. If one is missing, it remounts it using the native macOS NetFS APIs, with retry backoff when the server isn't reachable yet. A low-frequency fallback check catches anything the system events miss.
+Otter watches for the moments shares tend to drop—wake from sleep, network path changes, volumes mounting or unmounting—and checks that each configured share is still where it should be. If one is missing, it remounts it using the native macOS NetFS APIs, with retry backoff when the server isn't reachable yet. Shares with Wake-on-LAN enabled send a magic packet before retrying an unreachable server. A low-frequency fallback check catches anything the system events miss.
 
 Adding a share is easiest from Finder: mount it once the normal way, then let Otter import it with one click.
 

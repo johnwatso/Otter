@@ -20,6 +20,7 @@ final class AppModel: ObservableObject {
     let settings: SettingsStore
     let networkService: NetworkReachabilityService
     let mountService: MountService
+    let wakeOnLANService: WakeOnLANService
     let notificationService: NotificationService
     let loginItemService: LoginItemService
     let updaterViewModel = UpdaterViewModel()
@@ -36,16 +37,19 @@ final class AppModel: ObservableObject {
         let settings = SettingsStore()
         let networkService = NetworkReachabilityService()
         let mountService = MountService()
+        let wakeOnLANService = WakeOnLANService()
         let notificationService = NotificationService(settings: settings)
 
         self.settings = settings
         self.networkService = networkService
         self.mountService = mountService
+        self.wakeOnLANService = wakeOnLANService
         self.notificationService = notificationService
         self.loginItemService = LoginItemService()
         self.monitor = ShareMonitor(
             settings: settings,
             mountService: mountService,
+            wakeOnLANService: wakeOnLANService,
             networkService: networkService,
             notificationService: notificationService
         )

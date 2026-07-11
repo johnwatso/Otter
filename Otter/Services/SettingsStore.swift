@@ -62,6 +62,31 @@ final class SettingsStore: ObservableObject {
         shares.removeAll { $0.id == id }
     }
 
+    func isDuplicateShare(urlString: String, excluding shareID: NetworkShare.ID? = nil) -> Bool {
+        var value = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("//") {
+            value = "smb:\(value)"
+        } else if !value.lowercased().hasPrefix("smb://") {
+            value = "smb://\(value)"
+        }
+
+        guard var components = URLComponents(string: value),
+              components.scheme?.lowercased() == "smb",
+              let host = components.host?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !host.isEmpty
+        else {
+            return false
+        }
+
+        components.scheme = "smb"
+        components.host = host
+        guard let normalizedURL = components.string else { return false }
+
+        return shares.contains { share in
+            share.id != shareID && share.urlString.localizedCaseInsensitiveCompare(normalizedURL) == .orderedSame
+        }
+    }
+
     func setAllKeepMounted(_ enabled: Bool) {
         shares = shares.map { share in
             var updated = share

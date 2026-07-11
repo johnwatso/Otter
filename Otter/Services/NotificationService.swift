@@ -203,7 +203,7 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
                 title: "Couldn't connect \(share.displayName)",
                 body: message
             )
-        case .reconnecting:
+        case .wakePacketSent, .reconnecting:
             return nil
         }
     }

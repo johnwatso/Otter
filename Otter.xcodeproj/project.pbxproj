@@ -24,6 +24,7 @@
 		1A2B3C4D5E6F70010000000F /* Otter.icon in Resources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000010F /* Otter.icon */; };
 		1A2B3C4D5E6F700100000010 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000110 /* NotificationService.swift */; };
 		1A2B3C4D5E6F700100000011 /* UpdaterViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000111 /* UpdaterViewModel.swift */; };
+		1A2B3C4D5E6F700100000012 /* WakeOnLANService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000112 /* WakeOnLANService.swift */; };
 		1A2B3C4D5E6F700100000202 /* OtterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000203 /* OtterTests.swift */; };
 		1A2B3C4D5E6F700100000302 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F700100000301 /* Sparkle */; };
 /* End PBXBuildFile section */
@@ -48,6 +49,7 @@
 		1A2B3C4D5E6F70010000010F /* Otter.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = Otter.icon; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000110 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000111 /* UpdaterViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterViewModel.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000112 /* WakeOnLANService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeOnLANService.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000201 /* OtterTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OtterTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A2B3C4D5E6F700100000203 /* OtterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtterTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -116,6 +118,7 @@
 				1A2B3C4D5E6F700100000109 /* LoginItemService.swift */,
 				1A2B3C4D5E6F70010000010A /* ShareMonitor.swift */,
 				1A2B3C4D5E6F700100000111 /* UpdaterViewModel.swift */,
+				1A2B3C4D5E6F700100000112 /* WakeOnLANService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -273,6 +276,7 @@
 				1A2B3C4D5E6F70010000000D /* ShareEditorView.swift in Sources */,
 				1A2B3C4D5E6F700100000010 /* NotificationService.swift in Sources */,
 				1A2B3C4D5E6F700100000011 /* UpdaterViewModel.swift in Sources */,
+				1A2B3C4D5E6F700100000012 /* WakeOnLANService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -540,6 +540,13 @@ private struct ShareDetailView: View {
                 Toggle("Connect when server is reachable", isOn: binding(\.autoConnectWhenReachable))
             }
 
+            if currentShare.wakeOnLAN.isEnabled {
+                Section("Wake on LAN") {
+                    LabeledContent("MAC address", value: currentShare.wakeOnLAN.macAddress)
+                    LabeledContent("Broadcast", value: "\(currentShare.wakeOnLAN.broadcastAddress):\(currentShare.wakeOnLAN.port)")
+                }
+            }
+
             if currentShare.rules.hasWiFiNetworkRule || currentShare.rules.hasVPNRule {
                 Section("Rules") {
                     if let requiredWiFiNetworkName = currentShare.rules.requiredWiFiNetworkName {
@@ -559,6 +566,14 @@ private struct ShareDetailView: View {
 
             Section {
                 HStack {
+                    if currentShare.wakeOnLAN.isEnabled {
+                        Button {
+                            Task { await monitor.wake(currentShare) }
+                        } label: {
+                            Label("Wake Server", systemImage: "power")
+                        }
+                    }
+
                     Button {
                         Task { await monitor.mount(currentShare) }
                     } label: {

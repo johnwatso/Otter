@@ -68,8 +68,61 @@ final class NetworkShareTests: XCTestCase {
 
         let share = try JSONDecoder().decode(NetworkShare.self, from: Data(json.utf8))
         XCTAssertFalse(share.autoConnectWhenReachable)
+        XCTAssertFalse(share.wakeOnLAN.isEnabled)
+        XCTAssertEqual(share.wakeOnLAN.broadcastAddress, WakeOnLANConfiguration.defaultBroadcastAddress)
+        XCTAssertEqual(share.wakeOnLAN.port, WakeOnLANConfiguration.defaultPort)
         XCTAssertFalse(share.rules.hasVPNRule)
         XCTAssertFalse(share.rules.hasWiFiNetworkRule)
+    }
+}
+
+final class WakeOnLANConfigurationTests: XCTestCase {
+    func testMACAddressNormalizationAcceptsCommonFormats() {
+        XCTAssertEqual(WakeOnLANConfiguration.normalizedMACAddress("aa:bb:cc:dd:ee:ff"), "AA:BB:CC:DD:EE:FF")
+        XCTAssertEqual(WakeOnLANConfiguration.normalizedMACAddress("AA-BB-CC-DD-EE-FF"), "AA:BB:CC:DD:EE:FF")
+        XCTAssertEqual(WakeOnLANConfiguration.normalizedMACAddress("aabb.ccdd.eeff"), "AA:BB:CC:DD:EE:FF")
+        XCTAssertEqual(WakeOnLANConfiguration.normalizedMACAddress("aabbccddeeff"), "AA:BB:CC:DD:EE:FF")
+    }
+
+    func testMACAddressNormalizationRejectsInvalidValues() {
+        XCTAssertNil(WakeOnLANConfiguration.normalizedMACAddress(""))
+        XCTAssertNil(WakeOnLANConfiguration.normalizedMACAddress("AA:BB:CC:DD:EE"))
+        XCTAssertNil(WakeOnLANConfiguration.normalizedMACAddress("AA:BB:CC:DD:EE:GG"))
+        XCTAssertNil(WakeOnLANConfiguration.normalizedMACAddress("AA BB CC DD EE FF"))
+    }
+
+    func testWakeOnLANConfigurationNormalizesDefaults() {
+        let configuration = WakeOnLANConfiguration(
+            isEnabled: true,
+            macAddress: "aa-bb-cc-dd-ee-ff",
+            broadcastAddress: " ",
+            port: 70_000
+        )
+
+        XCTAssertEqual(configuration.macAddress, "AA:BB:CC:DD:EE:FF")
+        XCTAssertEqual(configuration.broadcastAddress, WakeOnLANConfiguration.defaultBroadcastAddress)
+        XCTAssertEqual(configuration.port, 65_535)
+    }
+}
+
+final class WakeOnLANServiceTests: XCTestCase {
+    func testMagicPacketLayout() throws {
+        let packet = try WakeOnLANService.magicPacket(macAddress: "01:23:45:67:89:AB")
+        let macAddressBytes: [UInt8] = [0x01, 0x23, 0x45, 0x67, 0x89, 0xab]
+
+        XCTAssertEqual(packet.count, 102)
+        XCTAssertEqual(Array(packet.prefix(6)), Array(repeating: 0xff, count: 6))
+
+        for offset in stride(from: 6, to: packet.count, by: macAddressBytes.count) {
+            XCTAssertEqual(Array(packet[offset..<(offset + macAddressBytes.count)]), macAddressBytes)
+        }
+    }
+
+    func testIPv4BroadcastValidation() {
+        XCTAssertTrue(WakeOnLANService.isValidIPv4Address("255.255.255.255"))
+        XCTAssertTrue(WakeOnLANService.isValidIPv4Address("192.168.1.255"))
+        XCTAssertFalse(WakeOnLANService.isValidIPv4Address("example.local"))
+        XCTAssertFalse(WakeOnLANService.isValidIPv4Address("999.999.999.999"))
     }
 }
 
@@ -160,6 +213,50 @@ final class RetryBackoffTests: XCTestCase {
         XCTAssertEqual(RetryBackoff.delay(afterFailures: 3), 120)
         XCTAssertEqual(RetryBackoff.delay(afterFailures: 4), 300)
         XCTAssertEqual(RetryBackoff.delay(afterFailures: 100), 300)
+    }
+
+    func testBackoffWithJitter() {
+        for failures in 0...10 {
+            let baseDelay = RetryBackoff.delay(afterFailures: failures)
+            let maxJitter = min(baseDelay * 0.1, 30.0)
+            
+            for _ in 0..<100 {
+                let delayWithJitter = RetryBackoff.delayWithJitter(afterFailures: failures)
+                XCTAssertGreaterThanOrEqual(delayWithJitter, baseDelay - maxJitter)
+                XCTAssertLessThanOrEqual(delayWithJitter, baseDelay + maxJitter)
+                XCTAssertGreaterThanOrEqual(delayWithJitter, 1.0)
+            }
+        }
+    }
+}
+
+final class SettingsStoreTests: XCTestCase {
+    @MainActor
+    func testIsDuplicateShareMatchesIdenticalAddresses() {
+        let defaults = UserDefaults(suiteName: "OtterTests.SettingsStoreTests")!
+        defaults.removePersistentDomain(forName: "OtterTests.SettingsStoreTests")
+        
+        let store = SettingsStore(defaults: defaults)
+        let share = NetworkShare(
+            displayName: "Test Share",
+            urlString: "smb://server.local/share",
+            mountPath: "/Volumes/share"
+        )
+        store.addShare(share)
+        
+        // Exact duplicate
+        XCTAssertTrue(store.isDuplicateShare(urlString: "smb://server.local/share"))
+        // Case insensitive host/scheme
+        XCTAssertTrue(store.isDuplicateShare(urlString: "SMB://SERVER.LOCAL/share"))
+        // Missing smb:// prefix (normalized automatically)
+        XCTAssertTrue(store.isDuplicateShare(urlString: "server.local/share"))
+        XCTAssertTrue(store.isDuplicateShare(urlString: "//server.local/share"))
+        
+        // Non-duplicate URL
+        XCTAssertFalse(store.isDuplicateShare(urlString: "smb://server.local/other"))
+        
+        // Excluding current share ID
+        XCTAssertFalse(store.isDuplicateShare(urlString: "smb://server.local/share", excluding: share.id))
     }
 }
 

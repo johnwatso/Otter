@@ -6,6 +6,7 @@ enum ShareStatus: Equatable {
     case waitingForNetwork
     case waitingForAllowedNetwork(String)
     case pausedByRule(String)
+    case wakePacketSent
     case reconnecting
     case failed(String)
 
@@ -21,6 +22,8 @@ enum ShareStatus: Equatable {
             "Waiting for network rule"
         case .pausedByRule:
             "Paused by rule"
+        case .wakePacketSent:
+            "Wake sent"
         case .reconnecting:
             "Reconnecting"
         case .failed:
@@ -34,6 +37,8 @@ enum ShareStatus: Equatable {
             return "Connect to \(requirement) to mount this share."
         case let .pausedByRule(requirement):
             return "Rule disconnects this share while \(requirement) is active."
+        case .wakePacketSent:
+            return "Otter sent a Wake-on-LAN packet."
         case let .failed(message):
             return message
         case .connected, .disconnected, .waitingForNetwork, .reconnecting:
@@ -45,7 +50,7 @@ enum ShareStatus: Equatable {
         switch self {
         case .failed:
             "Last error"
-        case .connected, .disconnected, .waitingForNetwork, .waitingForAllowedNetwork, .pausedByRule, .reconnecting:
+        case .connected, .disconnected, .waitingForNetwork, .waitingForAllowedNetwork, .pausedByRule, .wakePacketSent, .reconnecting:
             "Details"
         }
     }
@@ -62,6 +67,8 @@ enum ShareStatus: Equatable {
             "wifi.slash"
         case .pausedByRule:
             "pause.circle"
+        case .wakePacketSent:
+            "power.circle"
         case .reconnecting:
             "arrow.triangle.2.circlepath"
         case .failed:
@@ -79,6 +86,8 @@ enum ShareStatus: Equatable {
             .orange
         case .waitingForAllowedNetwork, .pausedByRule:
             .secondary
+        case .wakePacketSent:
+            .orange
         case .reconnecting:
             .blue
         case .failed:
@@ -90,7 +99,7 @@ enum ShareStatus: Equatable {
         switch self {
         case .failed, .waitingForNetwork:
             true
-        case .connected, .disconnected, .waitingForAllowedNetwork, .pausedByRule, .reconnecting:
+        case .connected, .disconnected, .waitingForAllowedNetwork, .pausedByRule, .wakePacketSent, .reconnecting:
             false
         }
     }

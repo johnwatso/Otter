@@ -8,6 +8,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
     var keepMounted: Bool
     var mountAtLaunch: Bool
     var autoConnectWhenReachable: Bool
+    var wakeOnLAN: WakeOnLANConfiguration
     var rules: ShareRules
     var createdAt: Date
     var updatedAt: Date
@@ -20,6 +21,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         keepMounted: Bool = true,
         mountAtLaunch: Bool = true,
         autoConnectWhenReachable: Bool = false,
+        wakeOnLAN: WakeOnLANConfiguration = WakeOnLANConfiguration(),
         rules: ShareRules = ShareRules(),
         createdAt: Date = Date(),
         updatedAt: Date = Date()
@@ -31,6 +33,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         self.keepMounted = keepMounted
         self.mountAtLaunch = mountAtLaunch
         self.autoConnectWhenReachable = autoConnectWhenReachable
+        self.wakeOnLAN = wakeOnLAN
         self.rules = rules
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -45,6 +48,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         case keepMounted
         case mountAtLaunch
         case autoConnectWhenReachable
+        case wakeOnLAN
         case rules
         case createdAt
         case updatedAt
@@ -59,6 +63,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         keepMounted = try container.decode(Bool.self, forKey: .keepMounted)
         mountAtLaunch = try container.decode(Bool.self, forKey: .mountAtLaunch)
         autoConnectWhenReachable = try container.decodeIfPresent(Bool.self, forKey: .autoConnectWhenReachable) ?? false
+        wakeOnLAN = try container.decodeIfPresent(WakeOnLANConfiguration.self, forKey: .wakeOnLAN) ?? WakeOnLANConfiguration()
         rules = try container.decodeIfPresent(ShareRules.self, forKey: .rules) ?? ShareRules()
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
@@ -77,6 +82,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         displayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         urlString = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         mountPath = Self.normalizedMountPath(mountPath, displayName: displayName, urlString: urlString)
+        wakeOnLAN.normalize()
         rules.normalize()
     }
 
@@ -143,6 +149,119 @@ struct NetworkShare: Identifiable, Codable, Hashable {
             .split(separator: "/", omittingEmptySubsequences: true)
             .last
             .map(String.init)
+    }
+}
+
+struct WakeOnLANConfiguration: Codable, Hashable {
+    static let defaultBroadcastAddress = "255.255.255.255"
+    static let defaultPort = 9
+
+    var isEnabled: Bool
+    var macAddress: String
+    var broadcastAddress: String
+    var port: Int
+
+    init(
+        isEnabled: Bool = false,
+        macAddress: String = "",
+        broadcastAddress: String = Self.defaultBroadcastAddress,
+        port: Int = Self.defaultPort
+    ) {
+        self.isEnabled = isEnabled
+        self.macAddress = macAddress
+        self.broadcastAddress = broadcastAddress
+        self.port = port
+        normalize()
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case isEnabled
+        case macAddress
+        case broadcastAddress
+        case port
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? false
+        macAddress = try container.decodeIfPresent(String.self, forKey: .macAddress) ?? ""
+        broadcastAddress = try container.decodeIfPresent(String.self, forKey: .broadcastAddress) ?? Self.defaultBroadcastAddress
+        port = try container.decodeIfPresent(Int.self, forKey: .port) ?? Self.defaultPort
+        normalize()
+    }
+
+    var normalizedMACAddress: String? {
+        Self.normalizedMACAddress(macAddress)
+    }
+
+    var canSendWakePacket: Bool {
+        isEnabled && normalizedMACAddress != nil
+    }
+
+    mutating func normalize() {
+        macAddress = macAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let normalizedMACAddress {
+            macAddress = normalizedMACAddress
+        }
+
+        broadcastAddress = broadcastAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        if broadcastAddress.isEmpty {
+            broadcastAddress = Self.defaultBroadcastAddress
+        }
+
+        port = min(max(port, 1), 65_535)
+    }
+
+    static func normalizedMACAddress(_ value: String) -> String? {
+        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedValue.isEmpty else { return nil }
+
+        var nibbles: [UInt8] = []
+        nibbles.reserveCapacity(12)
+
+        for scalar in trimmedValue.unicodeScalars {
+            if let value = hexValue(for: scalar) {
+                nibbles.append(value)
+                continue
+            }
+
+            guard scalar == ":" || scalar == "-" || scalar == "." else {
+                return nil
+            }
+        }
+
+        guard nibbles.count == 12 else { return nil }
+
+        var pairs: [String] = []
+        pairs.reserveCapacity(6)
+
+        for index in stride(from: 0, to: nibbles.count, by: 2) {
+            let byte = (nibbles[index] << 4) | nibbles[index + 1]
+            pairs.append(String(format: "%02X", byte))
+        }
+
+        return pairs.joined(separator: ":")
+    }
+
+    static func macAddressBytes(from value: String) -> [UInt8]? {
+        guard let normalizedMACAddress = normalizedMACAddress(value) else { return nil }
+
+        return normalizedMACAddress
+            .split(separator: ":")
+            .compactMap { UInt8($0, radix: 16) }
+    }
+
+    private static func hexValue(for scalar: Unicode.Scalar) -> UInt8? {
+        switch scalar.value {
+        case 48...57:
+            UInt8(scalar.value - 48)
+        case 65...70:
+            UInt8(scalar.value - 55)
+        case 97...102:
+            UInt8(scalar.value - 87)
+        default:
+            nil
+        }
     }
 }
 

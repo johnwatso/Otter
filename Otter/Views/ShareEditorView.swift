@@ -4,6 +4,7 @@ import SwiftUI
 struct ShareEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var networkService: NetworkReachabilityService
+    @EnvironmentObject private var settings: SettingsStore
     @State private var draft: DraftShare
     @State private var validationMessage: String?
     @State private var mountedShareSuggestions: [MountedShareSuggestion] = []
@@ -89,6 +90,27 @@ struct ShareEditorView: View {
 
                     if draft.autoConnectWhenReachable {
                         Text("Mounts automatically whenever the server answers — handy when the server is only visible on certain networks or VPNs.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Wake on LAN") {
+                    Toggle("Wake server before mounting", isOn: $draft.wakeOnLANEnabled)
+
+                    if draft.wakeOnLANEnabled {
+                        TextField("MAC address", text: $draft.wakeOnLANMACAddress, prompt: Text("AA:BB:CC:DD:EE:FF"))
+                        TextField(
+                            "Broadcast address",
+                            text: $draft.wakeOnLANBroadcastAddress,
+                            prompt: Text(WakeOnLANConfiguration.defaultBroadcastAddress)
+                        )
+
+                        Stepper(value: $draft.wakeOnLANPort, in: 1...65_535, step: 1) {
+                            Text("Port: \(draft.wakeOnLANPort)")
+                        }
+
+                        Text("Sends a magic packet when Otter is about to mount and the server does not answer.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -404,6 +426,7 @@ struct ShareEditorView: View {
             keepMounted: draft.keepMounted,
             mountAtLaunch: draft.mountAtLaunch,
             autoConnectWhenReachable: draft.autoConnectWhenReachable,
+            wakeOnLAN: draft.wakeOnLAN,
             rules: draft.rules,
             createdAt: draft.createdAt ?? now,
             updatedAt: now
@@ -432,6 +455,26 @@ struct ShareEditorView: View {
 
         if draft.usesVPNRule && !draft.matchesAnyVPN && draft.vpnName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "Choose a VPN, or match any VPN."
+        }
+
+        if draft.wakeOnLANEnabled {
+            if WakeOnLANConfiguration.normalizedMACAddress(draft.wakeOnLANMACAddress) == nil {
+                return "Add a valid Wake-on-LAN MAC address."
+            }
+
+            let broadcastAddress = draft.wakeOnLANBroadcastAddress
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedBroadcastAddress = broadcastAddress.isEmpty
+                ? WakeOnLANConfiguration.defaultBroadcastAddress
+                : broadcastAddress
+
+            if !WakeOnLANService.isValidIPv4Address(resolvedBroadcastAddress) {
+                return "Use an IPv4 broadcast address like 255.255.255.255."
+            }
+        }
+
+        if settings.isDuplicateShare(urlString: draft.urlString, excluding: draft.id) {
+            return "This network share address is already configured."
         }
 
         return nil
@@ -602,6 +645,10 @@ private struct DraftShare {
     var keepMounted: Bool
     var mountAtLaunch: Bool
     var autoConnectWhenReachable: Bool
+    var wakeOnLANEnabled: Bool
+    var wakeOnLANMACAddress: String
+    var wakeOnLANBroadcastAddress: String
+    var wakeOnLANPort: Int
     var usesWiFiNetworkRule: Bool
     var wifiNetworkName: String
     var wifiNetworkAction: ShareRuleAction
@@ -619,6 +666,10 @@ private struct DraftShare {
         keepMounted = share?.keepMounted ?? true
         mountAtLaunch = share?.mountAtLaunch ?? true
         autoConnectWhenReachable = share?.autoConnectWhenReachable ?? false
+        wakeOnLANEnabled = share?.wakeOnLAN.isEnabled ?? false
+        wakeOnLANMACAddress = share?.wakeOnLAN.macAddress ?? ""
+        wakeOnLANBroadcastAddress = share?.wakeOnLAN.broadcastAddress ?? WakeOnLANConfiguration.defaultBroadcastAddress
+        wakeOnLANPort = share?.wakeOnLAN.port ?? WakeOnLANConfiguration.defaultPort
         usesWiFiNetworkRule = share?.rules.hasWiFiNetworkRule ?? false
         wifiNetworkName = share?.rules.wifiNetworkName ?? ""
         wifiNetworkAction = share?.rules.wifiNetworkAction ?? .connect
@@ -636,6 +687,15 @@ private struct DraftShare {
             vpnRuleEnabled: usesVPNRule,
             vpnName: usesVPNRule && !matchesAnyVPN ? vpnName : "",
             vpnAction: vpnAction
+        )
+    }
+
+    var wakeOnLAN: WakeOnLANConfiguration {
+        WakeOnLANConfiguration(
+            isEnabled: wakeOnLANEnabled,
+            macAddress: wakeOnLANMACAddress,
+            broadcastAddress: wakeOnLANBroadcastAddress,
+            port: wakeOnLANPort
         )
     }
 }

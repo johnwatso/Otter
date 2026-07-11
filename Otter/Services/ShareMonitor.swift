@@ -27,6 +27,17 @@ enum RetryBackoff {
     static func delay(afterFailures failures: Int) -> TimeInterval {
         delays[min(max(failures - 1, 0), delays.count - 1)]
     }
+
+    static func delayWithJitter(afterFailures failures: Int) -> TimeInterval {
+        let baseDelay = delay(afterFailures: failures)
+        let maxJitter = min(baseDelay * 0.1, 30.0)
+        let jitter = Double.random(in: -maxJitter...maxJitter)
+        return max(baseDelay + jitter, 1.0)
+    }
+}
+
+private enum WakeOnLANRetryPolicy {
+    static let packetCooldown: TimeInterval = 60
 }
 
 @MainActor
@@ -36,24 +47,29 @@ final class ShareMonitor: ObservableObject {
 
     private let settings: SettingsStore
     private let mountService: MountService
+    private let wakeOnLANService: WakeOnLANService
     private let networkService: NetworkReachabilityService
     private let notificationService: NotificationService
     private var cancellables = Set<AnyCancellable>()
     private var workspaceObservers: [NSObjectProtocol] = []
     private var fallbackTimer: Timer?
     private var retryTasks: [NetworkShare.ID: Task<Void, Never>] = [:]
+    private var lastWakePacketDates: [NetworkShare.ID: Date] = [:]
     private var activeChecks = Set<NetworkShare.ID>()
     private var pendingChecks: [NetworkShare.ID: (reason: MonitorReason, force: Bool)] = [:]
     private var hasStarted = false
+    private var lastEvaluatedShares: [NetworkShare.ID: NetworkShare] = [:]
 
     init(
         settings: SettingsStore,
         mountService: MountService,
+        wakeOnLANService: WakeOnLANService,
         networkService: NetworkReachabilityService,
         notificationService: NotificationService
     ) {
         self.settings = settings
         self.mountService = mountService
+        self.wakeOnLANService = wakeOnLANService
         self.networkService = networkService
         self.notificationService = notificationService
         syncStates(with: settings.shares)
@@ -125,6 +141,26 @@ final class ShareMonitor: ObservableObject {
         do {
             try await mountService.unmount(share)
             updateStatus(.disconnected, for: share.id)
+        } catch {
+            updateFailure(error.localizedDescription, for: share.id)
+        }
+    }
+
+    func wake(_ share: NetworkShare) async {
+        guard share.wakeOnLAN.isEnabled else {
+            updateFailure("Wake-on-LAN is not enabled for this share.", for: share.id)
+            return
+        }
+
+        do {
+            _ = try await sendWakePacketIfDue(for: share, ignoringCooldown: true)
+
+            var state = states[share.id] ?? ShareRuntimeState()
+            state.status = .wakePacketSent
+            state.lastCheckedAt = Date()
+            state.nextRetryDate = nil
+            state.needsCredentials = false
+            saveState(state, for: share)
         } catch {
             updateFailure(error.localizedDescription, for: share.id)
         }
@@ -236,6 +272,19 @@ final class ShareMonitor: ObservableObject {
         }
 
         var state = states[share.id] ?? ShareRuntimeState()
+
+        let oldShare = lastEvaluatedShares[share.id]
+        if let oldShare, oldShare != share {
+            state.failureCount = 0
+            state.nextRetryDate = nil
+            state.needsCredentials = false
+            if case .failed = state.status {
+                state.status = .disconnected
+            }
+            states[share.id] = state
+        }
+        lastEvaluatedShares[share.id] = share
+
         state.lastCheckedAt = Date()
         await networkService.refreshNetworkDetailsIfStale()
 
@@ -327,8 +376,16 @@ final class ShareMonitor: ObservableObject {
                 saveState(state, for: share)
                 cancelRetry(for: share.id)
             } else {
+                let wakePacketSent: Bool
+                do {
+                    wakePacketSent = try await sendWakePacketIfDue(for: share)
+                } catch {
+                    registerFailure(error.localizedDescription, for: share.id)
+                    return
+                }
+
                 state = states[share.id] ?? state
-                state.status = .waitingForNetwork
+                state.status = wakePacketSent ? .wakePacketSent : .waitingForNetwork
                 state.nextRetryDate = nextRetryDate(afterFailures: max(state.failureCount, 1))
                 saveState(state, for: share)
                 scheduleRetry(for: share.id, at: state.nextRetryDate)
@@ -355,6 +412,25 @@ final class ShareMonitor: ObservableObject {
 
             registerFailure(error.localizedDescription, for: share.id, needsCredentials: needsCredentials)
         }
+    }
+
+    @discardableResult
+    private func sendWakePacketIfDue(
+        for share: NetworkShare,
+        ignoringCooldown: Bool = false
+    ) async throws -> Bool {
+        guard share.wakeOnLAN.isEnabled else { return false }
+
+        let now = Date()
+        if !ignoringCooldown,
+           let lastWakePacketDate = lastWakePacketDates[share.id],
+           now.timeIntervalSince(lastWakePacketDate) < WakeOnLANRetryPolicy.packetCooldown {
+            return false
+        }
+
+        try await wakeOnLANService.sendWakePacket(using: share.wakeOnLAN)
+        lastWakePacketDates[share.id] = now
+        return true
     }
 
     private func syncMountPathIfNeeded(_ mountedURL: URL, for share: NetworkShare) {
@@ -407,7 +483,7 @@ final class ShareMonitor: ObservableObject {
     }
 
     private func nextRetryDate(afterFailures failures: Int) -> Date {
-        Date().addingTimeInterval(RetryBackoff.delay(afterFailures: failures))
+        Date().addingTimeInterval(RetryBackoff.delayWithJitter(afterFailures: failures))
     }
 
     private func scheduleRetry(for shareID: NetworkShare.ID, at date: Date?) {
@@ -430,6 +506,7 @@ final class ShareMonitor: ObservableObject {
     private func syncStates(with shares: [NetworkShare]) {
         let shareIDs = Set(shares.map(\.id))
         states = states.filter { shareIDs.contains($0.key) }
+        lastWakePacketDates = lastWakePacketDates.filter { shareIDs.contains($0.key) }
 
         for share in shares where states[share.id] == nil {
             states[share.id] = ShareRuntimeState()

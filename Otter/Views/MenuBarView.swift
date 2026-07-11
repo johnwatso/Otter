@@ -128,6 +128,14 @@ private struct ShareMenu: View {
                 Label("Mount Now", systemImage: "arrow.triangle.2.circlepath")
             }
 
+            if share.wakeOnLAN.isEnabled {
+                Button {
+                    Task { await monitor.wake(share) }
+                } label: {
+                    Label("Wake Server", systemImage: "power")
+                }
+            }
+
             Button {
                 Task { await monitor.disconnect(share) }
             } label: {
