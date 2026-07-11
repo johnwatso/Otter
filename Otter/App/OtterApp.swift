@@ -4,12 +4,14 @@ import SwiftUI
 @main
 @MainActor
 struct OtterApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appModel: AppModel
 
     init() {
         let model = AppModel()
         _appModel = StateObject(wrappedValue: model)
         model.start()
+        appDelegate.appModel = model
     }
 
     var body: some Scene {
@@ -22,6 +24,7 @@ struct OtterApp: App {
                 .environmentObject(appModel.updaterViewModel)
         } label: {
             MenuBarLabel()
+                .environmentObject(appModel)
                 .environmentObject(appModel.monitor)
                 .environmentObject(appModel.settings)
         }
@@ -53,6 +56,7 @@ struct OtterApp: App {
 }
 
 private struct MenuBarLabel: View {
+    @EnvironmentObject private var appModel: AppModel
     @EnvironmentObject private var monitor: ShareMonitor
     @EnvironmentObject private var settings: SettingsStore
     @Environment(\.openWindow) private var openWindow
@@ -61,6 +65,13 @@ private struct MenuBarLabel: View {
         Image(systemName: monitor.menuBarSystemImage)
             .onAppear {
                 openManageSharesOnFirstRun()
+            }
+            .onReceive(appModel.$shouldOpenSharesWindow) { shouldOpen in
+                if shouldOpen {
+                    openWindow(id: AppModel.sharesWindowID)
+                    NSApp.activate(ignoringOtherApps: true)
+                    appModel.shouldOpenSharesWindow = false
+                }
             }
     }
 
@@ -75,5 +86,14 @@ private struct MenuBarLabel: View {
             openWindow(id: AppModel.sharesWindowID)
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+}
+
+class AppDelegate: NSObject, NSApplicationDelegate {
+    var appModel: AppModel?
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        appModel?.triggerOpenSharesWindow()
+        return true
     }
 }

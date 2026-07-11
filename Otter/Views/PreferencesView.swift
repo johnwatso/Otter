@@ -123,7 +123,7 @@ struct ShareManagementView: View {
         List(selection: $selection) {
             Section("Shares") {
                 ForEach(settings.shares) { share in
-                    ShareListRow(share: share)
+                    ShareListRow(share: share, isSelected: selection == share.id)
                         .tag(share.id)
                 }
             }
@@ -475,6 +475,7 @@ private struct EmptyShareDetailView: View {
 private struct ShareListRow: View {
     @EnvironmentObject private var monitor: ShareMonitor
     let share: NetworkShare
+    let isSelected: Bool
 
     var body: some View {
         let status = monitor.status(for: share)
@@ -485,11 +486,11 @@ private struct ShareListRow: View {
                     .lineLimit(1)
                 Text(status.label)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(isSelected ? .primary : .secondary)
             }
         } icon: {
             Image(systemName: status.systemImage)
-                .foregroundStyle(status.color)
+                .foregroundStyle(isSelected ? .primary : status.color)
         }
     }
 }
@@ -551,16 +552,35 @@ private struct ShareDetailView: View {
                 Section("Rules") {
                     if let requiredWiFiNetworkName = currentShare.rules.requiredWiFiNetworkName {
                         LabeledContent("Wi-Fi network", value: requiredWiFiNetworkName)
-                        LabeledContent("Wi-Fi action", value: currentShare.rules.wifiNetworkAction.title)
                     }
 
                     if currentShare.rules.hasVPNRule {
                         LabeledContent("VPN", value: currentShare.rules.vpnRuleTitle)
-                        LabeledContent("VPN action", value: currentShare.rules.vpnAction.title)
                     }
 
                     LabeledContent("Current Wi-Fi", value: networkService.currentWiFiNetworkName ?? "Unavailable")
                     LabeledContent("Current VPN", value: currentVPNLabel)
+
+                    if currentShare.rules.hasVPNRule || (currentShare.host?.hasSuffix(".local") ?? false) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "info.circle")
+                                Text("Static IP Warning")
+                            }
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            Text("Ensure this server has a static IP address, or VPN IP fallback might fail if the IP changes.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+
+            if let fallbackURL = fallbackURLString {
+                Section("Advanced") {
+                    LabeledContent("Fallback IP", value: fallbackURL)
                 }
             }
 
@@ -617,6 +637,18 @@ private struct ShareDetailView: View {
 
     private var currentVPNLabel: String {
         networkService.currentVPNDisplayName
+    }
+
+    private var fallbackURLString: String? {
+        guard let cachedIP = currentShare.cachedIPAddress,
+              let url = currentShare.url,
+              let host = url.host(percentEncoded: false),
+              !NetworkShare.isIPAddress(host)
+        else { return nil }
+
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.host = cachedIP
+        return components?.string
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<NetworkShare, Value>) -> Binding<Value> {

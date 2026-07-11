@@ -27,6 +27,11 @@ final class AppModel: ObservableObject {
     let monitor: ShareMonitor
 
     @Published var editorRequest: ShareEditorRequest?
+    @Published var shouldOpenSharesWindow = false
+
+    func triggerOpenSharesWindow() {
+        shouldOpenSharesWindow = true
+    }
 
     private var hasStarted = false
     private var preferencesWindowOpenCount = 0

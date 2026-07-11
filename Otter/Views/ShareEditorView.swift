@@ -80,6 +80,22 @@ struct ShareEditorView: View {
                 Section {
                     DisclosureGroup("Advanced", isExpanded: $isShowingAdvanced) {
                         TextField("Finder location", text: $draft.mountPath, prompt: Text(inferredMountPath))
+
+                        if let fallbackURL = fallbackURLString {
+                            LabeledContent("Fallback IP", value: fallbackURL)
+                        }
+
+                        if let host = hostFromURL, !NetworkShare.isIPAddress(host) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label("VPN IP Fallback", systemImage: "info.circle")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                Text("Otter will resolve and cache this server's local IP address when connected locally. If you connect to your VPN later, Otter will use the cached IP address to bypass mDNS limits. Ensure your server has a static IP address, or this fallback may fail if the IP changes.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.top, 4)
+                        }
                     }
                 }
 
@@ -121,13 +137,6 @@ struct ShareEditorView: View {
 
                     if draft.usesWiFiNetworkRule {
                         TextField("Wi-Fi network name", text: $draft.wifiNetworkName)
-
-                        Picker("When connected", selection: $draft.wifiNetworkAction) {
-                            ForEach(ShareRuleAction.allCases) { action in
-                                Text(action.title).tag(action)
-                            }
-                        }
-                        .pickerStyle(.segmented)
 
                         HStack {
                             LabeledContent("Current Wi-Fi", value: currentWiFiNetworkLabel)
@@ -188,13 +197,6 @@ struct ShareEditorView: View {
                         } else {
                             LabeledContent("Current VPN", value: currentVPNLabel)
                         }
-
-                        Picker("When connected", selection: $draft.vpnAction) {
-                            ForEach(ShareRuleAction.allCases) { action in
-                                Text(action.title).tag(action)
-                            }
-                        }
-                        .pickerStyle(.segmented)
                     }
                 }
 
@@ -268,6 +270,22 @@ struct ShareEditorView: View {
 
     private var isEditing: Bool {
         sourceShare != nil
+    }
+
+    private var hostFromURL: String? {
+        URL(string: draft.urlString.trimmingCharacters(in: .whitespacesAndNewlines))?.host(percentEncoded: false)
+    }
+
+    private var fallbackURLString: String? {
+        guard let cachedIP = draft.cachedIPAddress,
+              let url = URL(string: draft.urlString.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let host = url.host(percentEncoded: false),
+              !NetworkShare.isIPAddress(host)
+        else { return nil }
+
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.host = cachedIP
+        return components?.string
     }
 
     private var replaceFromFinderButton: some View {
@@ -428,6 +446,7 @@ struct ShareEditorView: View {
             autoConnectWhenReachable: draft.autoConnectWhenReachable,
             wakeOnLAN: draft.wakeOnLAN,
             rules: draft.rules,
+            cachedIPAddress: draft.cachedIPAddress,
             createdAt: draft.createdAt ?? now,
             updatedAt: now
         )
@@ -644,6 +663,7 @@ private struct DraftShare {
     var mountPath: String
     var keepMounted: Bool
     var mountAtLaunch: Bool
+    var cachedIPAddress: String?
     var autoConnectWhenReachable: Bool
     var wakeOnLANEnabled: Bool
     var wakeOnLANMACAddress: String
@@ -665,6 +685,7 @@ private struct DraftShare {
         mountPath = share?.mountPath ?? ""
         keepMounted = share?.keepMounted ?? true
         mountAtLaunch = share?.mountAtLaunch ?? true
+        cachedIPAddress = share?.cachedIPAddress
         autoConnectWhenReachable = share?.autoConnectWhenReachable ?? false
         wakeOnLANEnabled = share?.wakeOnLAN.isEnabled ?? false
         wakeOnLANMACAddress = share?.wakeOnLAN.macAddress ?? ""

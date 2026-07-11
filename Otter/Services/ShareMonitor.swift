@@ -326,6 +326,7 @@ final class ShareMonitor: ObservableObject {
             state.needsCredentials = false
             saveState(state, for: share)
             cancelRetry(for: share.id)
+            resolveAndCacheIPAddress(for: share)
             return
         }
 
@@ -368,7 +369,23 @@ final class ShareMonitor: ObservableObject {
             saveState(state, for: share)
         }
 
-        let reachable = await networkService.canReachServer(for: url)
+        var reachable = await networkService.canReachServer(for: url)
+        var fallbackURL: URL? = nil
+
+        if !reachable, networkService.isVPNConnected, let cachedIP = share.cachedIPAddress {
+            if let host = url.host(percentEncoded: false), !NetworkShare.isIPAddress(host) {
+                var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+                components?.host = cachedIP
+                if let resolvedURL = components?.url {
+                    let ipReachable = await networkService.canReachServer(for: resolvedURL)
+                    if ipReachable {
+                        reachable = true
+                        fallbackURL = resolvedURL
+                    }
+                }
+            }
+        }
+
         guard reachable else {
             if isOpportunistic {
                 state.status = .disconnected
@@ -394,13 +411,14 @@ final class ShareMonitor: ObservableObject {
         }
 
         do {
-            if let mountedURL = try await mountService.mount(share) {
+            if let mountedURL = try await mountService.mount(share, urlOverride: fallbackURL) {
                 syncMountPathIfNeeded(mountedURL, for: share)
                 state.status = .connected
                 state.failureCount = 0
                 state.nextRetryDate = nil
                 saveState(state, for: share)
                 cancelRetry(for: share.id)
+                resolveAndCacheIPAddress(for: share)
             } else {
                 registerFailure("macOS mounted the share, but Otter could not find the mounted volume.", for: share.id)
             }
@@ -501,6 +519,21 @@ final class ShareMonitor: ObservableObject {
     private func cancelRetry(for shareID: NetworkShare.ID) {
         retryTasks[shareID]?.cancel()
         retryTasks[shareID] = nil
+    }
+
+    private func resolveAndCacheIPAddress(for share: NetworkShare) {
+        guard let host = share.host, !NetworkShare.isIPAddress(host) else { return }
+        guard !networkService.isVPNConnected else { return }
+
+        Task { @MainActor [weak self] in
+            if let resolvedIP = await NetworkShare.resolveIPAddress(for: host) {
+                if share.cachedIPAddress != resolvedIP {
+                    self?.settings.updateShare(id: share.id) { updatedShare in
+                        updatedShare.cachedIPAddress = resolvedIP
+                    }
+                }
+            }
+        }
     }
 
     private func syncStates(with shares: [NetworkShare]) {

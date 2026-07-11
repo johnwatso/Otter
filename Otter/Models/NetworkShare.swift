@@ -10,6 +10,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
     var autoConnectWhenReachable: Bool
     var wakeOnLAN: WakeOnLANConfiguration
     var rules: ShareRules
+    var cachedIPAddress: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -23,6 +24,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         autoConnectWhenReachable: Bool = false,
         wakeOnLAN: WakeOnLANConfiguration = WakeOnLANConfiguration(),
         rules: ShareRules = ShareRules(),
+        cachedIPAddress: String? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -35,6 +37,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         self.autoConnectWhenReachable = autoConnectWhenReachable
         self.wakeOnLAN = wakeOnLAN
         self.rules = rules
+        self.cachedIPAddress = cachedIPAddress
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         normalize()
@@ -50,6 +53,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         case autoConnectWhenReachable
         case wakeOnLAN
         case rules
+        case cachedIPAddress
         case createdAt
         case updatedAt
     }
@@ -65,6 +69,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         autoConnectWhenReachable = try container.decodeIfPresent(Bool.self, forKey: .autoConnectWhenReachable) ?? false
         wakeOnLAN = try container.decodeIfPresent(WakeOnLANConfiguration.self, forKey: .wakeOnLAN) ?? WakeOnLANConfiguration()
         rules = try container.decodeIfPresent(ShareRules.self, forKey: .rules) ?? ShareRules()
+        cachedIPAddress = try container.decodeIfPresent(String.self, forKey: .cachedIPAddress)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         normalize()
@@ -94,6 +99,35 @@ struct NetworkShare: Identifiable, Codable, Hashable {
             .split(separator: "/", omittingEmptySubsequences: true)
             .last
             .map(String.init)
+    }
+
+    static func isIPAddress(_ host: String) -> Bool {
+        var sin = in_addr()
+        var sin6 = in6_addr()
+        return host.withCString { inet_pton(AF_INET, $0, &sin) } == 1
+            || host.withCString { inet_pton(AF_INET6, $0, &sin6) } == 1
+    }
+
+    static func resolveIPAddress(for hostname: String) async -> String? {
+        await Task.detached(priority: .utility) { () -> String? in
+            var res: UnsafeMutablePointer<addrinfo>?
+            let status = getaddrinfo(hostname, nil, nil, &res)
+            guard status == 0, let first = res else { return nil }
+            defer { freeaddrinfo(res) }
+
+            var hostnameBuffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            let nameInfoStatus = getnameinfo(
+                first.pointee.ai_addr,
+                first.pointee.ai_addrlen,
+                &hostnameBuffer,
+                socklen_t(hostnameBuffer.count),
+                nil,
+                0,
+                NI_NUMERICHOST
+            )
+            guard nameInfoStatus == 0 else { return nil }
+            return String(cString: hostnameBuffer)
+        }.value
     }
 
     static func defaultMountPath(displayName: String, urlString: String) -> String {
@@ -339,6 +373,8 @@ struct ShareRules: Codable, Hashable {
     mutating func normalize() {
         wifiNetworkName = wifiNetworkName.trimmingCharacters(in: .whitespacesAndNewlines)
         vpnName = vpnName.trimmingCharacters(in: .whitespacesAndNewlines)
+        wifiNetworkAction = .connect
+        vpnAction = .connect
     }
 }
 

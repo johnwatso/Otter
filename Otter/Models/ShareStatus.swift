@@ -60,19 +60,19 @@ enum ShareStatus: Equatable {
         case .connected:
             "externaldrive.fill"
         case .disconnected:
-            "externaldrive"
+            "externaldrive.fill.badge.xmark"
         case .waitingForNetwork:
-            "wifi.exclamationmark"
+            "externaldrive.badge.questionmark"
         case .waitingForAllowedNetwork:
-            "wifi.slash"
+            "externaldrive.badge.minus"
         case .pausedByRule:
-            "pause.circle"
+            "externaldrive.badge.minus"
         case .wakePacketSent:
-            "power.circle"
+            "externaldrive.badge.plus"
         case .reconnecting:
             "arrow.triangle.2.circlepath"
         case .failed:
-            "exclamationmark.triangle.fill"
+            "externaldrive.badge.exclamationmark"
         }
     }
 

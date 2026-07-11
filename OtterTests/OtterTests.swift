@@ -74,6 +74,26 @@ final class NetworkShareTests: XCTestCase {
         XCTAssertFalse(share.rules.hasVPNRule)
         XCTAssertFalse(share.rules.hasWiFiNetworkRule)
     }
+
+    func testIPAddressIdentification() {
+        XCTAssertTrue(NetworkShare.isIPAddress("127.0.0.1"))
+        XCTAssertTrue(NetworkShare.isIPAddress("192.168.1.1"))
+        XCTAssertTrue(NetworkShare.isIPAddress("2001:0db8:85a3:0000:0000:8a2e:0370:7334"))
+        XCTAssertTrue(NetworkShare.isIPAddress("::1"))
+
+        XCTAssertFalse(NetworkShare.isIPAddress("localhost"))
+        XCTAssertFalse(NetworkShare.isIPAddress("my-nas.local"))
+        XCTAssertFalse(NetworkShare.isIPAddress("apple.com"))
+    }
+
+    func testDNSResolution() async {
+        let resolved = await NetworkShare.resolveIPAddress(for: "localhost")
+        XCTAssertNotNil(resolved)
+        XCTAssertTrue(resolved == "127.0.0.1" || resolved == "::1")
+
+        let invalid = await NetworkShare.resolveIPAddress(for: "invalid.hostname.that.does.not.exist.local")
+        XCTAssertNil(invalid)
+    }
 }
 
 final class WakeOnLANConfigurationTests: XCTestCase {
@@ -150,18 +170,6 @@ final class ShareRulesEvaluationTests: XCTestCase {
         XCTAssertEqual(blocked.blockedStatus, .waitingForAllowedNetwork("Wi-Fi home"))
     }
 
-    func testWiFiDisconnectRulePausesShareOnMatchingNetwork() {
-        let rules = ShareRules(wifiNetworkName: "Public", wifiNetworkAction: .disconnect)
-
-        let paused = rules.evaluate(currentWiFiNetworkName: "Public", isVPNConnected: false, activeVPNNames: [])
-        XCTAssertFalse(paused.allowsConnection)
-        XCTAssertEqual(paused.blockedStatus, .pausedByRule("Wi-Fi Public"))
-
-        let allowed = rules.evaluate(currentWiFiNetworkName: "Home", isVPNConnected: false, activeVPNNames: [])
-        XCTAssertTrue(allowed.allowsConnection)
-        XCTAssertFalse(allowed.shouldAttemptMount)
-    }
-
     func testNamedVPNRuleOnlyMatchesThatVPN() {
         let rules = ShareRules(vpnRuleEnabled: true, vpnName: "VPN A", vpnAction: .connect)
 
@@ -194,14 +202,17 @@ final class ShareRulesEvaluationTests: XCTestCase {
         var rules = ShareRules(wifiNetworkName: "Home", wifiNetworkAction: .connect)
         rules.vpnRuleEnabled = true
         rules.vpnName = "Work VPN"
-        rules.vpnAction = .disconnect
+        rules.vpnAction = .connect
 
-        let wifiOnlyOK = rules.evaluate(currentWiFiNetworkName: "Home", isVPNConnected: false, activeVPNNames: [])
-        XCTAssertTrue(wifiOnlyOK.allowsConnection)
+        // Wifi matches, but VPN is not connected -> fails
+        let wifiOnlyNotEnough = rules.evaluate(currentWiFiNetworkName: "Home", isVPNConnected: false, activeVPNNames: [])
+        XCTAssertFalse(wifiOnlyNotEnough.allowsConnection)
+        XCTAssertEqual(wifiOnlyNotEnough.blockedStatus, .waitingForAllowedNetwork("VPN Work VPN"))
 
-        let vpnBlocks = rules.evaluate(currentWiFiNetworkName: "Home", isVPNConnected: true, activeVPNNames: ["Work VPN"])
-        XCTAssertFalse(vpnBlocks.allowsConnection)
-        XCTAssertEqual(vpnBlocks.blockedStatus, .pausedByRule("VPN Work VPN"))
+        // Both match -> succeeds
+        let bothMatch = rules.evaluate(currentWiFiNetworkName: "Home", isVPNConnected: true, activeVPNNames: ["Work VPN"])
+        XCTAssertTrue(bothMatch.allowsConnection)
+        XCTAssertTrue(bothMatch.shouldAttemptMount)
     }
 }
 

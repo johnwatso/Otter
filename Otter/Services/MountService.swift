@@ -55,8 +55,8 @@ actor MountService {
     }
 
     @discardableResult
-    func mount(_ share: NetworkShare) async throws -> URL? {
-        guard let url = share.url else {
+    func mount(_ share: NetworkShare, urlOverride: URL? = nil) async throws -> URL? {
+        guard let url = urlOverride ?? share.url else {
             throw MountServiceError.invalidURL
         }
 
