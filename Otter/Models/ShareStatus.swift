@@ -76,6 +76,26 @@ enum ShareStatus: Equatable {
         }
     }
 
+    // Circle-family symbol for compact colored status indicators.
+    var circleSymbol: String {
+        switch self {
+        case .connected:
+            "checkmark.circle.fill"
+        case .disconnected:
+            "minus.circle.fill"
+        case .waitingForNetwork:
+            "clock.fill"
+        case .waitingForAllowedNetwork, .pausedByRule:
+            "pause.circle.fill"
+        case .wakePacketSent:
+            "power.circle.fill"
+        case .reconnecting:
+            "arrow.triangle.2.circlepath.circle.fill"
+        case .failed:
+            "exclamationmark.circle.fill"
+        }
+    }
+
     var color: Color {
         switch self {
         case .connected:

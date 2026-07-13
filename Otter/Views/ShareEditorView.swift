@@ -134,78 +134,84 @@ struct ShareEditorView: View {
 
                 // Conditions Section
                 Section("Conditions") {
-                    Toggle("Limit connections to home network or VPN", isOn: Binding(
-                        get: { draft.usesWiFiNetworkRule },
-                        set: { newValue in
-                            draft.usesWiFiNetworkRule = newValue
-                            if newValue {
-                                if draft.wifiNetworkName.isEmpty, let currentSSID = networkService.currentWiFiNetworkName {
-                                    draft.wifiNetworkName = currentSSID
-                                }
-                                draft.usesVPNRule = true
-                                draft.matchesAnyVPN = true
+                    Toggle("Only connect on the registered network", isOn: Binding(
+                        get: { draft.limitsToRegisteredNetwork },
+                        set: { isOn in
+                            draft.limitsToRegisteredNetwork = isOn
+                            if isOn {
+                                registerCurrentNetworkIfNeeded()
                             } else {
-                                draft.usesVPNRule = false
+                                draft.registeredSubnets = []
                                 draft.wifiNetworkName = ""
                                 draft.vpnName = ""
-                                draft.matchesAnyVPN = false
+                                draft.matchesAnyVPN = true
+                                usesCustomVPNName = false
                             }
                         }
                     ))
-                    
-                    if draft.usesWiFiNetworkRule {
-                        VStack(alignment: .leading, spacing: 6) {
-                            if !draft.wifiNetworkName.isEmpty {
-                                LabeledContent("Home Wi-Fi", value: draft.wifiNetworkName)
-                            } else {
-                                LabeledContent("Home Wi-Fi", value: "Not registered")
-                                Text("Connect to your home Wi-Fi while configuring to automatically register it.")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                            
-                            Toggle("Require specific VPN profile", isOn: Binding(
-                                get: { !draft.matchesAnyVPN },
-                                set: { newValue in
-                                    draft.matchesAnyVPN = !newValue
-                                    if !newValue {
-                                        draft.vpnName = ""
-                                    }
-                                }
-                            ))
-                            .font(.subheadline)
-                            .padding(.top, 4)
-                            
-                            if !draft.matchesAnyVPN {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    if networkService.knownVPNNames.isEmpty {
-                                        TextField("VPN profile name", text: $draft.vpnName, prompt: Text("Office VPN"))
-                                            .textFieldStyle(.roundedBorder)
-                                    } else {
-                                        Picker("VPN Profile", selection: vpnSelection) {
-                                            Text("Choose VPN...").tag(VPNNameSelection.none)
-                                            
-                                            ForEach(networkService.knownVPNNames, id: \.self) { vpnName in
-                                                Text(vpnName).tag(VPNNameSelection.known(vpnName))
-                                            }
-                                            
-                                            Text("Other...").tag(VPNNameSelection.custom)
-                                        }
-                                        .pickerStyle(.menu)
-                                        
-                                        if vpnSelection.wrappedValue == .custom {
-                                            TextField("VPN name", text: $draft.vpnName, prompt: Text("Other VPN"))
-                                                .textFieldStyle(.roundedBorder)
-                                        }
-                                    }
-                                }
-                                .padding(.leading, 12)
-                            }
-                            
-                            Text("Ethernet and allowed VPN connections are trusted.")
+
+                    if draft.limitsToRegisteredNetwork {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Otter registers the network this share was set up on. It connects when your Mac is back on that network — Wi-Fi or Ethernet — or while your VPN is active, and disconnects the share everywhere else.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
-                                .padding(.top, 2)
+
+                            HStack(spacing: 8) {
+                                LabeledContent(
+                                    "Registered network",
+                                    value: draft.registeredSubnets.isEmpty ? "None" : draft.registeredSubnets.joined(separator: ", ")
+                                )
+
+                                if !networkService.currentIPv4Subnets.isEmpty && networkService.currentIPv4Subnets != draft.registeredSubnets {
+                                    Button(draft.registeredSubnets.isEmpty ? "Register Current Network" : "Re-register") {
+                                        registerCurrentNetwork()
+                                    }
+                                    .controlSize(.small)
+                                }
+                            }
+
+                            HStack(spacing: 8) {
+                                TextField("Wi-Fi name", text: $draft.wifiNetworkName, prompt: Text("Optional"))
+
+                                if let currentSSID = networkService.currentWiFiNetworkName, currentSSID != draft.wifiNetworkName {
+                                    Button("Use Current") {
+                                        draft.wifiNetworkName = currentSSID
+                                    }
+                                    .controlSize(.small)
+                                }
+                            }
+
+                            Text("The Wi-Fi name is an extra way to recognize the registered network, useful if the router hands out a different subnet later.")
+                                .font(.footnote)
+                                .foregroundStyle(.tertiary)
+
+                            if draft.registeredSubnets.isEmpty && draft.wifiNetworkName.isEmpty && networkService.wifiNameRequiresLocationPermission {
+                                locationPermissionNotice
+                            }
+
+                            Picker("VPN", selection: vpnSelection) {
+                                Text("Any VPN").tag(VPNNameSelection.any)
+
+                                ForEach(networkService.knownVPNNames, id: \.self) { vpnName in
+                                    Text(vpnName).tag(VPNNameSelection.known(vpnName))
+                                }
+
+                                Text("Other...").tag(VPNNameSelection.custom)
+                            }
+                            .pickerStyle(.menu)
+                            .padding(.top, 4)
+
+                            if vpnSelection.wrappedValue == .custom {
+                                TextField("VPN name", text: $draft.vpnName, prompt: Text("Office VPN"))
+                                    .textFieldStyle(.roundedBorder)
+                                    .padding(.leading, 12)
+                            }
+
+                            if vpnSelection.wrappedValue != .any {
+                                Text("Only this VPN will connect the share; other VPNs count as unregistered networks.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.tertiary)
+                            }
                         }
                         .padding(.leading, 20)
                     }
@@ -283,6 +289,12 @@ struct ShareEditorView: View {
                 refreshMountedShares()
             }
         }
+        .onChange(of: networkService.currentWiFiNetworkName) {
+            fillDraftFromCurrentNetwork()
+        }
+        .onChange(of: networkService.currentIPv4Subnets) {
+            fillDraftFromCurrentNetwork()
+        }
     }
 
     private var finderSectionHeader: some View {
@@ -330,19 +342,6 @@ struct ShareEditorView: View {
         sourceShare != nil
     }
 
-    private enum NetworkConstraint: Hashable {
-        case any
-        case wifi
-    }
-
-    private var networkConstraintBinding: Binding<NetworkConstraint> {
-        Binding {
-            draft.usesWiFiNetworkRule ? .wifi : .any
-        } set: { constraint in
-            draft.usesWiFiNetworkRule = (constraint == .wifi)
-        }
-    }
-
     private var hostFromURL: String? {
         URL(string: draft.urlString.trimmingCharacters(in: .whitespacesAndNewlines))?.host(percentEncoded: false)
     }
@@ -368,12 +367,12 @@ struct ShareEditorView: View {
 
     private var vpnSelection: Binding<VPNNameSelection> {
         Binding {
-            if usesCustomVPNName {
-                return .custom
+            if draft.matchesAnyVPN {
+                return .any
             }
 
-            if draft.vpnName.isEmpty {
-                return .none
+            if usesCustomVPNName {
+                return .custom
             }
 
             if networkService.knownVPNNames.contains(draft.vpnName) {
@@ -383,13 +382,16 @@ struct ShareEditorView: View {
             return .custom
         } set: { selection in
             switch selection {
-            case .none:
-                usesCustomVPNName = false
+            case .any:
+                draft.matchesAnyVPN = true
                 draft.vpnName = ""
-            case let .known(vpnName):
                 usesCustomVPNName = false
+            case let .known(vpnName):
+                draft.matchesAnyVPN = false
                 draft.vpnName = vpnName
+                usesCustomVPNName = false
             case .custom:
+                draft.matchesAnyVPN = false
                 usesCustomVPNName = true
             }
         }
@@ -460,29 +462,39 @@ struct ShareEditorView: View {
         validationMessage = nil
     }
 
-    private func useCurrentWiFiNetwork() {
-        Task {
-            await networkService.refreshNetworkDetailsNow()
-            guard let networkName = networkService.currentWiFiNetworkName else { return }
-            draft.wifiNetworkName = networkName
+    private func registerCurrentNetwork() {
+        draft.registeredSubnets = networkService.currentIPv4Subnets
+        if let currentSSID = networkService.currentWiFiNetworkName {
+            draft.wifiNetworkName = currentSSID
         }
     }
 
-    private func useCurrentVPN() {
+    private func registerCurrentNetworkIfNeeded() {
+        fillDraftFromCurrentNetwork()
+
+        // Reading the Wi-Fi name needs Location Services, so ask the moment
+        // the user enables the condition (no-op unless undetermined). The
+        // draft back-fills via onChange once the refreshed details arrive.
+        if draft.wifiNetworkName.isEmpty {
+            networkService.requestLocationAuthorization()
+        }
+
         Task {
             await networkService.refreshNetworkDetailsNow()
+            fillDraftFromCurrentNetwork()
+        }
+    }
 
-            // Without a name to match, the only rule that can work is "any VPN".
-            guard let vpnName = networkService.activeVPNNames.first else {
-                if networkService.isVPNConnected {
-                    draft.matchesAnyVPN = true
-                }
-                return
-            }
+    // Fills whatever the current network can provide into fields the user
+    // hasn't set, so the condition configures itself where possible.
+    private func fillDraftFromCurrentNetwork() {
+        guard draft.limitsToRegisteredNetwork else { return }
 
-            draft.matchesAnyVPN = false
-            draft.vpnName = vpnName
-            usesCustomVPNName = !networkService.knownVPNNames.contains(vpnName)
+        if draft.registeredSubnets.isEmpty {
+            draft.registeredSubnets = networkService.currentIPv4Subnets
+        }
+        if draft.wifiNetworkName.isEmpty, let currentSSID = networkService.currentWiFiNetworkName {
+            draft.wifiNetworkName = currentSSID
         }
     }
 
@@ -531,12 +543,14 @@ struct ShareEditorView: View {
             return "Include the share name in the address."
         }
 
-        if draft.usesWiFiNetworkRule && draft.wifiNetworkName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Add a Wi-Fi network name, or turn off the network rule."
+        if draft.limitsToRegisteredNetwork
+            && draft.registeredSubnets.isEmpty
+            && draft.wifiNetworkName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Register the network while connected to it, or turn off the network condition."
         }
 
-        if draft.usesVPNRule && !draft.matchesAnyVPN && draft.vpnName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Choose a VPN, or match any VPN."
+        if draft.limitsToRegisteredNetwork && !draft.matchesAnyVPN && draft.vpnName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Enter the VPN name, or choose Any VPN."
         }
 
         if draft.wakeOnLANEnabled {
@@ -618,13 +632,6 @@ struct ShareEditorView: View {
         return components
     }
 
-    private var currentWiFiNetworkLabel: String {
-        networkService.currentWiFiNetworkName ?? "Unavailable"
-    }
-
-    private var currentVPNLabel: String {
-        networkService.currentVPNDisplayName
-    }
 }
 
 private struct MountedShareSuggestion: Identifiable, Hashable {
@@ -700,7 +707,7 @@ private struct MountedShareSuggestion: Identifiable, Hashable {
 }
 
 private enum VPNNameSelection: Hashable {
-    case none
+    case any
     case known(String)
     case custom
 }
@@ -732,10 +739,10 @@ private struct DraftShare {
     var wakeOnLANMACAddress: String
     var wakeOnLANBroadcastAddress: String
     var wakeOnLANPort: Int
-    var usesWiFiNetworkRule: Bool
+    var limitsToRegisteredNetwork: Bool
     var wifiNetworkName: String
     var wifiNetworkAction: ShareRuleAction
-    var usesVPNRule: Bool
+    var registeredSubnets: [String]
     var matchesAnyVPN: Bool
     var vpnName: String
     var vpnAction: ShareRuleAction
@@ -754,11 +761,13 @@ private struct DraftShare {
         wakeOnLANMACAddress = share?.wakeOnLAN.macAddress ?? ""
         wakeOnLANBroadcastAddress = share?.wakeOnLAN.broadcastAddress ?? WakeOnLANConfiguration.defaultBroadcastAddress
         wakeOnLANPort = share?.wakeOnLAN.port ?? WakeOnLANConfiguration.defaultPort
-        usesWiFiNetworkRule = share?.rules.hasWiFiNetworkRule ?? false
+        // A share may carry a network rule, a VPN rule, or both; the editor
+        // presents them as a single "registered network" condition.
+        limitsToRegisteredNetwork = (share?.rules.hasNetworkRule ?? false) || (share?.rules.hasVPNRule ?? false)
         wifiNetworkName = share?.rules.wifiNetworkName ?? ""
         wifiNetworkAction = share?.rules.wifiNetworkAction ?? .connect
-        usesVPNRule = share?.rules.hasVPNRule ?? false
-        matchesAnyVPN = share?.rules.hasVPNRule == true ? share?.rules.requiredVPNName == nil : true
+        registeredSubnets = share?.rules.registeredSubnets ?? []
+        matchesAnyVPN = share?.rules.requiredVPNName == nil
         vpnName = share?.rules.vpnName ?? ""
         vpnAction = share?.rules.vpnAction ?? .connect
         createdAt = share?.createdAt
@@ -766,10 +775,11 @@ private struct DraftShare {
 
     var rules: ShareRules {
         ShareRules(
-            wifiNetworkName: usesWiFiNetworkRule ? wifiNetworkName : "",
+            wifiNetworkName: limitsToRegisteredNetwork ? wifiNetworkName : "",
             wifiNetworkAction: wifiNetworkAction,
-            vpnRuleEnabled: usesVPNRule,
-            vpnName: usesVPNRule && !matchesAnyVPN ? vpnName : "",
+            registeredSubnets: limitsToRegisteredNetwork ? registeredSubnets : [],
+            vpnRuleEnabled: limitsToRegisteredNetwork,
+            vpnName: limitsToRegisteredNetwork && !matchesAnyVPN ? vpnName : "",
             vpnAction: vpnAction
         )
     }

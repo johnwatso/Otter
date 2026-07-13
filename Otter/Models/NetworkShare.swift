@@ -354,6 +354,10 @@ struct WakeOnLANConfiguration: Codable, Hashable {
 struct ShareRules: Codable, Hashable {
     var wifiNetworkName: String
     var wifiNetworkAction: ShareRuleAction
+    // IPv4 networks (CIDR strings like "192.168.1.0/24") captured when the
+    // network condition was configured. Being on any of them identifies the
+    // registered network, whether the Mac is on Wi-Fi or Ethernet.
+    var registeredSubnets: [String]
     var vpnRuleEnabled: Bool
     var vpnName: String
     var vpnAction: ShareRuleAction
@@ -361,12 +365,14 @@ struct ShareRules: Codable, Hashable {
     init(
         wifiNetworkName: String = "",
         wifiNetworkAction: ShareRuleAction = .connect,
+        registeredSubnets: [String] = [],
         vpnRuleEnabled: Bool = false,
         vpnName: String = "",
         vpnAction: ShareRuleAction = .connect
     ) {
         self.wifiNetworkName = wifiNetworkName
         self.wifiNetworkAction = wifiNetworkAction
+        self.registeredSubnets = registeredSubnets
         self.vpnRuleEnabled = vpnRuleEnabled
         self.vpnName = vpnName
         self.vpnAction = vpnAction
@@ -376,6 +382,7 @@ struct ShareRules: Codable, Hashable {
     private enum CodingKeys: String, CodingKey {
         case wifiNetworkName
         case wifiNetworkAction
+        case registeredSubnets
         case vpnRuleEnabled
         case vpnName
         case vpnAction
@@ -385,6 +392,7 @@ struct ShareRules: Codable, Hashable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         wifiNetworkName = try container.decodeIfPresent(String.self, forKey: .wifiNetworkName) ?? ""
         wifiNetworkAction = try container.decodeIfPresent(ShareRuleAction.self, forKey: .wifiNetworkAction) ?? .connect
+        registeredSubnets = try container.decodeIfPresent([String].self, forKey: .registeredSubnets) ?? []
         vpnRuleEnabled = try container.decodeIfPresent(Bool.self, forKey: .vpnRuleEnabled) ?? false
         vpnName = try container.decodeIfPresent(String.self, forKey: .vpnName) ?? ""
         vpnAction = try container.decodeIfPresent(ShareRuleAction.self, forKey: .vpnAction) ?? .connect
@@ -395,6 +403,7 @@ struct ShareRules: Codable, Hashable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(wifiNetworkName, forKey: .wifiNetworkName)
         try container.encode(wifiNetworkAction, forKey: .wifiNetworkAction)
+        try container.encode(registeredSubnets, forKey: .registeredSubnets)
         try container.encode(vpnRuleEnabled, forKey: .vpnRuleEnabled)
         try container.encode(vpnName, forKey: .vpnName)
         try container.encode(vpnAction, forKey: .vpnAction)
@@ -402,6 +411,10 @@ struct ShareRules: Codable, Hashable {
 
     var hasWiFiNetworkRule: Bool {
         requiredWiFiNetworkName != nil
+    }
+
+    var hasNetworkRule: Bool {
+        requiredWiFiNetworkName != nil || !registeredSubnets.isEmpty
     }
 
     var hasVPNRule: Bool {
@@ -425,6 +438,9 @@ struct ShareRules: Codable, Hashable {
     mutating func normalize() {
         wifiNetworkName = wifiNetworkName.trimmingCharacters(in: .whitespacesAndNewlines)
         vpnName = vpnName.trimmingCharacters(in: .whitespacesAndNewlines)
+        registeredSubnets = registeredSubnets
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
         wifiNetworkAction = .connect
         vpnAction = .connect
     }
@@ -450,13 +466,19 @@ extension ShareRules {
     func evaluate(
         currentWiFiNetworkName: String?,
         isVPNConnected: Bool,
-        activeVPNNames: [String]
+        activeVPNNames: [String],
+        currentIPv4Subnets: [String] = []
     ) -> ShareRuleEvaluation {
-        if let requiredWiFiNetworkName {
+        if hasNetworkRule {
             let currentNetworkName = currentWiFiNetworkName?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let isHomeWiFi = currentNetworkName?.localizedCaseInsensitiveCompare(requiredWiFiNetworkName) == .orderedSame
-            let isEthernet = currentNetworkName == nil && !isVPNConnected
-            
+            let matchesWiFiName = requiredWiFiNetworkName.map { requiredName in
+                currentNetworkName?.localizedCaseInsensitiveCompare(requiredName) == .orderedSame
+            } ?? false
+            let matchesRegisteredSubnet = !registeredSubnets.isEmpty && currentIPv4Subnets.contains { registeredSubnets.contains($0) }
+            // Shares configured before subnet capture existed have nothing to
+            // compare against, so any wired connection keeps counting as a match.
+            let isLegacyEthernet = registeredSubnets.isEmpty && currentNetworkName == nil && !isVPNConnected
+
             let isVPNActive: Bool
             if vpnRuleEnabled {
                 if let requiredVPNName = requiredVPNName {
@@ -470,13 +492,13 @@ extension ShareRules {
                 isVPNActive = isVPNConnected
             }
 
-            let matches = isHomeWiFi || isEthernet || isVPNActive
+            let matches = matchesWiFiName || matchesRegisteredSubnet || isLegacyEthernet || isVPNActive
 
             if !matches {
                 let vpnSuffix = vpnRuleEnabled && !vpnName.isEmpty ? " \(vpnName)" : ""
                 return ShareRuleEvaluation(
                     allowsConnection: false,
-                    blockedStatus: .waitingForAllowedNetwork("Home network or VPN\(vpnSuffix)"),
+                    blockedStatus: .waitingForAllowedNetwork("the registered network or VPN\(vpnSuffix)"),
                     shouldDisconnectMountedShare: true,
                     shouldAttemptMount: false
                 )

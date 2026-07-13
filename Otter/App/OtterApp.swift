@@ -37,8 +37,10 @@ struct OtterApp: App {
                 .environmentObject(appModel.monitor)
                 .environmentObject(appModel.networkService)
                 .environmentObject(appModel.loginItemService)
+                .environmentObject(appModel.eventLog)
+                .frame(minWidth: 600, minHeight: 560)
         }
-        .defaultSize(width: 760, height: 480)
+        .defaultSize(width: 600, height: 600)
 
         Window("Preferences", id: AppModel.preferencesWindowID) {
             PreferencesView()

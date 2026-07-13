@@ -9,11 +9,15 @@ struct MenuBarView: View {
     @EnvironmentObject private var networkService: NetworkReachabilityService
     @EnvironmentObject private var updaterViewModel: UpdaterViewModel
 
+    private var shares: [NetworkShare] {
+        appModel.screenshotDemoShares ?? settings.shares
+    }
+
     var body: some View {
-        if settings.shares.isEmpty {
+        if shares.isEmpty {
             Text("No shares configured")
         } else {
-            ForEach(settings.shares) { share in
+            ForEach(shares) { share in
                 ShareMenu(share: share)
             }
         }
@@ -32,14 +36,14 @@ struct MenuBarView: View {
         } label: {
             Label("Mount All", systemImage: "arrow.triangle.2.circlepath")
         }
-        .disabled(settings.shares.isEmpty)
+        .disabled(shares.isEmpty)
 
         Button {
             Task { await monitor.disconnectAll() }
         } label: {
             Label("Disconnect All", systemImage: "eject")
         }
-        .disabled(settings.shares.isEmpty)
+        .disabled(shares.isEmpty)
 
         Divider()
 

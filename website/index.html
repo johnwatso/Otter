@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Otter - Keep a paw on Shares</title>
+    <meta
+      name="description"
+      content="Otter is a lightweight macOS menu bar app that keeps SMB network shares connected after sleep, Wi-Fi changes, VPN reconnects, and unexpected disconnects."
+    >
+    <meta id="theme-color" name="theme-color" content="#14213A">
+    <link rel="icon" type="image/png" href="assets/otter-icon.png">
+    <script>
+      (function () {
+        var storageKey = "otter-theme";
+        var savedTheme = null;
+
+        try {
+          savedTheme = localStorage.getItem(storageKey);
+        } catch (error) {
+          savedTheme = null;
+        }
+
+        var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        var theme = savedTheme || (prefersDark ? "dark" : "light");
+
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+        document.querySelector("#theme-color").setAttribute("content", theme === "dark" ? "#14213A" : "#EAF5FF");
+      })();
+    </script>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <button class="theme-toggle" type="button" aria-label="Toggle light and dark theme" aria-pressed="false">
+      <span class="theme-toggle-track" aria-hidden="true">
+        <span class="theme-toggle-thumb"></span>
+      </span>
+    </button>
+
+    <main id="main">
+      <section class="hero-section" id="top">
+        <div class="hero-shell">
+          <div class="brand-lockup">
+            <img src="assets/otter-icon.png" width="64" height="64" alt="">
+            <span>Otter</span>
+          </div>
+
+          <h1>
+            <span class="text-gradient">Keep a paw on Shares</span>
+            for macOS.
+          </h1>
+
+          <p class="hero-lede">
+            Otter quietly watches SMB shares for home users, small businesses, and home labs, reconnecting them after sleep, network changes, VPN reconnects, and unexpected disconnects.
+          </p>
+
+          <p class="hero-note">
+            Native, lightweight, and open source. Built for family NAS setups, office file shares, media servers, and backup volumes.
+          </p>
+
+          <div class="hero-actions">
+            <a class="button button-primary" href="./download/index.html">
+              <svg class="button-icon button-icon-line" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"></path>
+              </svg>
+              Download
+            </a>
+            <a class="button button-secondary" href="https://github.com/johnwatso/Otter">
+              <svg class="button-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.6 7.6 0 0 1 8 3.86c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"></path>
+              </svg>
+              View on GitHub
+            </a>
+          </div>
+
+          <div class="app-preview" aria-label="Otter Manage Shares screenshots">
+            <div class="screenshot-stage">
+              <img
+                class="app-shot app-shot-light"
+                src="assets/otter-app-light.png"
+                width="640"
+                height="650"
+                alt="Otter Manage Shares window in light mode showing share status and network conditions"
+              >
+              <img
+                class="app-shot app-shot-dark"
+                src="assets/otter-app-dark.png"
+                width="640"
+                height="650"
+                alt="Otter Manage Shares window in dark mode showing share status and network conditions"
+              >
+            </div>
+          </div>
+
+          <div class="trust-strip" aria-label="Otter highlights">
+            <span class="trust-badge">Home users</span>
+            <span class="trust-badge">Small business</span>
+            <span class="trust-badge">Home labs</span>
+            <span class="trust-badge">VPN aware</span>
+            <span class="trust-badge">Finder credentials</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="content-section" id="features">
+        <div class="section-shell">
+          <div class="section-heading">
+            <h2>Set it once. Let Otter keep watch.</h2>
+            <p>
+              Built for the small macOS moments that break shared storage: sleep, wake, Wi-Fi hops, VPN timing, and slow NAS or server wakeups.
+            </p>
+          </div>
+
+          <div class="feature-grid">
+            <article class="glass-panel card-glow-sky">
+              <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"></path>
+                </svg>
+              </span>
+              <h3>Home storage that stays mounted</h3>
+              <p>Keep photos, media libraries, family backups, and Finder shares available after your Mac sleeps or switches Wi-Fi.</p>
+            </article>
+
+            <article class="glass-panel card-glow-aurora">
+              <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M20.25 14.15v4.25c0 1.094-.787 2.036-1.872 2.18-2.087.277-4.216.42-6.378.42s-4.291-.143-6.378-.42c-1.085-.144-1.872-1.086-1.872-2.18v-4.25m16.5 0a2.18 2.18 0 0 0 .75-1.661V8.706c0-1.081-.768-2.015-1.837-2.175a48.114 48.114 0 0 0-3.413-.387m4.5 8.006c-.194.165-.42.295-.673.38A23.978 23.978 0 0 1 12 15.75c-2.648 0-5.195-.429-7.577-1.22a2.016 2.016 0 0 1-.673-.38m0 0A2.18 2.18 0 0 1 3 12.489V8.706c0-1.081.768-2.015 1.837-2.175a48.111 48.111 0 0 1 3.413-.387m7.5 0V5.25A2.25 2.25 0 0 0 13.5 3h-3a2.25 2.25 0 0 0-2.25 2.25v.894m7.5 0a48.667 48.667 0 0 0-7.5 0M12 12.75h.008v.008H12v-.008Z"></path>
+                </svg>
+              </span>
+              <h3>Office shares without babysitting</h3>
+              <p>Use per-share rules for trusted networks and VPNs so business folders reconnect only where they should.</p>
+            </article>
+
+            <article class="glass-panel card-glow-deep">
+              <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3m3 3a3 3 0 1 0 0 6h13.5a3 3 0 1 0 0-6m-16.5-3a3 3 0 0 1 3-3h13.5a3 3 0 0 1 3 3m-19.5 0a4.5 4.5 0 0 1 .9-2.7L5.737 5.1a3.375 3.375 0 0 1 2.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 0 1 .9 2.7m0 0a3 3 0 0 1-3 3m0 3h.008v.008h-.008v-.008Zm0-6h.008v.008h-.008v-.008Zm-3 6h.008v.008h-.008v-.008Zm0-6h.008v.008h-.008v-.008Z"></path>
+                </svg>
+              </span>
+              <h3>Home lab friendly</h3>
+              <p>Wake sleeping servers, retry slow mounts, and keep NAS volumes ready for Plex, automation, and backup jobs.</p>
+            </article>
+          </div>
+
+          <div class="comparison-panel glass-panel card-glow-sky">
+            <div class="comparison-inner">
+              <div class="comparison-icon" aria-hidden="true">
+                <img src="assets/otter-icon.png" width="34" height="34" alt="">
+              </div>
+
+              <h3>Otter vs Launch Agent</h3>
+              <p>
+                A Launch Agent can mount a simple share at login, but keeping SMB shares reliable on a Mac usually means handling sleep, wake, Wi-Fi changes, VPN timing, server reachability, and useful status. Otter wraps that work in a native app instead of a pile of scripts.
+              </p>
+
+              <div class="comparison-options">
+                <article class="comparison-card comparison-card-primary">
+                  <div class="comparison-card-heading">
+                    <img src="assets/otter-icon.png" width="26" height="26" alt="">
+                    <h4>Otter</h4>
+                  </div>
+
+                  <ul class="comparison-points">
+                    <li>
+                      <span class="point-good">✓</span>
+                      <strong>Setup</strong>
+                      <span>Add mounted Finder shares from a native UI</span>
+                    </li>
+                    <li>
+                      <span class="point-good">✓</span>
+                      <strong>Difficulty</strong>
+                      <span>Simple to set up, adjust, and understand later</span>
+                    </li>
+                    <li>
+                      <span class="point-good">✓</span>
+                      <strong>Recovery</strong>
+                      <span>Reconnects after sleep, wake, and network changes</span>
+                    </li>
+                    <li>
+                      <span class="point-good">✓</span>
+                      <strong>Conditions</strong>
+                      <span>Per-share Wi-Fi, VPN, reachability, and Wake-on-LAN rules</span>
+                    </li>
+                    <li>
+                      <span class="point-good">✓</span>
+                      <strong>Status</strong>
+                      <span>See connected, checking, and waiting shares at a glance</span>
+                    </li>
+                    <li>
+                      <span class="point-good">✓</span>
+                      <strong>Credentials</strong>
+                      <span>Checks Keychain for saved share passwords</span>
+                    </li>
+                  </ul>
+
+                </article>
+
+                <article class="comparison-card comparison-card-muted">
+                  <div class="comparison-card-heading">
+                    <span class="plist-file-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <path d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"></path>
+                      </svg>
+                    </span>
+                    <h4>Launch Agent</h4>
+                  </div>
+
+                  <ul class="comparison-points">
+                    <li>
+                      <span class="point-warn">✗</span>
+                      <strong>Setup</strong>
+                      <span>Requires plist and script maintenance</span>
+                    </li>
+                    <li>
+                      <span class="point-warn">✗</span>
+                      <strong>Difficulty</strong>
+                      <span>Harder to set up, debug, and safely change later</span>
+                    </li>
+                    <li>
+                      <span class="point-warn">✗</span>
+                      <strong>Recovery</strong>
+                      <span>Sleep, VPN, and network changes need custom logic</span>
+                    </li>
+                    <li>
+                      <span class="point-warn">✗</span>
+                      <strong>Conditions</strong>
+                      <span>VPN, Wi-Fi, reachability, and wake rules need scripting</span>
+                    </li>
+                    <li>
+                      <span class="point-warn">✗</span>
+                      <strong>Status</strong>
+                      <span>Debugging usually means Console or Terminal</span>
+                    </li>
+                    <li>
+                      <span class="point-warn">✗</span>
+                      <strong>Credentials</strong>
+                      <span>Does not check saved credentials for you</span>
+                    </li>
+                  </ul>
+
+                </article>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="download-section" id="download">
+        <div class="download-card glass-panel card-glow-white">
+          <div class="download-glow" aria-hidden="true"></div>
+          <div class="download-card-content">
+            <img class="download-app-icon theme-icon-light" src="assets/otter-icon-light.png" width="1024" height="1024" loading="lazy" decoding="async" alt="">
+            <img class="download-app-icon theme-icon-dark" src="assets/otter-icon-dark.png" width="1024" height="1024" loading="lazy" decoding="async" alt="">
+            <h2>Ready to keep your <span class="text-gradient">shares close.</span></h2>
+            <p>
+              Free, open source, and built for the Macs that rely on home storage, office shares, and home lab servers. Download the latest release when it is available.
+            </p>
+
+            <a class="button button-primary" href="./download/index.html">
+              <svg class="button-icon button-icon-line" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"></path>
+              </svg>
+              Get Otter
+            </a>
+            <p class="download-meta">Free · macOS app · No release published yet</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>Otter for macOS</span>
+      <span>Keep a paw on Shares.</span>
+    </footer>
+    <script>
+      (function () {
+        var storageKey = "otter-theme";
+        var toggle = document.querySelector(".theme-toggle");
+        var themeColor = document.querySelector("#theme-color");
+
+        function setTheme(theme, persist) {
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.style.colorScheme = theme;
+          toggle.setAttribute("aria-pressed", String(theme === "dark"));
+          themeColor.setAttribute("content", theme === "dark" ? "#14213A" : "#EAF5FF");
+
+          if (persist) {
+            try {
+              localStorage.setItem(storageKey, theme);
+            } catch (error) {
+              // Storage can fail in private browsing; the visual switch still works.
+            }
+          }
+        }
+
+        setTheme(document.documentElement.dataset.theme || "dark", false);
+
+        toggle.addEventListener("click", function () {
+          var nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+          setTheme(nextTheme, true);
+        });
+
+        if (window.matchMedia) {
+          window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function (event) {
+            try {
+              if (localStorage.getItem(storageKey)) {
+                return;
+              }
+            } catch (error) {
+              // Continue with system theme if storage is unavailable.
+            }
+
+            setTheme(event.matches ? "dark" : "light", false);
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>

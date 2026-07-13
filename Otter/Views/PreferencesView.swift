@@ -43,6 +43,15 @@ struct ShareManagementView: View {
     @EnvironmentObject private var loginItemService: LoginItemService
     @State private var selection: NetworkShare.ID?
     @State private var didRegisterWindowAppearance = false
+    @State private var isShowingActivityLog = false
+    @Namespace private var selectionHighlightNamespace
+    @State private var rowFrames: [NetworkShare.ID: CGRect] = [:]
+
+    fileprivate static let dragCoordinateSpace = "shareSelectorDrag"
+
+    private var shares: [NetworkShare] {
+        appModel.screenshotDemoShares ?? settings.shares
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -69,6 +78,12 @@ struct ShareManagementView: View {
                 .disabled(selectedShare == nil)
 
                 Button {
+                    isShowingActivityLog = true
+                } label: {
+                    Label("Activity Log", systemImage: "clock.arrow.circlepath")
+                }
+
+                Button {
                     if let selectedShare {
                         settings.removeShare(id: selectedShare.id)
                         selection = settings.shares.first?.id
@@ -78,6 +93,9 @@ struct ShareManagementView: View {
                 }
                 .disabled(selectedShare == nil)
             }
+        }
+        .sheet(isPresented: $isShowingActivityLog) {
+            ActivityLogView(initialShareFilter: selection)
         }
         .sheet(item: $appModel.editorRequest) { request in
             let editingShare = share(for: request)
@@ -106,10 +124,13 @@ struct ShareManagementView: View {
             }
 
             if selection == nil {
-                selection = settings.shares.first?.id
+                selection = shares.first?.id
             }
 
             loginItemService.refresh()
+        }
+        .onChange(of: appModel.screenshotDemoShares != nil) {
+            selection = shares.first?.id
         }
         .onDisappear {
             if didRegisterWindowAppearance {
@@ -119,20 +140,65 @@ struct ShareManagementView: View {
         }
     }
 
+    // Custom rows instead of List(selection:) so the selection is a sliding
+    // material pill (ported from SwiftMiner) rather than the accent-color bar.
     private var sidebar: some View {
-        List(selection: $selection) {
-            Section("Shares") {
-                ForEach(settings.shares) { share in
-                    ShareListRow(share: share, isSelected: selection == share.id)
-                        .tag(share.id)
+        ZStack {
+            SidebarMaterialBackground()
+
+            sidebarRows
+        }
+    }
+
+    private var sidebarRows: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Shares")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 2)
+
+                ForEach(shares) { share in
+                    ShareListRow(
+                        share: share,
+                        isSelected: selection == share.id,
+                        selectionHighlightNamespace: selectionHighlightNamespace
+                    ) {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            selection = share.id
+                        }
+                    }
                 }
             }
+            .padding(.horizontal, 8)
+            .padding(.top, 10)
+            .coordinateSpace(name: Self.dragCoordinateSpace)
+            .onPreferenceChange(ShareRowFramesKey.self) { rowFrames = $0 }
+            .gesture(selectionDragGesture)
+        }
+    }
+
+    private var selectionDragGesture: some Gesture {
+        DragGesture(minimumDistance: 6, coordinateSpace: .named(Self.dragCoordinateSpace))
+            .onChanged { value in
+                updateSelection(forDragLocation: value.location)
+            }
+    }
+
+    private func updateSelection(forDragLocation point: CGPoint) {
+        guard let target = shares.first(where: { rowFrames[$0.id]?.contains(point) ?? false }),
+              selection != target.id
+        else { return }
+
+        withAnimation(.easeInOut(duration: 0.18)) {
+            selection = target.id
         }
     }
 
     @ViewBuilder
     private var detail: some View {
-        if settings.shares.isEmpty {
+        if shares.isEmpty {
             ContentUnavailableView {
                 Label("No Network Shares", systemImage: "externaldrive.badge.plus")
             } description: {
@@ -152,7 +218,7 @@ struct ShareManagementView: View {
 
     private var selectedShare: NetworkShare? {
         guard let selection else { return nil }
-        return settings.share(id: selection)
+        return shares.first { $0.id == selection }
     }
 
     private func share(for request: ShareEditorRequest) -> NetworkShare? {
@@ -339,6 +405,18 @@ private struct GeneralPreferencesView: View {
             } header: {
                 Text("Network")
             }
+
+#if DEBUG
+            Section {
+                Toggle("Show demo shares", isOn: Binding(
+                    get: { appModel.isScreenshotDemoEnabled },
+                    set: { appModel.setScreenshotDemo($0) }
+                ))
+                SettingsSecondaryText("Replaces the share list with five fake shares in assorted states for product screenshots. Real configuration is untouched. Debug builds only.")
+            } header: {
+                Text("Developer")
+            }
+#endif
         }
         .compactPreferencesForm()
         .onAppear {
@@ -476,6 +554,8 @@ private struct ShareListRow: View {
     @EnvironmentObject private var monitor: ShareMonitor
     let share: NetworkShare
     let isSelected: Bool
+    let selectionHighlightNamespace: Namespace.ID
+    let action: () -> Void
 
     var body: some View {
         let status = monitor.status(for: share)
@@ -489,45 +569,312 @@ private struct ShareListRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(share.displayName)
                     .font(.body)
-                    .fontWeight(.medium)
+                    .fontWeight(isSelected ? .semibold : .medium)
                     .lineLimit(1)
-                
+
                 HStack(spacing: 4) {
-                    Image(systemName: statusSymbol(for: status))
+                    Image(systemName: status.circleSymbol)
                         .font(.caption2)
-                        .foregroundStyle(isSelected ? .primary : statusColor(for: status))
+                        .foregroundStyle(status.color)
                     Text(status.label)
                         .font(.caption)
-                        .foregroundStyle(isSelected ? .primary : .secondary)
+                        .foregroundStyle(.secondary)
                 }
             }
+
+            Spacer(minLength: 0)
         }
-        .padding(.vertical, 4)
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background {
+            if isSelected {
+                SidebarSelectionHighlight()
+                    .matchedGeometryEffect(id: "sidebarSelectionHighlight", in: selectionHighlightNamespace)
+            }
+        }
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: ShareRowFramesKey.self,
+                    value: [share.id: geo.frame(in: .named(ShareManagementView.dragCoordinateSpace))]
+                )
+            }
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { action() }
+    }
+}
+
+// Flat, column-like sidebar material (Apple Music style), ported from
+// SwiftMiner. Gives the selection pill enough backdrop contrast to read.
+private struct SidebarMaterialBackground: View {
+    var body: some View {
+        VisualEffectMaterialView(material: .sidebar)
+            .overlay {
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.10),
+                        Color.clear
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
+            .overlay(alignment: .trailing) {
+                Rectangle()
+                    .fill(Color.black.opacity(0.10))
+                    .frame(width: 1)
+            }
+            .clipShape(Rectangle())
+            .ignoresSafeArea()
+    }
+}
+
+private struct VisualEffectMaterialView: NSViewRepresentable {
+    let material: NSVisualEffectView.Material
+    var blendingMode: NSVisualEffectView.BlendingMode = .withinWindow
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.state = .active
+        view.material = material
+        view.blendingMode = blendingMode
+        return view
     }
 
-    private func statusColor(for status: ShareStatus) -> Color {
-        switch status {
-        case .connected:
-            return .green
-        case .reconnecting:
-            return .blue
-        case .failed:
-            return .red
-        case .waitingForNetwork, .waitingForAllowedNetwork:
-            return .orange
-        default:
-            return .secondary
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = material
+        nsView.blendingMode = blendingMode
+        nsView.state = .active
+    }
+}
+
+// Frosted material selection pill, ported from SwiftMiner's sidebar.
+private struct SidebarSelectionHighlight: View {
+    @Environment(\.controlActiveState) private var controlActiveState
+
+    private var highlightMaterial: Material {
+        controlActiveState == .active ? .ultraThinMaterial : .bar
+    }
+
+    private var strokeOpacity: Double {
+        controlActiveState == .active ? 0.16 : 0.10
+    }
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 11, style: .continuous)
+            .fill(highlightMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .strokeBorder(.white.opacity(strokeOpacity), lineWidth: 1)
+            )
+    }
+}
+
+private struct ShareRowFramesKey: PreferenceKey {
+    static var defaultValue: [NetworkShare.ID: CGRect] { [:] }
+    static func reduce(value: inout [NetworkShare.ID: CGRect], nextValue: () -> [NetworkShare.ID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+// Dense, flat activity list in the SwiftMiner event log style.
+private struct ActivityLogView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appModel: AppModel
+    @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var eventLog: ShareEventLog
+    @State private var shareFilter: NetworkShare.ID?
+
+    init(initialShareFilter: NetworkShare.ID? = nil) {
+        _shareFilter = State(initialValue: initialShareFilter)
+    }
+
+    private var allShares: [NetworkShare] {
+        appModel.screenshotDemoShares ?? settings.shares
+    }
+
+    private var visibleEvents: [ShareEvent] {
+        let events = appModel.screenshotDemoEvents ?? eventLog.events(for: nil)
+        guard let resolvedFilter else { return events }
+        return events.filter { $0.shareID == resolvedFilter }
+    }
+
+    // A filter pointing at a share that was removed falls back to All Shares.
+    private var resolvedFilter: NetworkShare.ID? {
+        guard let shareFilter, allShares.contains(where: { $0.id == shareFilter }) else { return nil }
+        return shareFilter
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Activity Log")
+                    .font(.title3)
+                    .fontWeight(.bold)
+
+                Spacer()
+
+                Picker("Share", selection: $shareFilter) {
+                    Text("All Shares").tag(NetworkShare.ID?.none)
+
+                    ForEach(allShares) { share in
+                        Text(share.displayName).tag(Optional(share.id))
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 170)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+
+            Divider()
+
+            if visibleEvents.isEmpty {
+                ContentUnavailableView {
+                    Label("No Activity", systemImage: "clock.arrow.circlepath")
+                } description: {
+                    Text("Mounts, drops, and failures will appear here as they happen.")
+                }
+                .frame(maxHeight: .infinity)
+            } else {
+                List(visibleEvents) { event in
+                    ActivityLogRow(event: event, shareName: shareName(for: event.shareID))
+                        .listRowInsets(EdgeInsets(top: 3, leading: 12, bottom: 3, trailing: 12))
+                        .listRowSeparator(.visible, edges: .bottom)
+                        .listRowSeparatorTint(.secondary.opacity(0.14))
+                        .listRowBackground(Color.clear)
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+            }
+
+            Divider()
+
+            HStack {
+                Button("Clear Log") {
+                    eventLog.clear()
+                }
+                .disabled(appModel.screenshotDemoEvents != nil || eventLog.events(for: nil).isEmpty)
+
+                Spacer()
+
+                Button("Done") {
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(16)
+        }
+        .frame(width: 480, height: 440)
+    }
+
+    private func shareName(for shareID: NetworkShare.ID) -> String {
+        allShares.first { $0.id == shareID }?.displayName ?? "Removed share"
+    }
+}
+
+private struct ActivityLogRow: View {
+    let event: ShareEvent
+    let shareName: String
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: event.kind.symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(event.kind.color)
+                .frame(width: 16, alignment: .center)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(event.kind.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Text(metadataText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .help(metadataText)
+            }
+
+            Spacer(minLength: 8)
+
+            Text(timeLabel)
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var metadataText: String {
+        var parts = [shareName]
+        if let detail = event.detail, !detail.isEmpty {
+            parts.append(detail)
+        }
+        return parts.joined(separator: " • ")
+    }
+
+    private var timeLabel: String {
+        if Calendar.current.isDateInToday(event.date) {
+            return event.date.formatted(date: .omitted, time: .shortened)
+        }
+        return event.date.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
+private extension ShareEventKind {
+    var title: String {
+        switch self {
+        case .mounted:
+            "Mounted"
+        case .connectionLost:
+            "Connection lost"
+        case .disconnected:
+            "Disconnected"
+        case .blockedByRule:
+            "Disconnected by network condition"
+        case .mountFailed:
+            "Mount failed"
+        case .wakePacketSent:
+            "Wake-on-LAN packet sent"
         }
     }
 
-    private func statusSymbol(for status: ShareStatus) -> String {
-        switch status {
-        case .connected:
-            return "circle.fill"
-        case .reconnecting, .wakePacketSent:
-            return "circle.fill"
-        default:
-            return "circle"
+    var symbol: String {
+        switch self {
+        case .mounted:
+            "checkmark.circle.fill"
+        case .connectionLost:
+            "wifi.exclamationmark"
+        case .disconnected:
+            "eject.circle.fill"
+        case .blockedByRule:
+            "pause.circle.fill"
+        case .mountFailed:
+            "exclamationmark.triangle.fill"
+        case .wakePacketSent:
+            "power.circle.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .mounted:
+            .green
+        case .connectionLost:
+            .orange
+        case .disconnected:
+            .secondary
+        case .blockedByRule:
+            .indigo
+        case .mountFailed:
+            .red
+        case .wakePacketSent:
+            .blue
         }
     }
 }
@@ -537,6 +884,7 @@ private struct ShareDetailView: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var monitor: ShareMonitor
     @EnvironmentObject private var networkService: NetworkReachabilityService
+    @EnvironmentObject private var eventLog: ShareEventLog
     let share: NetworkShare
 
     var body: some View {
@@ -573,6 +921,13 @@ private struct ShareDetailView: View {
                         
                         if let lastConnected = runtimeState.lastConnectedAt {
                             Text(formatLastConnected(lastConnected))
+                        }
+
+                        let dropCount = appModel.screenshotDemoDropCount(for: currentShare.id)
+                            ?? eventLog.connectionDropCount(for: currentShare.id)
+                        if dropCount > 0 {
+                            Text("Connection dropped \(dropCount) time\(dropCount == 1 ? "" : "s") in the last 24 hours")
+                                .foregroundStyle(.orange)
                         }
                     }
                     .font(.subheadline)
@@ -625,17 +980,17 @@ private struct ShareDetailView: View {
                         .foregroundStyle(.secondary)
                     
                     VStack(spacing: 6) {
-                        if currentShare.rules.hasWiFiNetworkRule {
-                            if currentShare.rules.hasVPNRule && !currentShare.rules.vpnName.isEmpty {
-                                DetailRow(label: "Limit connections", value: "Home network or VPN \(currentShare.rules.vpnName) only")
-                            } else {
-                                DetailRow(label: "Limit connections", value: "Home network or VPN only")
+                        if currentShare.rules.hasNetworkRule || currentShare.rules.hasVPNRule {
+                            DetailRow(label: "Connect on", value: "Registered network or VPN")
+                            if !currentShare.rules.registeredSubnets.isEmpty {
+                                DetailRow(label: "Network", value: currentShare.rules.registeredSubnets.joined(separator: ", "))
                             }
                             if let ssid = currentShare.rules.requiredWiFiNetworkName {
-                                DetailRow(label: "Home Wi-Fi", value: ssid)
+                                DetailRow(label: "Wi-Fi", value: ssid)
                             }
+                            DetailRow(label: "VPN", value: currentShare.rules.requiredVPNName ?? "Any VPN")
                         } else {
-                            DetailRow(label: "Limit connections", value: "None (any network)")
+                            DetailRow(label: "Connect on", value: "Any network")
                         }
                     }
                 }
@@ -704,10 +1059,14 @@ private struct ShareDetailView: View {
     }
 
     private var hasKeychainCredentials: Bool {
+        if let demoValue = appModel.screenshotDemoHasCredentials(for: currentShare.id) {
+            return demoValue
+        }
+
         guard let url = currentShare.url,
               let host = url.host(percentEncoded: false)
         else { return false }
-        
+
         if NetworkShare.checkKeychainHasCredentials(for: host) {
             return true
         }
@@ -719,10 +1078,6 @@ private struct ShareDetailView: View {
 
     private var currentShare: NetworkShare {
         settings.share(id: share.id) ?? share
-    }
-
-    private var currentVPNLabel: String {
-        networkService.currentVPNDisplayName
     }
 
     private var fallbackURLString: String? {

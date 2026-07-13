@@ -11,6 +11,7 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
     @Published private(set) var isOnline = true
     @Published private(set) var currentWiFiNetworkName: String?
     @Published private(set) var isVPNConnected = false
+    @Published private(set) var currentIPv4Subnets: [String] = []
     @Published private(set) var activeVPNNames: [String] = []
     @Published private(set) var knownVPNNames: [String] = []
     @Published private(set) var locationAuthorizationStatus: CLAuthorizationStatus = .notDetermined
@@ -152,6 +153,7 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
 
             lastDetailsRefresh = Date()
             currentWiFiNetworkName = snapshot.currentWiFiNetworkName
+            currentIPv4Subnets = snapshot.currentIPv4Subnets
             activeVPNNames = snapshot.activeVPNNames
             knownVPNNames = snapshot.knownVPNNames
             isVPNConnected = snapshot.isVPNConnected
@@ -164,6 +166,7 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
 
     private struct NetworkDetailsSnapshot: Sendable {
         var currentWiFiNetworkName: String?
+        var currentIPv4Subnets: [String]
         var activeVPNNames: [String]
         var knownVPNNames: [String]
         var isVPNConnected: Bool
@@ -189,6 +192,7 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
 
         return NetworkDetailsSnapshot(
             currentWiFiNetworkName: currentWiFiNetworkName,
+            currentIPv4Subnets: readCurrentIPv4Subnets(),
             activeVPNNames: activeVPNNames,
             knownVPNNames: readKnownVPNNames(including: activeVPNNames),
             isVPNConnected: hasActiveTunnel || !connectedServiceNames.isEmpty
@@ -199,6 +203,7 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
         let newOnlineState = path.status == .satisfied
         let changed = newOnlineState != isOnline
         let previousWiFiNetworkName = currentWiFiNetworkName
+        let previousIPv4Subnets = currentIPv4Subnets
         let wasVPNConnected = isVPNConnected
         let previousVPNNames = activeVPNNames
         let previousKnownVPNNames = knownVPNNames
@@ -206,10 +211,11 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
         await refreshNetworkDetailsNow()
 
         let wifiNetworkChanged = previousWiFiNetworkName != currentWiFiNetworkName
+        let subnetsChanged = previousIPv4Subnets != currentIPv4Subnets
         let vpnChanged = wasVPNConnected != isVPNConnected
             || previousVPNNames != activeVPNNames
             || previousKnownVPNNames != knownVPNNames
-        let shouldNotify = changed || wifiNetworkChanged || vpnChanged || !hasReceivedPathUpdate
+        let shouldNotify = changed || wifiNetworkChanged || subnetsChanged || vpnChanged || !hasReceivedPathUpdate
         hasReceivedPathUpdate = true
 
         if shouldNotify {
@@ -230,6 +236,55 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
         }
 
         return networkName
+    }
+
+    // The IPv4 networks (CIDR, e.g. "192.168.1.0/24") the Mac is currently on,
+    // excluding loopback, link-local, and VPN tunnel interfaces. Used to
+    // recognize the network a share was configured on.
+    private nonisolated static func readCurrentIPv4Subnets() -> [String] {
+        var addresses: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&addresses) == 0, let addresses else {
+            return []
+        }
+
+        defer { freeifaddrs(addresses) }
+
+        var subnets = Set<String>()
+        var cursor: UnsafeMutablePointer<ifaddrs>? = addresses
+
+        while let current = cursor {
+            let interface = current.pointee
+            cursor = interface.ifa_next
+
+            let flags = Int32(interface.ifa_flags)
+            guard (flags & IFF_UP) != 0,
+                  (flags & IFF_RUNNING) != 0,
+                  (flags & IFF_LOOPBACK) == 0,
+                  !isVPNInterfaceName(String(cString: interface.ifa_name)),
+                  let address = interface.ifa_addr,
+                  Int32(address.pointee.sa_family) == AF_INET,
+                  hasUsableIPv4Address(address),
+                  let netmask = interface.ifa_netmask,
+                  Int32(netmask.pointee.sa_family) == AF_INET
+            else { continue }
+
+            let ipAddress = address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
+                UInt32(bigEndian: $0.pointee.sin_addr.s_addr)
+            }
+            let mask = netmask.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
+                UInt32(bigEndian: $0.pointee.sin_addr.s_addr)
+            }
+
+            guard mask != 0 else { continue }
+
+            let network = ipAddress & mask
+            let dottedNetwork = [24, 16, 8, 0]
+                .map { String((network >> $0) & 0xff) }
+                .joined(separator: ".")
+            subnets.insert("\(dottedNetwork)/\(mask.nonzeroBitCount)")
+        }
+
+        return subnets.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
     private nonisolated static func activeVPNInterfaceNames() -> [String] {

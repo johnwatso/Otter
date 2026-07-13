@@ -23,6 +23,93 @@ struct ShareRuntimeState: Equatable {
     var lastConnectedAt: Date?
 }
 
+enum ShareEventKind: String, Codable {
+    case mounted
+    case connectionLost
+    case disconnected
+    case blockedByRule
+    case mountFailed
+    case wakePacketSent
+}
+
+struct ShareEvent: Identifiable, Codable, Equatable {
+    let id: UUID
+    let shareID: NetworkShare.ID
+    let date: Date
+    let kind: ShareEventKind
+    let detail: String?
+}
+
+// Persisted, capped log of share status transitions. Feeds the Activity Log
+// window and the per-share drop counter in the detail pane.
+@MainActor
+final class ShareEventLog: ObservableObject {
+    // Newest first.
+    @Published private(set) var events: [ShareEvent]
+
+    private static let storageKey = "shareEventLog"
+    private static let maxEvents = 200
+    // Retry loops re-report the same failure; identical consecutive events
+    // for a share within this window collapse into the earlier entry.
+    private static let coalescingWindow: TimeInterval = 15 * 60
+
+    init() {
+        if let data = UserDefaults.standard.data(forKey: Self.storageKey),
+           let stored = try? JSONDecoder().decode([ShareEvent].self, from: data) {
+            events = stored
+        } else {
+            events = []
+        }
+    }
+
+    func record(_ kind: ShareEventKind, for share: NetworkShare, detail: String? = nil) {
+        if let latest = events.first(where: { $0.shareID == share.id }),
+           latest.kind == kind,
+           latest.detail == detail,
+           Date().timeIntervalSince(latest.date) < Self.coalescingWindow {
+            return
+        }
+
+        events.insert(
+            ShareEvent(id: UUID(), shareID: share.id, date: Date(), kind: kind, detail: detail),
+            at: 0
+        )
+        if events.count > Self.maxEvents {
+            events.removeLast(events.count - Self.maxEvents)
+        }
+        save()
+    }
+
+    func events(for shareID: NetworkShare.ID?) -> [ShareEvent] {
+        guard let shareID else { return events }
+        return events.filter { $0.shareID == shareID }
+    }
+
+    func connectionDropCount(for shareID: NetworkShare.ID, within interval: TimeInterval = 24 * 60 * 60) -> Int {
+        let cutoff = Date().addingTimeInterval(-interval)
+        return events
+            .filter { $0.shareID == shareID && $0.kind == .connectionLost && $0.date >= cutoff }
+            .count
+    }
+
+    func pruneShares(keeping shareIDs: Set<NetworkShare.ID>) {
+        let prunedEvents = events.filter { shareIDs.contains($0.shareID) }
+        guard prunedEvents.count != events.count else { return }
+        events = prunedEvents
+        save()
+    }
+
+    func clear() {
+        events = []
+        save()
+    }
+
+    private func save() {
+        guard let data = try? JSONEncoder().encode(events) else { return }
+        UserDefaults.standard.set(data, forKey: Self.storageKey)
+    }
+}
+
 enum RetryBackoff {
     static let delays: [TimeInterval] = [10, 30, 120, 300]
 
@@ -52,6 +139,7 @@ final class ShareMonitor: ObservableObject {
     private let wakeOnLANService: WakeOnLANService
     private let networkService: NetworkReachabilityService
     private let notificationService: NotificationService
+    private let eventLog: ShareEventLog
     private var cancellables = Set<AnyCancellable>()
     private var workspaceObservers: [NSObjectProtocol] = []
     private var fallbackTimer: Timer?
@@ -61,19 +149,32 @@ final class ShareMonitor: ObservableObject {
     private var pendingChecks: [NetworkShare.ID: (reason: MonitorReason, force: Bool)] = [:]
     private var hasStarted = false
     private var lastEvaluatedShares: [NetworkShare.ID: NetworkShare] = [:]
+    private var persistedConnectionTimes: [String: PersistedConnectionTimes] = [:]
+
+    private static let connectionTimesKey = "shareConnectionTimes"
+
+    // Connection timestamps survive relaunches; everything else in the runtime
+    // state is re-derived by the first evaluation.
+    private struct PersistedConnectionTimes: Codable, Equatable {
+        var mountedAt: Date?
+        var lastConnectedAt: Date?
+    }
 
     init(
         settings: SettingsStore,
         mountService: MountService,
         wakeOnLANService: WakeOnLANService,
         networkService: NetworkReachabilityService,
-        notificationService: NotificationService
+        notificationService: NotificationService,
+        eventLog: ShareEventLog
     ) {
         self.settings = settings
         self.mountService = mountService
         self.wakeOnLANService = wakeOnLANService
         self.networkService = networkService
         self.notificationService = notificationService
+        self.eventLog = eventLog
+        persistedConnectionTimes = Self.loadPersistedConnectionTimes()
         syncStates(with: settings.shares)
     }
 
@@ -106,12 +207,27 @@ final class ShareMonitor: ObservableObject {
         scheduleCheck(reason: .launch)
     }
 
+#if DEBUG
+    // Supplies fixed runtime states for screenshot demo shares (set by AppModel).
+    var demoStateProvider: ((NetworkShare.ID) -> ShareRuntimeState?)?
+#endif
+
     func status(for share: NetworkShare) -> ShareStatus {
-        states[share.id]?.status ?? .disconnected
+#if DEBUG
+        if let demoState = demoStateProvider?(share.id) {
+            return demoState.status
+        }
+#endif
+        return states[share.id]?.status ?? .disconnected
     }
 
     func runtimeState(for share: NetworkShare) -> ShareRuntimeState {
-        states[share.id] ?? ShareRuntimeState()
+#if DEBUG
+        if let demoState = demoStateProvider?(share.id) {
+            return demoState
+        }
+#endif
+        return states[share.id] ?? ShareRuntimeState()
     }
 
     func mountAll() async {
@@ -295,7 +411,8 @@ final class ShareMonitor: ObservableObject {
         let ruleEvaluation = share.rules.evaluate(
             currentWiFiNetworkName: networkService.currentWiFiNetworkName,
             isVPNConnected: networkService.isVPNConnected,
-            activeVPNNames: networkService.activeVPNNames
+            activeVPNNames: networkService.activeVPNNames,
+            currentIPv4Subnets: networkService.currentIPv4Subnets
         )
         if !ruleEvaluation.allowsConnection {
             cancelRetry(for: share.id)
@@ -506,7 +623,64 @@ final class ShareMonitor: ObservableObject {
         }
 
         states[share.id] = updatedState
+        persistConnectionTimes(for: share.id, state: updatedState)
+        recordEvent(for: share, previous: previousStatus, current: updatedState.status)
         notificationService.notifyStatusChange(for: share, previous: previousStatus, current: updatedState.status)
+    }
+
+    private func recordEvent(for share: NetworkShare, previous: ShareStatus, current: ShareStatus) {
+        guard previous != current else { return }
+
+        switch current {
+        case .connected:
+            eventLog.record(.mounted, for: share)
+        case let .failed(message):
+            eventLog.record(.mountFailed, for: share, detail: message)
+        case .wakePacketSent:
+            eventLog.record(.wakePacketSent, for: share)
+        case .disconnected where previous == .connected:
+            eventLog.record(.disconnected, for: share)
+        case let .waitingForAllowedNetwork(requirement) where previous == .connected,
+             let .pausedByRule(requirement) where previous == .connected:
+            eventLog.record(.blockedByRule, for: share, detail: requirement)
+        case .reconnecting where previous == .connected,
+             .waitingForNetwork where previous == .connected:
+            eventLog.record(.connectionLost, for: share)
+        default:
+            break
+        }
+    }
+
+    private func persistConnectionTimes(for shareID: NetworkShare.ID, state: ShareRuntimeState) {
+        let key = shareID.uuidString
+        let existing = persistedConnectionTimes[key]
+        let updated = PersistedConnectionTimes(mountedAt: state.mountedAt, lastConnectedAt: state.lastConnectedAt)
+        guard existing != updated else { return }
+
+        // lastConnectedAt refreshes on every check while a share stays
+        // connected; skip the defaults write until it has moved meaningfully.
+        if let existingDate = existing?.lastConnectedAt,
+           let updatedDate = updated.lastConnectedAt,
+           existing?.mountedAt == updated.mountedAt,
+           updatedDate.timeIntervalSince(existingDate) < 60 {
+            return
+        }
+
+        persistedConnectionTimes[key] = updated
+        savePersistedConnectionTimes()
+    }
+
+    private func savePersistedConnectionTimes() {
+        guard let data = try? JSONEncoder().encode(persistedConnectionTimes) else { return }
+        UserDefaults.standard.set(data, forKey: Self.connectionTimesKey)
+    }
+
+    private static func loadPersistedConnectionTimes() -> [String: PersistedConnectionTimes] {
+        guard let data = UserDefaults.standard.data(forKey: connectionTimesKey),
+              let times = try? JSONDecoder().decode([String: PersistedConnectionTimes].self, from: data)
+        else { return [:] }
+
+        return times
     }
 
     private func saveState(_ state: ShareRuntimeState, for shareID: NetworkShare.ID) {
@@ -559,8 +733,22 @@ final class ShareMonitor: ObservableObject {
         lastWakePacketDates = lastWakePacketDates.filter { shareIDs.contains($0.key) }
 
         for share in shares where states[share.id] == nil {
-            states[share.id] = ShareRuntimeState()
+            var state = ShareRuntimeState()
+            if let times = persistedConnectionTimes[share.id.uuidString] {
+                state.mountedAt = times.mountedAt
+                state.lastConnectedAt = times.lastConnectedAt
+            }
+            states[share.id] = state
         }
+
+        let validKeys = Set(shareIDs.map(\.uuidString))
+        let prunedTimes = persistedConnectionTimes.filter { validKeys.contains($0.key) }
+        if prunedTimes.count != persistedConnectionTimes.count {
+            persistedConnectionTimes = prunedTimes
+            savePersistedConnectionTimes()
+        }
+
+        eventLog.pruneShares(keeping: shareIDs)
     }
 }
 

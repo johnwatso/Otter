@@ -167,7 +167,77 @@ final class ShareRulesEvaluationTests: XCTestCase {
         let blocked = rules.evaluate(currentWiFiNetworkName: "Coffee Shop", isVPNConnected: false, activeVPNNames: [])
         XCTAssertFalse(blocked.allowsConnection)
         XCTAssertTrue(blocked.shouldDisconnectMountedShare)
-        XCTAssertEqual(blocked.blockedStatus, .waitingForAllowedNetwork("Home network or VPN"))
+        XCTAssertEqual(blocked.blockedStatus, .waitingForAllowedNetwork("the registered network or VPN"))
+    }
+
+    func testRegisteredSubnetRuleMatchesRegisteredSubnet() {
+        let rules = ShareRules(registeredSubnets: ["192.168.50.0/24"])
+
+        // Same subnet, regardless of Wi-Fi vs Ethernet -> succeeds
+        let onHomeSubnet = rules.evaluate(
+            currentWiFiNetworkName: nil,
+            isVPNConnected: false,
+            activeVPNNames: [],
+            currentIPv4Subnets: ["192.168.50.0/24"]
+        )
+        XCTAssertTrue(onHomeSubnet.allowsConnection)
+        XCTAssertTrue(onHomeSubnet.shouldAttemptMount)
+
+        // Different wired network -> blocked, unlike the legacy Ethernet fallback
+        let onForeignSubnet = rules.evaluate(
+            currentWiFiNetworkName: nil,
+            isVPNConnected: false,
+            activeVPNNames: [],
+            currentIPv4Subnets: ["10.0.0.0/24"]
+        )
+        XCTAssertFalse(onForeignSubnet.allowsConnection)
+        XCTAssertTrue(onForeignSubnet.shouldDisconnectMountedShare)
+
+        // VPN still counts as an allowed connection path
+        let onVPNElsewhere = rules.evaluate(
+            currentWiFiNetworkName: nil,
+            isVPNConnected: true,
+            activeVPNNames: [],
+            currentIPv4Subnets: ["10.0.0.0/24"]
+        )
+        XCTAssertTrue(onVPNElsewhere.allowsConnection)
+    }
+
+    func testSubnetAndWiFiNameEachMatchIndependently() {
+        let rules = ShareRules(wifiNetworkName: "Home", registeredSubnets: ["192.168.50.0/24"])
+
+        // Registered subnet matches even when the SSID differs (renamed
+        // network) or is unreadable without Location Services access.
+        let renamedWiFi = rules.evaluate(
+            currentWiFiNetworkName: "New Network Name",
+            isVPNConnected: false,
+            activeVPNNames: [],
+            currentIPv4Subnets: ["192.168.50.0/24"]
+        )
+        XCTAssertTrue(renamedWiFi.allowsConnection)
+
+        // The Wi-Fi name still matches on its own if the subnet changed.
+        let newSubnet = rules.evaluate(
+            currentWiFiNetworkName: "Home",
+            isVPNConnected: false,
+            activeVPNNames: [],
+            currentIPv4Subnets: ["192.168.86.0/24"]
+        )
+        XCTAssertTrue(newSubnet.allowsConnection)
+    }
+
+    func testRegisteredSubnetDoesNotTrustForeignEthernet() {
+        let rules = ShareRules(wifiNetworkName: "Home", registeredSubnets: ["192.168.50.0/24"])
+
+        // A wired connection on some other network must not count as home
+        // once a subnet is registered.
+        let foreignEthernet = rules.evaluate(
+            currentWiFiNetworkName: nil,
+            isVPNConnected: false,
+            activeVPNNames: [],
+            currentIPv4Subnets: ["10.20.30.0/24"]
+        )
+        XCTAssertFalse(foreignEthernet.allowsConnection)
     }
 
     func testNamedVPNRuleOnlyMatchesThatVPN() {
@@ -208,20 +278,21 @@ final class ShareRulesEvaluationTests: XCTestCase {
         let wifiOnlyIsEnough = rules.evaluate(currentWiFiNetworkName: "Home", isVPNConnected: false, activeVPNNames: [])
         XCTAssertTrue(wifiOnlyIsEnough.allowsConnection)
 
-        // Wired Ethernet -> succeeds directly
+        // Wired Ethernet -> succeeds directly (legacy share with no registered
+        // subnet keeps the old any-Ethernet behavior)
         let ethernetOnlyIsEnough = rules.evaluate(currentWiFiNetworkName: nil, isVPNConnected: false, activeVPNNames: [])
         XCTAssertTrue(ethernetOnlyIsEnough.allowsConnection)
 
-        // Untrusted Wifi, no VPN -> blocked
+        // Unregistered Wi-Fi, no VPN -> blocked
         let foreignWifiNoVPN = rules.evaluate(currentWiFiNetworkName: "Coffee Shop", isVPNConnected: false, activeVPNNames: [])
         XCTAssertFalse(foreignWifiNoVPN.allowsConnection)
-        XCTAssertEqual(foreignWifiNoVPN.blockedStatus, .waitingForAllowedNetwork("Home network or VPN Work VPN"))
+        XCTAssertEqual(foreignWifiNoVPN.blockedStatus, .waitingForAllowedNetwork("the registered network or VPN Work VPN"))
 
-        // Untrusted Wifi, correct VPN -> succeeds
+        // Unregistered Wi-Fi, correct VPN -> succeeds
         let foreignWifiWithVPN = rules.evaluate(currentWiFiNetworkName: "Coffee Shop", isVPNConnected: true, activeVPNNames: ["Work VPN"])
         XCTAssertTrue(foreignWifiWithVPN.allowsConnection)
 
-        // Untrusted Wifi, wrong VPN -> blocked
+        // Unregistered Wi-Fi, wrong VPN -> blocked
         let foreignWifiWithWrongVPN = rules.evaluate(currentWiFiNetworkName: "Coffee Shop", isVPNConnected: true, activeVPNNames: ["Other VPN"])
         XCTAssertFalse(foreignWifiWithWrongVPN.allowsConnection)
     }
