@@ -897,10 +897,10 @@ private struct ShareDetailView: View {
                 // Status Section
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Image(systemName: "circle.fill")
-                            .font(.system(size: 8))
-                            .foregroundStyle(statusColor(for: status))
-                        
+                        Image(systemName: status.circleSymbol)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(status.color)
+
                         Text(status.label)
                             .font(.headline)
                             .foregroundStyle(.primary)
@@ -1102,35 +1102,6 @@ private struct ShareDetailView: View {
         }
     }
 
-    private func statusColor(for status: ShareStatus) -> Color {
-        switch status {
-        case .connected:
-            return .green
-        case .reconnecting:
-            return .blue
-        case .failed:
-            return .red
-        case .waitingForNetwork, .waitingForAllowedNetwork:
-            return .orange
-        default:
-            return .secondary
-        }
-    }
-
-    private func statusIcon(for status: ShareStatus) -> String {
-        switch status {
-        case .connected:
-            return "checkmark.circle.fill"
-        case .reconnecting:
-            return "arrow.triangle.2.circlepath.circle.fill"
-        case .failed:
-            return "exclamationmark.circle.fill"
-        case .waitingForNetwork, .waitingForAllowedNetwork:
-            return "wifi.circle.fill"
-        default:
-            return "circle.fill"
-        }
-    }
 }
 
 private struct DetailRow: View {
