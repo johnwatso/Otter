@@ -48,7 +48,7 @@ struct MenuBarView: View {
         Divider()
 
         networkStatusLabel
-        if networkService.isVPNConnected {
+        if networkService.isVPNConnected || networkService.hasUnidentifiedTunnel {
             vpnStatusLabel
         }
 

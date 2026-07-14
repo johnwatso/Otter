@@ -1,5 +1,5 @@
+import Darwin
 import Foundation
-import Security
 
 struct NetworkShare: Identifiable, Codable, Hashable {
     var id: UUID
@@ -109,77 +109,11 @@ struct NetworkShare: Identifiable, Codable, Hashable {
             || host.withCString { inet_pton(AF_INET6, $0, &sin6) } == 1
     }
 
-    static func checkKeychainHasCredentials(for host: String) -> Bool {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassInternetPassword,
-            kSecAttrServer as String: host,
-            kSecAttrProtocol as String: kSecAttrProtocolSMB,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        let status = SecItemCopyMatching(query as CFDictionary, nil)
-        return status == errSecSuccess || status == errSecInteractionNotAllowed
-    }
-
-    static func syncKeychainCredentials(fromHost: String, toHost: String) {
-        guard !fromHost.isEmpty, !toHost.isEmpty, fromHost != toHost else { return }
-        
-        // If the destination host already has credentials, do nothing
-        if checkKeychainHasCredentials(for: toHost) {
-            return
-        }
-        
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassInternetPassword,
-            kSecAttrServer as String: fromHost,
-            kSecAttrProtocol as String: kSecAttrProtocolSMB,
-            kSecReturnAttributes as String: true,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess,
-              let dict = result as? [String: Any],
-              let account = dict[kSecAttrAccount as String] as? String,
-              let passwordData = dict[kSecValueData as String] as? Data
-        else {
-            return
-        }
-        
-        let newQuery: [String: Any] = [
-            kSecClass as String: kSecClassInternetPassword,
-            kSecAttrServer as String: toHost,
-            kSecAttrProtocol as String: kSecAttrProtocolSMB,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: passwordData,
-            kSecAttrLabel as String: "Otter: \(toHost)",
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
-        ]
-        
-        _ = SecItemAdd(newQuery as CFDictionary, nil)
-    }
-
-    static func resolveIPAddress(for hostname: String) async -> String? {
-        await Task.detached(priority: .utility) { () -> String? in
-            var res: UnsafeMutablePointer<addrinfo>?
-            let status = getaddrinfo(hostname, nil, nil, &res)
-            guard status == 0, let first = res else { return nil }
-            defer { freeaddrinfo(res) }
-
-            var hostnameBuffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-            let nameInfoStatus = getnameinfo(
-                first.pointee.ai_addr,
-                first.pointee.ai_addrlen,
-                &hostnameBuffer,
-                socklen_t(hostnameBuffer.count),
-                nil,
-                0,
-                NI_NUMERICHOST
-            )
-            guard nameInfoStatus == 0 else { return nil }
-            return String(cString: hostnameBuffer)
-        }.value
+    static func resolveIPAddress(
+        for hostname: String,
+        using resolver: any HostResolving = SystemHostResolver()
+    ) async -> String? {
+        await resolver.resolveIPAddress(for: hostname)
     }
 
     static func defaultMountPath(displayName: String, urlString: String) -> String {
@@ -353,60 +287,48 @@ struct WakeOnLANConfiguration: Codable, Hashable {
 
 struct ShareRules: Codable, Hashable {
     var wifiNetworkName: String
-    var wifiNetworkAction: ShareRuleAction
     // IPv4 networks (CIDR strings like "192.168.1.0/24") captured when the
     // network condition was configured. Being on any of them identifies the
     // registered network, whether the Mac is on Wi-Fi or Ethernet.
     var registeredSubnets: [String]
     var vpnRuleEnabled: Bool
     var vpnName: String
-    var vpnAction: ShareRuleAction
 
     init(
         wifiNetworkName: String = "",
-        wifiNetworkAction: ShareRuleAction = .connect,
         registeredSubnets: [String] = [],
         vpnRuleEnabled: Bool = false,
-        vpnName: String = "",
-        vpnAction: ShareRuleAction = .connect
+        vpnName: String = ""
     ) {
         self.wifiNetworkName = wifiNetworkName
-        self.wifiNetworkAction = wifiNetworkAction
         self.registeredSubnets = registeredSubnets
         self.vpnRuleEnabled = vpnRuleEnabled
         self.vpnName = vpnName
-        self.vpnAction = vpnAction
         normalize()
     }
 
     private enum CodingKeys: String, CodingKey {
         case wifiNetworkName
-        case wifiNetworkAction
         case registeredSubnets
         case vpnRuleEnabled
         case vpnName
-        case vpnAction
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         wifiNetworkName = try container.decodeIfPresent(String.self, forKey: .wifiNetworkName) ?? ""
-        wifiNetworkAction = try container.decodeIfPresent(ShareRuleAction.self, forKey: .wifiNetworkAction) ?? .connect
         registeredSubnets = try container.decodeIfPresent([String].self, forKey: .registeredSubnets) ?? []
         vpnRuleEnabled = try container.decodeIfPresent(Bool.self, forKey: .vpnRuleEnabled) ?? false
         vpnName = try container.decodeIfPresent(String.self, forKey: .vpnName) ?? ""
-        vpnAction = try container.decodeIfPresent(ShareRuleAction.self, forKey: .vpnAction) ?? .connect
         normalize()
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(wifiNetworkName, forKey: .wifiNetworkName)
-        try container.encode(wifiNetworkAction, forKey: .wifiNetworkAction)
         try container.encode(registeredSubnets, forKey: .registeredSubnets)
         try container.encode(vpnRuleEnabled, forKey: .vpnRuleEnabled)
         try container.encode(vpnName, forKey: .vpnName)
-        try container.encode(vpnAction, forKey: .vpnAction)
     }
 
     var hasWiFiNetworkRule: Bool {
@@ -441,8 +363,6 @@ struct ShareRules: Codable, Hashable {
         registeredSubnets = registeredSubnets
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        wifiNetworkAction = .connect
-        vpnAction = .connect
     }
 }
 
@@ -541,21 +461,5 @@ extension ShareRules {
         }
 
         return .noRules
-    }
-}
-
-enum ShareRuleAction: String, Codable, CaseIterable, Hashable, Identifiable {
-    case connect
-    case disconnect
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .connect:
-            "Connect"
-        case .disconnect:
-            "Disconnect"
-        }
     }
 }

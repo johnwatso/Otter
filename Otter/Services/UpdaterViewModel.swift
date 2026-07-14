@@ -16,9 +16,9 @@ final class UpdaterViewModel: ObservableObject {
         updaterController.updater
     }
 
-    init() {
+    init(startingUpdater: Bool = true) {
         updaterController = SPUStandardUpdaterController(
-            startingUpdater: true,
+            startingUpdater: startingUpdater,
             updaterDelegate: nil,
             userDriverDelegate: nil
         )

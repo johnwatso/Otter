@@ -1,10 +1,8 @@
-import AppKit
 import CoreLocation
 import CoreWLAN
 import Darwin
 import Foundation
 import Network
-import SystemConfiguration
 
 @MainActor
 final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationManagerDelegate {
@@ -14,6 +12,7 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
     @Published private(set) var currentIPv4Subnets: [String] = []
     @Published private(set) var activeVPNNames: [String] = []
     @Published private(set) var knownVPNNames: [String] = []
+    @Published private(set) var hasUnidentifiedTunnel = false
     @Published private(set) var locationAuthorizationStatus: CLAuthorizationStatus = .notDetermined
 
     var currentVPNDisplayName: String {
@@ -21,11 +20,15 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
             return activeVPNNames.joined(separator: ", ")
         }
 
-        return isVPNConnected ? "Connected (name unavailable)" : "None"
+        if hasUnidentifiedTunnel {
+            return "Tunnel detected (not used for share rules)"
+        }
+
+        return "None"
     }
 
     var isVPNNameUnavailable: Bool {
-        isVPNConnected && activeVPNNames.isEmpty
+        hasUnidentifiedTunnel
     }
 
     // macOS only exposes the Wi-Fi network name to apps with Location Services access.
@@ -157,6 +160,7 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
             activeVPNNames = snapshot.activeVPNNames
             knownVPNNames = snapshot.knownVPNNames
             isVPNConnected = snapshot.isVPNConnected
+            hasUnidentifiedTunnel = snapshot.hasUnidentifiedTunnel
         }
 
         detailsRefreshTask = task
@@ -170,32 +174,37 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
         var activeVPNNames: [String]
         var knownVPNNames: [String]
         var isVPNConnected: Bool
+        var hasUnidentifiedTunnel: Bool
     }
 
     private nonisolated static func gatherNetworkDetails() -> NetworkDetailsSnapshot {
         let currentWiFiNetworkName = readCurrentWiFiNetworkName()
         let activeVPNInterfaceNames = activeVPNInterfaceNames()
-        let connectedServiceNames = connectedVPNServiceNames()
+        let connectedServiceNames = VPNServiceDiscovery.connectedVPNServiceNames()
         let hasActiveTunnel = !activeVPNInterfaceNames.isEmpty
 
-        var names = Set(vpnServiceNames(for: activeVPNInterfaceNames))
+        var names = Set(VPNServiceDiscovery.vpnServiceNames(for: activeVPNInterfaceNames))
         names.formUnion(connectedServiceNames)
 
         // Network Extension VPNs (Tailscale, WireGuard, ...) don't appear as
         // SystemConfiguration services, so fall back to naming them by the VPN
         // apps that are currently running while a tunnel interface is active.
         if hasActiveTunnel && names.isEmpty {
-            names.formUnion(runningVPNAppNames())
+            names.formUnion(VPNServiceDiscovery.runningVPNAppNames())
         }
 
-        let activeVPNNames = sorted(names)
+        let identity = VPNConnectionIdentity(
+            hasActiveTunnel: hasActiveTunnel,
+            identifiedNames: names
+        )
 
         return NetworkDetailsSnapshot(
             currentWiFiNetworkName: currentWiFiNetworkName,
             currentIPv4Subnets: readCurrentIPv4Subnets(),
-            activeVPNNames: activeVPNNames,
-            knownVPNNames: readKnownVPNNames(including: activeVPNNames),
-            isVPNConnected: hasActiveTunnel || !connectedServiceNames.isEmpty
+            activeVPNNames: identity.activeNames,
+            knownVPNNames: VPNServiceDiscovery.readKnownVPNNames(including: identity.activeNames),
+            isVPNConnected: identity.isConnected,
+            hasUnidentifiedTunnel: identity.hasUnidentifiedTunnel
         )
     }
 
@@ -205,6 +214,7 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
         let previousWiFiNetworkName = currentWiFiNetworkName
         let previousIPv4Subnets = currentIPv4Subnets
         let wasVPNConnected = isVPNConnected
+        let hadUnidentifiedTunnel = hasUnidentifiedTunnel
         let previousVPNNames = activeVPNNames
         let previousKnownVPNNames = knownVPNNames
         isOnline = newOnlineState
@@ -213,6 +223,7 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
         let wifiNetworkChanged = previousWiFiNetworkName != currentWiFiNetworkName
         let subnetsChanged = previousIPv4Subnets != currentIPv4Subnets
         let vpnChanged = wasVPNConnected != isVPNConnected
+            || hadUnidentifiedTunnel != hasUnidentifiedTunnel
             || previousVPNNames != activeVPNNames
             || previousKnownVPNNames != knownVPNNames
         let shouldNotify = changed || wifiNetworkChanged || subnetsChanged || vpnChanged || !hasReceivedPathUpdate
@@ -369,239 +380,6 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
         return !isUnspecified && !isLoopback && !isLinkLocal && !isMulticast
     }
 
-    // Personal VPNs configured in System Settings (IKEv2, L2TP, ...) report a live
-    // connection status through SCNetworkConnection, which tells us exactly which
-    // configured VPN is connected rather than inferring it from tunnel interfaces.
-    private nonisolated static func connectedVPNServiceNames() -> Set<String> {
-        guard let preferences = SCPreferencesCreate(nil, "Otter.NetworkDetails" as CFString, nil),
-              let services = SCNetworkServiceCopyAll(preferences) as? [SCNetworkService]
-        else {
-            return []
-        }
-
-        var names = Set<String>()
-
-        for service in services {
-            guard let serviceName = SCNetworkServiceGetName(service) as String?,
-                  !serviceName.isEmpty,
-                  isVPNService(service, serviceName: serviceName),
-                  let serviceID = SCNetworkServiceGetServiceID(service) as String?,
-                  let connection = SCNetworkConnectionCreateWithServiceID(nil, serviceID as CFString, nil, nil),
-                  SCNetworkConnectionGetStatus(connection) == .connected
-            else {
-                continue
-            }
-
-            names.insert(serviceName)
-        }
-
-        return names
-    }
-
-    private nonisolated static let vpnAppBundleIDPrefixes: [(prefix: String, name: String)] = [
-        ("com.tailscale", "Tailscale"),
-        ("io.tailscale", "Tailscale"),
-        ("com.wireguard", "WireGuard"),
-        ("com.nordvpn", "NordVPN"),
-        ("com.nordsec", "NordVPN"),
-        ("net.mullvad", "Mullvad VPN"),
-        ("ch.protonvpn", "Proton VPN"),
-        ("com.protonvpn", "Proton VPN"),
-        ("com.expressvpn", "ExpressVPN"),
-        ("com.privateinternetaccess", "Private Internet Access"),
-        ("com.surfshark", "Surfshark"),
-        ("com.windscribe", "Windscribe"),
-        ("com.cloudflare", "Cloudflare WARP"),
-        ("com.cisco.anyconnect", "Cisco AnyConnect"),
-        ("com.cisco.secureclient", "Cisco Secure Client"),
-        ("com.paloaltonetworks", "GlobalProtect"),
-        ("com.fortinet", "FortiClient"),
-        ("com.zscaler", "Zscaler"),
-        ("net.openvpn", "OpenVPN Connect"),
-        ("com.viscosityvpn", "Viscosity"),
-        ("net.tunnelblick", "Tunnelblick")
-    ]
-
-    private nonisolated static func runningVPNAppNames() -> Set<String> {
-        var names = Set<String>()
-
-        for application in NSWorkspace.shared.runningApplications {
-            guard let bundleID = application.bundleIdentifier?.lowercased() else { continue }
-
-            for entry in vpnAppBundleIDPrefixes where bundleID.hasPrefix(entry.prefix) {
-                names.insert(entry.name)
-            }
-        }
-
-        return names
-    }
-
-    private nonisolated static func readKnownVPNNames(including activeVPNNames: [String]) -> [String] {
-        var names = Set(activeVPNNames)
-
-        guard let preferences = SCPreferencesCreate(nil, "Otter.NetworkDetails" as CFString, nil),
-              let services = SCNetworkServiceCopyAll(preferences) as? [SCNetworkService]
-        else {
-            return sorted(names)
-        }
-
-        for service in services {
-            guard let serviceName = SCNetworkServiceGetName(service) as String?,
-                  isVPNService(service, serviceName: serviceName),
-                  !serviceName.isEmpty
-            else {
-                continue
-            }
-
-            names.insert(serviceName)
-        }
-
-        return sorted(names)
-    }
-
-    private nonisolated static func isVPNService(_ service: SCNetworkService, serviceName: String) -> Bool {
-        if serviceNameContainsVPNMarker(serviceName) {
-            return true
-        }
-
-        guard let interface = SCNetworkServiceGetInterface(service) else {
-            return false
-        }
-
-        return isVPNInterface(interface)
-    }
-
-    private nonisolated static func isVPNInterface(_ interface: SCNetworkInterface) -> Bool {
-        let interfaceValues = [
-            SCNetworkInterfaceGetInterfaceType(interface) as String?,
-            SCNetworkInterfaceGetBSDName(interface) as String?
-        ]
-        .compactMap { $0?.lowercased() }
-
-        let vpnMarkers = [
-            "vpn",
-            "ppp",
-            "ipsec",
-            "l2tp",
-            "pptp",
-            "ikev2"
-        ]
-
-        return interfaceValues.contains { value in
-            vpnMarkers.contains { value.contains($0) }
-        }
-    }
-
-    private nonisolated static func serviceNameContainsVPNMarker(_ serviceName: String) -> Bool {
-        let normalizedName = serviceName.lowercased()
-        let vpnMarkers = ["vpn", "wireguard", "tailscale", "zerotier", "openvpn", "nord", "mullvad"]
-        return vpnMarkers.contains { normalizedName.contains($0) }
-    }
-
-    private nonisolated static func vpnServiceNames(for interfaceNames: [String]) -> [String] {
-        guard !interfaceNames.isEmpty else { return [] }
-
-        guard let store = SCDynamicStoreCreate(nil, "Otter.NetworkDetails" as CFString, nil, nil),
-              let keys = SCDynamicStoreCopyKeyList(store, "State:/Network/Service/.*/IPv[46]" as CFString) as? [String]
-        else {
-            return []
-        }
-
-        let interfaceNameSet = Set(interfaceNames)
-        var serviceNames = Set<String>()
-
-        for key in keys {
-            guard let state = SCDynamicStoreCopyValue(store, key as CFString) as? [String: Any],
-                  let interfaceName = state["InterfaceName"] as? String,
-                  interfaceNameSet.contains(interfaceName),
-                  let serviceID = serviceID(from: key),
-                  let serviceName = serviceName(for: serviceID, store: store),
-                  isActiveVPNService(serviceID: serviceID, serviceName: serviceName, store: store)
-            else {
-                continue
-            }
-
-            serviceNames.insert(serviceName)
-        }
-
-        return Array(serviceNames).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-    }
-
-    private nonisolated static func isActiveVPNService(serviceID: String, serviceName: String, store: SCDynamicStore) -> Bool {
-        if serviceNameContainsVPNMarker(serviceName) {
-            return true
-        }
-
-        let setupValues = setupValues(for: serviceID, store: store)
-        let vpnMarkers = ["vpn", "ppp", "ipsec", "l2tp", "pptp", "ikev2", "wireguard", "tailscale", "zerotier", "openvpn"]
-
-        return setupValues.contains { value in
-            vpnMarkers.contains { value.contains($0) }
-        }
-    }
-
-    private nonisolated static func sorted(_ names: Set<String>) -> [String] {
-        names.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-    }
-
-    private nonisolated static func serviceID(from key: String) -> String? {
-        let components = key.split(separator: "/")
-        guard components.count >= 4,
-              components[0] == "State:",
-              components[1] == "Network",
-              components[2] == "Service"
-        else {
-            return nil
-        }
-
-        return String(components[3])
-    }
-
-    private nonisolated static func serviceName(for serviceID: String, store: SCDynamicStore) -> String? {
-        let keys = [
-            "Setup:/Network/Service/\(serviceID)",
-            "Setup:/Network/Service/\(serviceID)/Interface"
-        ]
-
-        for key in keys {
-            guard let setup = SCDynamicStoreCopyValue(store, key as CFString) as? [String: Any] else {
-                continue
-            }
-
-            if let name = setup["UserDefinedName"] as? String, !name.isEmpty {
-                return name
-            }
-
-            if let name = setup["DeviceName"] as? String, !name.isEmpty {
-                return name
-            }
-        }
-
-        return nil
-    }
-
-    private nonisolated static func setupValues(for serviceID: String, store: SCDynamicStore) -> [String] {
-        let keys = [
-            "Setup:/Network/Service/\(serviceID)",
-            "Setup:/Network/Service/\(serviceID)/Interface",
-            "Setup:/Network/Service/\(serviceID)/PPP",
-            "Setup:/Network/Service/\(serviceID)/IPSec"
-        ]
-
-        return keys.flatMap { key -> [String] in
-            guard let setup = SCDynamicStoreCopyValue(store, key as CFString) as? [String: Any] else {
-                return []
-            }
-
-            return setup.values.compactMap { value in
-                if let value = value as? String {
-                    return value.lowercased()
-                }
-
-                return nil
-            }
-        }
-    }
 }
 
 private final class ReachabilityAttempt: @unchecked Sendable {

@@ -33,7 +33,7 @@ Otters are small, quick, and famously good at not letting important things drift
 - 🧭 VPN IP fallback for `.local` or hostname-based shares when mDNS is not available over VPN
 - 🔌 Optional Wake-on-LAN — wakes a sleeping server before retrying a mount
 - ⚡ Lightweight with minimal resource usage
-- 🔐 Leaves credentials with macOS/Finder — Otter never stores passwords
+- 🔐 Keeps credentials in macOS Keychain — Otter never stores passwords in its settings or files
 - 🚀 Launch at login
 - 🪟 Choose whether Otter appears only in the menu bar, temporarily in the Dock, or always in both places
 - 🔄 Automatic updates via Sparkle
@@ -60,7 +60,7 @@ Adding a share is easiest from Finder: mount it once the normal way, then let Ot
 
 Conditions are per share. When the network condition is on, Otter registers the network the share was configured on (its IPv4 subnet, plus the Wi-Fi name when available) and only connects while your Mac is back on that registered network — over Wi-Fi or Ethernet — or while a VPN is active. On any other network, Otter disconnects the share.
 
-For hostname-based shares, Otter can cache the server's local IP address while you are on the local network. If your VPN cannot resolve Bonjour or `.local` names later, Otter can try that cached IP instead. This works best when the server has a static IP address.
+For hostname-based shares, Otter can cache the server's local IP address while you are on the local network. If your VPN cannot resolve Bonjour or `.local` names later, Otter can try that cached IP instead. To let macOS authenticate the IP-based fallback, Otter may create a scoped alias of the Finder-saved credential in macOS Keychain. Otter removes its alias when the cached IP changes or the share is deleted. This works best when the server has a static IP address.
 
 ## Requirements
 

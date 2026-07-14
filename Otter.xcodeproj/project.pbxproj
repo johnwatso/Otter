@@ -25,6 +25,16 @@
 		1A2B3C4D5E6F700100000010 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000110 /* NotificationService.swift */; };
 		1A2B3C4D5E6F700100000011 /* UpdaterViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000111 /* UpdaterViewModel.swift */; };
 		1A2B3C4D5E6F700100000012 /* WakeOnLANService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000112 /* WakeOnLANService.swift */; };
+		1A2B3C4D5E6F700100000013 /* ActionButtonStyles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000113 /* ActionButtonStyles.swift */; };
+		1A2B3C4D5E6F700100000014 /* ShareEventLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000114 /* ShareEventLog.swift */; };
+		1A2B3C4D5E6F700100000015 /* ReconnectPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000115 /* ReconnectPolicy.swift */; };
+		1A2B3C4D5E6F700100000016 /* HostResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000116 /* HostResolver.swift */; };
+		1A2B3C4D5E6F700100000017 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000117 /* CredentialStore.swift */; };
+		1A2B3C4D5E6F700100000018 /* ServiceProtocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000118 /* ServiceProtocols.swift */; };
+		1A2B3C4D5E6F700100000019 /* ActivityLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000119 /* ActivityLogView.swift */; };
+		1A2B3C4D5E6F70010000001A /* ShareDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000011A /* ShareDetailView.swift */; };
+		1A2B3C4D5E6F70010000001B /* ShareEditorModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000011B /* ShareEditorModels.swift */; };
+		1A2B3C4D5E6F70010000001C /* VPNServiceDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000011C /* VPNServiceDiscovery.swift */; };
 		1A2B3C4D5E6F700100000202 /* OtterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000203 /* OtterTests.swift */; };
 		1A2B3C4D5E6F700100000302 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F700100000301 /* Sparkle */; };
 /* End PBXBuildFile section */
@@ -50,6 +60,16 @@
 		1A2B3C4D5E6F700100000110 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000111 /* UpdaterViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterViewModel.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000112 /* WakeOnLANService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeOnLANService.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000113 /* ActionButtonStyles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionButtonStyles.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000114 /* ShareEventLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareEventLog.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000115 /* ReconnectPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconnectPolicy.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000116 /* HostResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostResolver.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000117 /* CredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialStore.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000118 /* ServiceProtocols.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceProtocols.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000119 /* ActivityLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityLogView.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F70010000011A /* ShareDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareDetailView.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F70010000011B /* ShareEditorModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareEditorModels.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F70010000011C /* VPNServiceDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VPNServiceDiscovery.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000201 /* OtterTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OtterTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A2B3C4D5E6F700100000203 /* OtterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtterTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -112,12 +132,18 @@
 			isa = PBXGroup;
 			children = (
 				1A2B3C4D5E6F700100000106 /* SettingsStore.swift */,
+				1A2B3C4D5E6F700100000117 /* CredentialStore.swift */,
+				1A2B3C4D5E6F700100000116 /* HostResolver.swift */,
 				1A2B3C4D5E6F700100000107 /* MountService.swift */,
 				1A2B3C4D5E6F700100000108 /* NetworkReachabilityService.swift */,
 				1A2B3C4D5E6F700100000110 /* NotificationService.swift */,
 				1A2B3C4D5E6F700100000109 /* LoginItemService.swift */,
+				1A2B3C4D5E6F700100000115 /* ReconnectPolicy.swift */,
+				1A2B3C4D5E6F700100000114 /* ShareEventLog.swift */,
+				1A2B3C4D5E6F700100000118 /* ServiceProtocols.swift */,
 				1A2B3C4D5E6F70010000010A /* ShareMonitor.swift */,
 				1A2B3C4D5E6F700100000111 /* UpdaterViewModel.swift */,
+				1A2B3C4D5E6F70010000011C /* VPNServiceDiscovery.swift */,
 				1A2B3C4D5E6F700100000112 /* WakeOnLANService.swift */,
 			);
 			path = Services;
@@ -126,8 +152,12 @@
 		1A2B3C4D5E6F700100000045 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				1A2B3C4D5E6F700100000113 /* ActionButtonStyles.swift */,
+				1A2B3C4D5E6F700100000119 /* ActivityLogView.swift */,
 				1A2B3C4D5E6F70010000010B /* MenuBarView.swift */,
 				1A2B3C4D5E6F70010000010C /* PreferencesView.swift */,
+				1A2B3C4D5E6F70010000011A /* ShareDetailView.swift */,
+				1A2B3C4D5E6F70010000011B /* ShareEditorModels.swift */,
 				1A2B3C4D5E6F70010000010D /* ShareEditorView.swift */,
 			);
 			path = Views;
@@ -277,6 +307,16 @@
 				1A2B3C4D5E6F700100000010 /* NotificationService.swift in Sources */,
 				1A2B3C4D5E6F700100000011 /* UpdaterViewModel.swift in Sources */,
 				1A2B3C4D5E6F700100000012 /* WakeOnLANService.swift in Sources */,
+				1A2B3C4D5E6F700100000013 /* ActionButtonStyles.swift in Sources */,
+				1A2B3C4D5E6F700100000014 /* ShareEventLog.swift in Sources */,
+				1A2B3C4D5E6F700100000015 /* ReconnectPolicy.swift in Sources */,
+				1A2B3C4D5E6F700100000016 /* HostResolver.swift in Sources */,
+				1A2B3C4D5E6F700100000017 /* CredentialStore.swift in Sources */,
+				1A2B3C4D5E6F700100000018 /* ServiceProtocols.swift in Sources */,
+				1A2B3C4D5E6F700100000019 /* ActivityLogView.swift in Sources */,
+				1A2B3C4D5E6F70010000001A /* ShareDetailView.swift in Sources */,
+				1A2B3C4D5E6F70010000001B /* ShareEditorModels.swift in Sources */,
+				1A2B3C4D5E6F70010000001C /* VPNServiceDiscovery.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

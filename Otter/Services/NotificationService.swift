@@ -11,7 +11,7 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
     // Shares that already got a problem notification for the current outage.
     // Retry cycles flip between "waiting" and "failed" states, and without this
     // every retry would fire another notification.
-    private var problemNotifiedShareIDs = Set<NetworkShare.ID>()
+    private var problemNotificationTracker = ProblemNotificationTracker()
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -71,7 +71,14 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
     }
 
     func notifyStatusChange(for share: NetworkShare, previous: ShareStatus, current: ShareStatus) {
-        guard previous != current,
+        guard previous != current else { return }
+
+        // Recovery ends the outage even when connection-change notifications are
+        // disabled. Keeping this independent of delivery preferences ensures a
+        // later outage can notify again.
+        problemNotificationTracker.resolveIfNeeded(shareID: share.id, status: current)
+
+        guard
               settings.preferences.notificationsEnabled,
               let message = notificationMessage(for: share, previous: previous, current: current)
         else {
@@ -79,14 +86,14 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
         }
 
         if message.kind.isProblem {
-            guard !problemNotifiedShareIDs.contains(share.id) else { return }
-            problemNotifiedShareIDs.insert(share.id)
-        } else {
-            problemNotifiedShareIDs.remove(share.id)
+            guard problemNotificationTracker.beginProblemDelivery(for: share.id) else { return }
         }
 
         Task {
-            await deliver(message)
+            let delivered = await deliver(message)
+            if message.kind.isProblem && !delivered {
+                problemNotificationTracker.problemDeliveryFailed(for: share.id)
+            }
         }
     }
 
@@ -105,8 +112,8 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
         return options
     }
 
-    private func deliver(_ message: ShareNotificationMessage) async {
-        guard await hasPermissionToNotify() else { return }
+    private func deliver(_ message: ShareNotificationMessage) async -> Bool {
+        guard await hasPermissionToNotify() else { return false }
 
         let content = UNMutableNotificationContent()
         content.title = message.title
@@ -124,7 +131,12 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
             trigger: nil
         )
 
-        try? await center.add(request)
+        do {
+            try await center.add(request)
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func hasPermissionToNotify() async -> Bool {
@@ -184,17 +196,6 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
                 title: "\(share.displayName) paused by rule",
                 body: "Connect to \(requirement) to mount this share."
             )
-        case let .pausedByRule(requirement):
-            guard settings.preferences.notifyConnectionChanges,
-                  previous == .connected
-            else { return nil }
-
-            return ShareNotificationMessage(
-                shareID: share.id,
-                kind: .pausedByRule,
-                title: "\(share.displayName) disconnected by rule",
-                body: "The rule applies while \(requirement) is active."
-            )
         case let .failed(message):
             guard settings.preferences.notifyProblems else { return nil }
             return ShareNotificationMessage(
@@ -205,6 +206,27 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
             )
         case .wakePacketSent, .reconnecting:
             return nil
+        }
+    }
+}
+
+struct ProblemNotificationTracker {
+    private(set) var notifiedShareIDs = Set<NetworkShare.ID>()
+
+    mutating func beginProblemDelivery(for shareID: NetworkShare.ID) -> Bool {
+        notifiedShareIDs.insert(shareID).inserted
+    }
+
+    mutating func problemDeliveryFailed(for shareID: NetworkShare.ID) {
+        notifiedShareIDs.remove(shareID)
+    }
+
+    mutating func resolveIfNeeded(shareID: NetworkShare.ID, status: ShareStatus) {
+        switch status {
+        case .connected, .disconnected, .waitingForAllowedNetwork:
+            notifiedShareIDs.remove(shareID)
+        case .waitingForNetwork, .wakePacketSent, .reconnecting, .failed:
+            break
         }
     }
 }
@@ -221,14 +243,13 @@ private enum ShareNotificationKind: String {
     case disconnected
     case waitingForNetwork
     case waitingForAllowedNetwork
-    case pausedByRule
     case failed
 
     var isProblem: Bool {
         switch self {
         case .waitingForNetwork, .failed:
             true
-        case .connected, .disconnected, .waitingForAllowedNetwork, .pausedByRule:
+        case .connected, .disconnected, .waitingForAllowedNetwork:
             false
         }
     }
