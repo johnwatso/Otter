@@ -8,9 +8,12 @@ struct OtterApp: App {
     @StateObject private var appModel: AppModel
 
     init() {
-        let model = AppModel()
+        let isRunningTests = AppRuntime.isRunningTests
+        let model = AppModel(isRunningTests: isRunningTests)
         _appModel = StateObject(wrappedValue: model)
-        model.start()
+        if !isRunningTests {
+            model.start()
+        }
         appDelegate.appModel = model
     }
 

@@ -303,7 +303,6 @@ h1 {
   position: relative;
   display: flex;
   justify-content: center;
-  min-height: 570px;
 }
 
 .app-shot {
@@ -805,10 +804,6 @@ h1 {
 
   .app-preview {
     margin-top: 26px;
-  }
-
-  .screenshot-stage {
-    min-height: 382px;
   }
 
   .app-shot {

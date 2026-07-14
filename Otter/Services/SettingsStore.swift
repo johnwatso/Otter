@@ -19,11 +19,16 @@ final class SettingsStore: ObservableObject {
     }
 
     private let defaults: UserDefaults
+    private let credentialStore: any CredentialStoring
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        credentialStore: any CredentialStoring = KeychainCredentialStore()
+    ) {
         self.defaults = defaults
+        self.credentialStore = credentialStore
         self.shares = Self.load([NetworkShare].self, from: defaults, key: Keys.shares) ?? []
 
         var loadedPreferences = Self.load(AppPreferences.self, from: defaults, key: Keys.preferences) ?? AppPreferences()
@@ -33,6 +38,10 @@ final class SettingsStore: ObservableObject {
 
     func share(id: NetworkShare.ID) -> NetworkShare? {
         shares.first { $0.id == id }
+    }
+
+    func hasCredentials(for host: String) -> Bool {
+        credentialStore.hasCredentials(for: host)
     }
 
     func addShare(_ share: NetworkShare) {
@@ -45,21 +54,27 @@ final class SettingsStore: ObservableObject {
             return
         }
 
+        let previousCachedIPAddress = shares[index].cachedIPAddress
         var updated = share
         updated.updatedAt = Date()
         shares[index] = updated
+        removeFallbackCredentialIfUnused(previousCachedIPAddress, replacingWith: updated.cachedIPAddress)
     }
 
     func updateShare(id: NetworkShare.ID, _ update: (inout NetworkShare) -> Void) {
         guard let index = shares.firstIndex(where: { $0.id == id }) else { return }
         var share = shares[index]
+        let previousCachedIPAddress = share.cachedIPAddress
         update(&share)
         share.updatedAt = Date()
         shares[index] = share
+        removeFallbackCredentialIfUnused(previousCachedIPAddress, replacingWith: share.cachedIPAddress)
     }
 
     func removeShare(id: NetworkShare.ID) {
+        let cachedIPAddress = shares.first(where: { $0.id == id })?.cachedIPAddress
         shares.removeAll { $0.id == id }
+        removeFallbackCredentialIfUnused(cachedIPAddress, replacingWith: nil)
     }
 
     func isDuplicateShare(urlString: String, excluding shareID: NetworkShare.ID? = nil) -> Bool {
@@ -111,6 +126,17 @@ final class SettingsStore: ObservableObject {
         save(preferences, key: Keys.preferences)
     }
 
+    private func removeFallbackCredentialIfUnused(_ previousHost: String?, replacingWith newHost: String?) {
+        guard let previousHost,
+              previousHost.localizedCaseInsensitiveCompare(newHost ?? "") != .orderedSame,
+              !shares.contains(where: {
+                  $0.cachedIPAddress?.localizedCaseInsensitiveCompare(previousHost) == .orderedSame
+              })
+        else { return }
+
+        credentialStore.removeFallbackCredentials(for: previousHost)
+    }
+
     private func save<T: Encodable>(_ value: T, key: String) {
         do {
             defaults.set(try encoder.encode(value), forKey: key)
@@ -119,7 +145,7 @@ final class SettingsStore: ObservableObject {
         }
     }
 
-    private static let logger = Logger(subsystem: "com.example.otter", category: "SettingsStore")
+    private static let logger = Logger(subsystem: "io.github.johnwatso.Otter", category: "SettingsStore")
 
     private static func load<T: Decodable>(_ type: T.Type, from defaults: UserDefaults, key: String) -> T? {
         guard let data = defaults.data(forKey: key) else { return nil }

@@ -12,6 +12,12 @@ struct ShareEditorRequest: Identifiable, Equatable {
     let mode: Mode
 }
 
+enum AppRuntime {
+    static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     static let preferencesWindowID = "preferences"
@@ -23,7 +29,7 @@ final class AppModel: ObservableObject {
     let wakeOnLANService: WakeOnLANService
     let notificationService: NotificationService
     let loginItemService: LoginItemService
-    let updaterViewModel = UpdaterViewModel()
+    let updaterViewModel: UpdaterViewModel
     let eventLog: ShareEventLog
     let monitor: ShareMonitor
 
@@ -84,13 +90,21 @@ final class AppModel: ObservableObject {
     private var lastAppliedDockIconVisibility: Bool?
     private var cancellables = Set<AnyCancellable>()
 
-    init() {
-        let settings = SettingsStore()
+    init(isRunningTests: Bool = AppRuntime.isRunningTests) {
+        let defaults: UserDefaults
+        if isRunningTests {
+            defaults = UserDefaults(suiteName: "OtterTests.Runtime.\(UUID().uuidString)")!
+        } else {
+            defaults = .standard
+        }
+
+        let credentialStore = KeychainCredentialStore()
+        let settings = SettingsStore(defaults: defaults, credentialStore: credentialStore)
         let networkService = NetworkReachabilityService()
-        let mountService = MountService()
+        let mountService = MountService(credentialStore: credentialStore)
         let wakeOnLANService = WakeOnLANService()
         let notificationService = NotificationService(settings: settings)
-        let eventLog = ShareEventLog()
+        let eventLog = ShareEventLog(defaults: defaults)
 
         self.settings = settings
         self.networkService = networkService
@@ -98,6 +112,7 @@ final class AppModel: ObservableObject {
         self.wakeOnLANService = wakeOnLANService
         self.notificationService = notificationService
         self.loginItemService = LoginItemService()
+        self.updaterViewModel = UpdaterViewModel(startingUpdater: !isRunningTests)
         self.eventLog = eventLog
         self.monitor = ShareMonitor(
             settings: settings,
@@ -105,7 +120,8 @@ final class AppModel: ObservableObject {
             wakeOnLANService: wakeOnLANService,
             networkService: networkService,
             notificationService: notificationService,
-            eventLog: eventLog
+            eventLog: eventLog,
+            defaults: defaults
         )
     }
 

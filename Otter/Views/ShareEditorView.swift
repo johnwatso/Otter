@@ -53,6 +53,7 @@ struct ShareEditorView: View {
                             } label: {
                                 Label("Select a mounted volume...", systemImage: "externaldrive.badge.plus")
                             }
+                            .tahoeSecondaryActionButton()
                         } else {
                             ForEach(mountedShareSuggestions) { suggestion in
                                 Button {
@@ -73,6 +74,7 @@ struct ShareEditorView: View {
                             } label: {
                                 Label("Choose Other...", systemImage: "folder")
                             }
+                            .tahoeSecondaryActionButton()
                         }
 
                         Button {
@@ -80,6 +82,7 @@ struct ShareEditorView: View {
                         } label: {
                             Label("Refresh", systemImage: "arrow.clockwise")
                         }
+                        .tahoeSecondaryActionButton()
                     } header: {
                         finderSectionHeader
                     }
@@ -98,8 +101,7 @@ struct ShareEditorView: View {
                         } label: {
                             Label("Auto-fill details from Finder...", systemImage: "arrow.down.doc.fill")
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .tahoeCompactActionButton()
                         .padding(.vertical, 2)
                     }
                 }
@@ -163,10 +165,15 @@ struct ShareEditorView: View {
                                 )
 
                                 if !networkService.currentIPv4Subnets.isEmpty && networkService.currentIPv4Subnets != draft.registeredSubnets {
-                                    Button(draft.registeredSubnets.isEmpty ? "Register Current Network" : "Re-register") {
+                                    Button {
                                         registerCurrentNetwork()
+                                    } label: {
+                                        Label(
+                                            draft.registeredSubnets.isEmpty ? "Register Current Network" : "Re-register",
+                                            systemImage: "location"
+                                        )
                                     }
-                                    .controlSize(.small)
+                                    .tahoeCompactActionButton()
                                 }
                             }
 
@@ -174,10 +181,12 @@ struct ShareEditorView: View {
                                 TextField("Wi-Fi name", text: $draft.wifiNetworkName, prompt: Text("Optional"))
 
                                 if let currentSSID = networkService.currentWiFiNetworkName, currentSSID != draft.wifiNetworkName {
-                                    Button("Use Current") {
+                                    Button {
                                         draft.wifiNetworkName = currentSSID
+                                    } label: {
+                                        Label("Use Current", systemImage: "location.fill")
                                     }
-                                    .controlSize(.small)
+                                    .tahoeCompactActionButton()
                                 }
                             }
 
@@ -266,17 +275,23 @@ struct ShareEditorView: View {
             Divider()
 
             HStack {
-                Button("Cancel") {
+                Button {
                     onCancel()
                     dismiss()
+                } label: {
+                    Label("Cancel", systemImage: "xmark")
                 }
+                .tahoeSecondaryActionButton()
                 .keyboardShortcut(.cancelAction)
 
                 Spacer()
 
-                Button("Done") {
+                Button {
                     save()
+                } label: {
+                    Label("Done", systemImage: "checkmark")
                 }
+                .tahoePrimaryActionButton()
                 .keyboardShortcut(.defaultAction)
             }
             .padding(20)
@@ -329,10 +344,10 @@ struct ShareEditorView: View {
               let host = url.host(percentEncoded: false)
         else { return false }
         
-        if NetworkShare.checkKeychainHasCredentials(for: host) {
+        if settings.hasCredentials(for: host) {
             return true
         }
-        if let cachedIP = draft.cachedIPAddress, NetworkShare.checkKeychainHasCredentials(for: cachedIP) {
+        if let cachedIP = draft.cachedIPAddress, settings.hasCredentials(for: cachedIP) {
             return true
         }
         return false
@@ -409,12 +424,14 @@ struct ShareEditorView: View {
                 } label: {
                     Label("Allow Location Access", systemImage: "location")
                 }
+                .tahoeCompactActionButton()
             } else {
                 Button {
                     openLocationPrivacySettings()
                 } label: {
                     Label("Open Location Settings", systemImage: "gearshape")
                 }
+                .tahoeCompactActionButton()
             }
         }
     }
@@ -632,164 +649,4 @@ struct ShareEditorView: View {
         return components
     }
 
-}
-
-private struct MountedShareSuggestion: Identifiable, Hashable {
-    var id: String { mountPath }
-
-    let displayName: String
-    let urlString: String
-    let mountPath: String
-
-    static func discover() -> [MountedShareSuggestion] {
-        let fileManager = FileManager.default
-        let keys = resourceKeys
-
-        guard let volumeURLs = fileManager.mountedVolumeURLs(includingResourceValuesForKeys: Array(keys), options: []) else {
-            return []
-        }
-
-        return volumeURLs
-            .compactMap { try? make(from: $0) }
-            .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
-    }
-
-    static func make(from selectedURL: URL) throws -> MountedShareSuggestion {
-        let values = try selectedURL.resourceValues(forKeys: resourceKeys)
-        let volumeURL = values.volume ?? selectedURL
-        let volumeValues = try volumeURL.resourceValues(forKeys: resourceKeys)
-        let remountURL = values.volumeURLForRemounting ?? volumeValues.volumeURLForRemounting
-
-        guard let remountURL else {
-            throw MountedShareSuggestionError.notNetworkShare
-        }
-
-        guard let urlString = sanitizedSMBURLString(from: remountURL) else {
-            throw MountedShareSuggestionError.notSMBShare
-        }
-
-        let displayName = values.volumeLocalizedName
-            ?? volumeValues.volumeLocalizedName
-            ?? values.volumeName
-            ?? volumeValues.volumeName
-            ?? volumeURL.lastPathComponent
-
-        return MountedShareSuggestion(
-            displayName: displayName,
-            urlString: urlString,
-            mountPath: volumeURL.standardizedFileURL.resolvingSymlinksInPath().path
-        )
-    }
-
-    private static var resourceKeys: Set<URLResourceKey> {
-        [
-            .volumeURLKey,
-            .volumeURLForRemountingKey,
-            .volumeLocalizedNameKey,
-            .volumeNameKey
-        ]
-    }
-
-    private static func sanitizedSMBURLString(from url: URL) -> String? {
-        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              components.scheme?.lowercased() == "smb",
-              components.host?.isEmpty == false,
-              !components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty
-        else {
-            return nil
-        }
-
-        components.scheme = "smb"
-        components.user = nil
-        components.password = nil
-        return components.string
-    }
-}
-
-private enum VPNNameSelection: Hashable {
-    case any
-    case known(String)
-    case custom
-}
-
-private enum MountedShareSuggestionError: LocalizedError {
-    case notNetworkShare
-    case notSMBShare
-
-    var errorDescription: String? {
-        switch self {
-        case .notNetworkShare:
-            "Choose a mounted network share."
-        case .notSMBShare:
-            "Choose a mounted SMB share."
-        }
-    }
-}
-
-private struct DraftShare {
-    var id: UUID?
-    var displayName: String
-    var urlString: String
-    var mountPath: String
-    var keepMounted: Bool
-    var mountAtLaunch: Bool
-    var cachedIPAddress: String?
-    var autoConnectWhenReachable: Bool
-    var wakeOnLANEnabled: Bool
-    var wakeOnLANMACAddress: String
-    var wakeOnLANBroadcastAddress: String
-    var wakeOnLANPort: Int
-    var limitsToRegisteredNetwork: Bool
-    var wifiNetworkName: String
-    var wifiNetworkAction: ShareRuleAction
-    var registeredSubnets: [String]
-    var matchesAnyVPN: Bool
-    var vpnName: String
-    var vpnAction: ShareRuleAction
-    var createdAt: Date?
-
-    init(share: NetworkShare?) {
-        id = share?.id
-        displayName = share?.displayName ?? ""
-        urlString = share?.urlString ?? ""
-        mountPath = share?.mountPath ?? ""
-        keepMounted = share?.keepMounted ?? true
-        mountAtLaunch = share?.mountAtLaunch ?? true
-        cachedIPAddress = share?.cachedIPAddress
-        autoConnectWhenReachable = share?.autoConnectWhenReachable ?? false
-        wakeOnLANEnabled = share?.wakeOnLAN.isEnabled ?? false
-        wakeOnLANMACAddress = share?.wakeOnLAN.macAddress ?? ""
-        wakeOnLANBroadcastAddress = share?.wakeOnLAN.broadcastAddress ?? WakeOnLANConfiguration.defaultBroadcastAddress
-        wakeOnLANPort = share?.wakeOnLAN.port ?? WakeOnLANConfiguration.defaultPort
-        // A share may carry a network rule, a VPN rule, or both; the editor
-        // presents them as a single "registered network" condition.
-        limitsToRegisteredNetwork = (share?.rules.hasNetworkRule ?? false) || (share?.rules.hasVPNRule ?? false)
-        wifiNetworkName = share?.rules.wifiNetworkName ?? ""
-        wifiNetworkAction = share?.rules.wifiNetworkAction ?? .connect
-        registeredSubnets = share?.rules.registeredSubnets ?? []
-        matchesAnyVPN = share?.rules.requiredVPNName == nil
-        vpnName = share?.rules.vpnName ?? ""
-        vpnAction = share?.rules.vpnAction ?? .connect
-        createdAt = share?.createdAt
-    }
-
-    var rules: ShareRules {
-        ShareRules(
-            wifiNetworkName: limitsToRegisteredNetwork ? wifiNetworkName : "",
-            wifiNetworkAction: wifiNetworkAction,
-            registeredSubnets: limitsToRegisteredNetwork ? registeredSubnets : [],
-            vpnRuleEnabled: limitsToRegisteredNetwork,
-            vpnName: limitsToRegisteredNetwork && !matchesAnyVPN ? vpnName : "",
-            vpnAction: vpnAction
-        )
-    }
-
-    var wakeOnLAN: WakeOnLANConfiguration {
-        WakeOnLANConfiguration(
-            isEnabled: wakeOnLANEnabled,
-            macAddress: wakeOnLANMACAddress,
-            broadcastAddress: wakeOnLANBroadcastAddress,
-            port: wakeOnLANPort
-        )
-    }
 }

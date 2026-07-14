@@ -5,7 +5,6 @@ enum ShareStatus: Equatable {
     case disconnected
     case waitingForNetwork
     case waitingForAllowedNetwork(String)
-    case pausedByRule(String)
     case wakePacketSent
     case reconnecting
     case failed(String)
@@ -20,8 +19,6 @@ enum ShareStatus: Equatable {
             "Waiting for network"
         case .waitingForAllowedNetwork:
             "Waiting for network rule"
-        case .pausedByRule:
-            "Paused by rule"
         case .wakePacketSent:
             "Wake sent"
         case .reconnecting:
@@ -35,8 +32,6 @@ enum ShareStatus: Equatable {
         switch self {
         case let .waitingForAllowedNetwork(requirement):
             return "Connect to \(requirement) to mount this share."
-        case let .pausedByRule(requirement):
-            return "Rule disconnects this share while \(requirement) is active."
         case .wakePacketSent:
             return "Otter sent a Wake-on-LAN packet."
         case let .failed(message):
@@ -50,7 +45,7 @@ enum ShareStatus: Equatable {
         switch self {
         case .failed:
             "Last error"
-        case .connected, .disconnected, .waitingForNetwork, .waitingForAllowedNetwork, .pausedByRule, .wakePacketSent, .reconnecting:
+        case .connected, .disconnected, .waitingForNetwork, .waitingForAllowedNetwork, .wakePacketSent, .reconnecting:
             "Details"
         }
     }
@@ -58,14 +53,12 @@ enum ShareStatus: Equatable {
     var systemImage: String {
         switch self {
         case .connected:
-            "externaldrive.fill"
+            "externaldrive.connected.to.line.below.fill"
         case .disconnected:
             "externaldrive.fill.badge.xmark"
         case .waitingForNetwork:
             "externaldrive.badge.questionmark"
         case .waitingForAllowedNetwork:
-            "externaldrive.badge.minus"
-        case .pausedByRule:
             "externaldrive.badge.minus"
         case .wakePacketSent:
             "externaldrive.badge.plus"
@@ -84,8 +77,8 @@ enum ShareStatus: Equatable {
         case .disconnected:
             "minus.circle.fill"
         case .waitingForNetwork:
-            "clock.fill"
-        case .waitingForAllowedNetwork, .pausedByRule:
+            "questionmark.circle.fill"
+        case .waitingForAllowedNetwork:
             "pause.circle.fill"
         case .wakePacketSent:
             "power.circle.fill"
@@ -104,7 +97,7 @@ enum ShareStatus: Equatable {
             .secondary
         case .waitingForNetwork:
             .orange
-        case .waitingForAllowedNetwork, .pausedByRule:
+        case .waitingForAllowedNetwork:
             .secondary
         case .wakePacketSent:
             .orange
@@ -119,7 +112,7 @@ enum ShareStatus: Equatable {
         switch self {
         case .failed, .waitingForNetwork:
             true
-        case .connected, .disconnected, .waitingForAllowedNetwork, .pausedByRule, .wakePacketSent, .reconnecting:
+        case .connected, .disconnected, .waitingForAllowedNetwork, .wakePacketSent, .reconnecting:
             false
         }
     }

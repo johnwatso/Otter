@@ -86,13 +86,37 @@ final class NetworkShareTests: XCTestCase {
         XCTAssertFalse(NetworkShare.isIPAddress("apple.com"))
     }
 
-    func testDNSResolution() async {
-        let resolved = await NetworkShare.resolveIPAddress(for: "localhost")
-        XCTAssertNotNil(resolved)
-        XCTAssertTrue(resolved == "127.0.0.1" || resolved == "::1")
+    func testDNSResolutionUsesInjectedResolver() async {
+        let resolved = await NetworkShare.resolveIPAddress(
+            for: "server.local",
+            using: StubHostResolver(result: "192.168.1.20")
+        )
+        XCTAssertEqual(resolved, "192.168.1.20")
 
-        let invalid = await NetworkShare.resolveIPAddress(for: "invalid.hostname.that.does.not.exist.local")
+        let invalid = await NetworkShare.resolveIPAddress(
+            for: "missing.local",
+            using: StubHostResolver(result: nil)
+        )
         XCTAssertNil(invalid)
+    }
+
+    func testLegacyRuleActionFieldsRemainDecodable() throws {
+        let legacyJSON = """
+        {
+            "wifiNetworkName": "Home",
+            "wifiNetworkAction": "disconnect",
+            "registeredSubnets": ["192.168.1.0/24"],
+            "vpnRuleEnabled": true,
+            "vpnName": "Work VPN",
+            "vpnAction": "disconnect"
+        }
+        """
+
+        let rules = try JSONDecoder().decode(ShareRules.self, from: Data(legacyJSON.utf8))
+
+        XCTAssertEqual(rules.requiredWiFiNetworkName, "Home")
+        XCTAssertEqual(rules.registeredSubnets, ["192.168.1.0/24"])
+        XCTAssertEqual(rules.requiredVPNName, "Work VPN")
     }
 }
 
@@ -158,7 +182,7 @@ final class ShareRulesEvaluationTests: XCTestCase {
     }
 
     func testWiFiConnectRuleMatchesCaseInsensitively() {
-        let rules = ShareRules(wifiNetworkName: "home", wifiNetworkAction: .connect)
+        let rules = ShareRules(wifiNetworkName: "home")
 
         let matching = rules.evaluate(currentWiFiNetworkName: "Home", isVPNConnected: false, activeVPNNames: [])
         XCTAssertTrue(matching.allowsConnection)
@@ -241,7 +265,7 @@ final class ShareRulesEvaluationTests: XCTestCase {
     }
 
     func testNamedVPNRuleOnlyMatchesThatVPN() {
-        let rules = ShareRules(vpnRuleEnabled: true, vpnName: "VPN A", vpnAction: .connect)
+        let rules = ShareRules(vpnRuleEnabled: true, vpnName: "VPN A")
 
         let onVPNA = rules.evaluate(currentWiFiNetworkName: nil, isVPNConnected: true, activeVPNNames: ["VPN A"])
         XCTAssertTrue(onVPNA.allowsConnection)
@@ -257,7 +281,7 @@ final class ShareRulesEvaluationTests: XCTestCase {
     }
 
     func testAnyVPNRuleMatchesUnnamedVPN() {
-        let rules = ShareRules(vpnRuleEnabled: true, vpnName: "", vpnAction: .connect)
+        let rules = ShareRules(vpnRuleEnabled: true, vpnName: "")
 
         let connected = rules.evaluate(currentWiFiNetworkName: nil, isVPNConnected: true, activeVPNNames: [])
         XCTAssertTrue(connected.allowsConnection)
@@ -268,11 +292,10 @@ final class ShareRulesEvaluationTests: XCTestCase {
         XCTAssertEqual(disconnected.blockedStatus, .waitingForAllowedNetwork("a VPN"))
     }
 
-    func testCombinedRulesRequireBothToPass() {
-        var rules = ShareRules(wifiNetworkName: "Home", wifiNetworkAction: .connect)
+    func testCombinedNetworkAndVPNRulesAllowEitherPath() {
+        var rules = ShareRules(wifiNetworkName: "Home")
         rules.vpnRuleEnabled = true
         rules.vpnName = "Work VPN"
-        rules.vpnAction = .connect
 
         // Wifi matches -> succeeds directly
         let wifiOnlyIsEnough = rules.evaluate(currentWiFiNetworkName: "Home", isVPNConnected: false, activeVPNNames: [])
@@ -298,6 +321,27 @@ final class ShareRulesEvaluationTests: XCTestCase {
     }
 }
 
+final class VPNConnectionIdentityTests: XCTestCase {
+    func testUnidentifiedTunnelDoesNotCountAsVPN() {
+        let identity = VPNConnectionIdentity(hasActiveTunnel: true, identifiedNames: [])
+
+        XCTAssertFalse(identity.isConnected)
+        XCTAssertTrue(identity.hasUnidentifiedTunnel)
+        XCTAssertTrue(identity.activeNames.isEmpty)
+    }
+
+    func testIdentifiedVPNCountsAsConnectedAndSortsNames() {
+        let identity = VPNConnectionIdentity(
+            hasActiveTunnel: true,
+            identifiedNames: ["Work VPN", "Personal VPN"]
+        )
+
+        XCTAssertTrue(identity.isConnected)
+        XCTAssertFalse(identity.hasUnidentifiedTunnel)
+        XCTAssertEqual(identity.activeNames, ["Personal VPN", "Work VPN"])
+    }
+}
+
 final class RetryBackoffTests: XCTestCase {
     func testBackoffProgressionAndClamping() {
         XCTAssertEqual(RetryBackoff.delay(afterFailures: 0), 10)
@@ -320,6 +364,166 @@ final class RetryBackoffTests: XCTestCase {
                 XCTAssertGreaterThanOrEqual(delayWithJitter, 1.0)
             }
         }
+    }
+
+    func testAutomaticRetryBudgetIsBounded() {
+        XCTAssertTrue(RetryBackoff.shouldRetry(afterFailures: 0))
+        XCTAssertTrue(RetryBackoff.shouldRetry(afterFailures: RetryBackoff.maxAutomaticAttempts - 1))
+        XCTAssertFalse(RetryBackoff.shouldRetry(afterFailures: RetryBackoff.maxAutomaticAttempts))
+        XCTAssertFalse(RetryBackoff.shouldRetry(afterFailures: RetryBackoff.maxAutomaticAttempts + 1))
+    }
+}
+
+final class ShareMonitorRetryTests: XCTestCase {
+    @MainActor
+    func testUnreachableServerConsumesRetryBudgetAndSchedulesBackoff() async {
+        let suiteName = "OtterTests.ShareMonitorRetryTests"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media"
+        )
+        settings.addShare(share)
+        let network = StubNetworkReachability(isOnline: true, isReachable: false)
+        let monitor = ShareMonitor(
+            settings: settings,
+            mountService: StubMountService(),
+            wakeOnLANService: StubWakeOnLANService(),
+            networkService: network,
+            notificationService: RecordingNotificationService(),
+            eventLog: ShareEventLog(defaults: defaults),
+            defaults: defaults
+        )
+
+        let beforeEvaluation = Date()
+        await monitor.evaluate(share, reason: .timer)
+        let state = monitor.runtimeState(for: share)
+
+        XCTAssertEqual(state.failureCount, 1)
+        XCTAssertEqual(state.status, .waitingForNetwork)
+        XCTAssertNotNil(state.nextRetryDate)
+        XCTAssertGreaterThanOrEqual(state.nextRetryDate ?? .distantPast, beforeEvaluation.addingTimeInterval(9))
+        XCTAssertLessThanOrEqual(state.nextRetryDate ?? .distantFuture, Date().addingTimeInterval(11))
+    }
+
+    @MainActor
+    func testNetworkChangeResetsConsumedRetryBudget() async {
+        let suiteName = "OtterTests.ShareMonitorRetryTests.Reset"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media"
+        )
+        settings.addShare(share)
+        let monitor = ShareMonitor(
+            settings: settings,
+            mountService: StubMountService(),
+            wakeOnLANService: StubWakeOnLANService(),
+            networkService: StubNetworkReachability(isOnline: true, isReachable: false),
+            notificationService: RecordingNotificationService(),
+            eventLog: ShareEventLog(defaults: defaults),
+            defaults: defaults
+        )
+
+        await monitor.evaluate(share, reason: .timer)
+        XCTAssertEqual(monitor.runtimeState(for: share).failureCount, 1)
+
+        await monitor.evaluate(share, reason: .networkChanged)
+        XCTAssertEqual(monitor.runtimeState(for: share).failureCount, 1)
+    }
+
+    @MainActor
+    func testTimerCannotRestartExhaustedRetriesButNetworkChangeCan() async {
+        let suiteName = "OtterTests.ShareMonitorRetryTests.Exhaustion"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media"
+        )
+        settings.addShare(share)
+        let network = StubNetworkReachability(isOnline: true, isReachable: false)
+        var currentDate = Date()
+        let monitor = ShareMonitor(
+            settings: settings,
+            mountService: StubMountService(),
+            wakeOnLANService: StubWakeOnLANService(),
+            networkService: network,
+            notificationService: RecordingNotificationService(),
+            eventLog: ShareEventLog(defaults: defaults),
+            defaults: defaults,
+            now: { currentDate }
+        )
+
+        for attempt in 1...RetryBackoff.maxAutomaticAttempts {
+            await monitor.evaluate(share, reason: attempt == 1 ? .timer : .retry)
+            XCTAssertEqual(monitor.runtimeState(for: share).failureCount, attempt)
+            currentDate = currentDate.addingTimeInterval(1_000)
+        }
+
+        let exhaustedState = monitor.runtimeState(for: share)
+        XCTAssertNil(exhaustedState.nextRetryDate)
+        guard case let .failed(message) = exhaustedState.status else {
+            return XCTFail("Expected the monitor to pause in a failed state")
+        }
+        XCTAssertTrue(message.contains("Automatic reconnect paused"))
+        XCTAssertEqual(network.canReachCallCount, RetryBackoff.maxAutomaticAttempts)
+
+        await monitor.evaluate(share, reason: .timer)
+        XCTAssertEqual(network.canReachCallCount, RetryBackoff.maxAutomaticAttempts)
+        XCTAssertEqual(monitor.runtimeState(for: share).failureCount, RetryBackoff.maxAutomaticAttempts)
+
+        await monitor.evaluate(share, reason: .networkChanged)
+        XCTAssertEqual(network.canReachCallCount, RetryBackoff.maxAutomaticAttempts + 1)
+        XCTAssertEqual(monitor.runtimeState(for: share).failureCount, 1)
+    }
+}
+
+final class MountIdentityTests: XCTestCase {
+    func testSMBIdentityIgnoresFoldersBelowTheShareAndNormalizesDefaultPort() {
+        let configured = SMBShareLocation(url: URL(string: "smb://server.local:445/Media/Movies"))
+        let mounted = SMBShareLocation(url: URL(string: "smb://SERVER.local/Media"))
+
+        XCTAssertEqual(configured, mounted)
+    }
+
+    func testDifferentSharesOnTheSameServerHaveDifferentIdentities() {
+        let media = SMBShareLocation(url: URL(string: "smb://server.local/Media"))
+        let backups = SMBShareLocation(url: URL(string: "smb://server.local/Backups"))
+
+        XCTAssertNotEqual(media, backups)
+    }
+}
+
+final class ProblemNotificationTrackerTests: XCTestCase {
+    func testRecoveryClearsSuppressionEvenWithoutARecoveryNotification() {
+        let shareID = UUID()
+        var tracker = ProblemNotificationTracker()
+
+        XCTAssertTrue(tracker.beginProblemDelivery(for: shareID))
+        XCTAssertFalse(tracker.beginProblemDelivery(for: shareID))
+
+        tracker.resolveIfNeeded(shareID: shareID, status: .connected)
+
+        XCTAssertTrue(tracker.beginProblemDelivery(for: shareID))
+    }
+
+    func testFailedDeliveryCanBeRetried() {
+        let shareID = UUID()
+        var tracker = ProblemNotificationTracker()
+
+        XCTAssertTrue(tracker.beginProblemDelivery(for: shareID))
+        tracker.problemDeliveryFailed(for: shareID)
+
+        XCTAssertTrue(tracker.beginProblemDelivery(for: shareID))
     }
 }
 
@@ -351,6 +555,53 @@ final class SettingsStoreTests: XCTestCase {
         // Excluding current share ID
         XCTAssertFalse(store.isDuplicateShare(urlString: "smb://server.local/share", excluding: share.id))
     }
+
+    @MainActor
+    func testRemovingLastShareForCachedIPRemovesFallbackCredential() {
+        let defaults = UserDefaults(suiteName: "OtterTests.SettingsStoreTests.Credentials")!
+        defaults.removePersistentDomain(forName: "OtterTests.SettingsStoreTests.Credentials")
+        let credentialStore = RecordingCredentialStore()
+        let store = SettingsStore(defaults: defaults, credentialStore: credentialStore)
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            cachedIPAddress: "192.168.1.20"
+        )
+        store.addShare(share)
+
+        store.removeShare(id: share.id)
+
+        XCTAssertEqual(credentialStore.removedHosts, ["192.168.1.20"])
+    }
+
+    @MainActor
+    func testSharedFallbackCredentialSurvivesUntilLastShareIsRemoved() {
+        let defaults = UserDefaults(suiteName: "OtterTests.SettingsStoreTests.SharedCredentials")!
+        defaults.removePersistentDomain(forName: "OtterTests.SettingsStoreTests.SharedCredentials")
+        let credentialStore = RecordingCredentialStore()
+        let store = SettingsStore(defaults: defaults, credentialStore: credentialStore)
+        let first = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            cachedIPAddress: "192.168.1.20"
+        )
+        let second = NetworkShare(
+            displayName: "Backups",
+            urlString: "smb://server.local/Backups",
+            mountPath: "/Volumes/Backups",
+            cachedIPAddress: "192.168.1.20"
+        )
+        store.addShare(first)
+        store.addShare(second)
+
+        store.removeShare(id: first.id)
+        XCTAssertTrue(credentialStore.removedHosts.isEmpty)
+
+        store.removeShare(id: second.id)
+        XCTAssertEqual(credentialStore.removedHosts, ["192.168.1.20"])
+    }
 }
 
 final class AppPreferencesTests: XCTestCase {
@@ -374,5 +625,78 @@ final class AppPreferencesTests: XCTestCase {
 
         let enabledPreferences = try JSONDecoder().decode(AppPreferences.self, from: Data(legacyEnabledJSON.utf8))
         XCTAssertEqual(enabledPreferences.appPresenceMode, .dockWhilePreferencesOpen)
+    }
+}
+
+private struct StubHostResolver: HostResolving {
+    let result: String?
+
+    func resolveIPAddress(for hostname: String) async -> String? {
+        result
+    }
+}
+
+private final class RecordingCredentialStore: CredentialStoring, @unchecked Sendable {
+    var removedHosts: [String] = []
+
+    func hasCredentials(for host: String) -> Bool {
+        false
+    }
+
+    func syncCredentials(fromHost: String, toHost: String) -> Bool {
+        false
+    }
+
+    func removeFallbackCredentials(for host: String) {
+        removedHosts.append(host)
+    }
+}
+
+private actor StubMountService: MountServicing {
+    func mountedURL(for share: NetworkShare) async -> URL? {
+        nil
+    }
+
+    func mount(_ share: NetworkShare, urlOverride: URL?) async throws -> URL? {
+        nil
+    }
+
+    func unmount(_ share: NetworkShare) async throws {}
+}
+
+private actor StubWakeOnLANService: WakeOnLANServicing {
+    func sendWakePacket(using configuration: WakeOnLANConfiguration) async throws {}
+}
+
+@MainActor
+private final class StubNetworkReachability: NetworkReachabilityProviding {
+    let isOnline: Bool
+    let currentWiFiNetworkName: String? = nil
+    let isVPNConnected = false
+    let currentIPv4Subnets: [String] = []
+    let activeVPNNames: [String] = []
+    var onPathChange: (() -> Void)?
+    let isReachable: Bool
+    private(set) var canReachCallCount = 0
+
+    init(isOnline: Bool, isReachable: Bool) {
+        self.isOnline = isOnline
+        self.isReachable = isReachable
+    }
+
+    func canReachServer(for url: URL, timeout: TimeInterval) async -> Bool {
+        canReachCallCount += 1
+        return isReachable
+    }
+
+    func refreshNetworkDetailsIfStale(maxAge: TimeInterval) async {}
+}
+
+@MainActor
+private final class RecordingNotificationService: ShareNotificationProviding {
+    private(set) var transitions: [(previous: ShareStatus, current: ShareStatus)] = []
+
+    func notifyStatusChange(for share: NetworkShare, previous: ShareStatus, current: ShareStatus) {
+        transitions.append((previous, current))
     }
 }

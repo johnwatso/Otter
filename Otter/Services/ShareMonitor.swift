@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import Foundation
 
-private enum MonitorReason {
+enum MonitorReason {
     case launch
     case manual
     case timer
@@ -11,6 +11,15 @@ private enum MonitorReason {
     case volumeChanged
     case configurationChanged
     case retry
+
+    var resetsRetryBudget: Bool {
+        switch self {
+        case .wake, .networkChanged, .configurationChanged:
+            true
+        case .launch, .manual, .timer, .volumeChanged, .retry:
+            false
+        }
+    }
 }
 
 struct ShareRuntimeState: Equatable {
@@ -23,108 +32,6 @@ struct ShareRuntimeState: Equatable {
     var lastConnectedAt: Date?
 }
 
-enum ShareEventKind: String, Codable {
-    case mounted
-    case connectionLost
-    case disconnected
-    case blockedByRule
-    case mountFailed
-    case wakePacketSent
-}
-
-struct ShareEvent: Identifiable, Codable, Equatable {
-    let id: UUID
-    let shareID: NetworkShare.ID
-    let date: Date
-    let kind: ShareEventKind
-    let detail: String?
-}
-
-// Persisted, capped log of share status transitions. Feeds the Activity Log
-// window and the per-share drop counter in the detail pane.
-@MainActor
-final class ShareEventLog: ObservableObject {
-    // Newest first.
-    @Published private(set) var events: [ShareEvent]
-
-    private static let storageKey = "shareEventLog"
-    private static let maxEvents = 200
-    // Retry loops re-report the same failure; identical consecutive events
-    // for a share within this window collapse into the earlier entry.
-    private static let coalescingWindow: TimeInterval = 15 * 60
-
-    init() {
-        if let data = UserDefaults.standard.data(forKey: Self.storageKey),
-           let stored = try? JSONDecoder().decode([ShareEvent].self, from: data) {
-            events = stored
-        } else {
-            events = []
-        }
-    }
-
-    func record(_ kind: ShareEventKind, for share: NetworkShare, detail: String? = nil) {
-        if let latest = events.first(where: { $0.shareID == share.id }),
-           latest.kind == kind,
-           latest.detail == detail,
-           Date().timeIntervalSince(latest.date) < Self.coalescingWindow {
-            return
-        }
-
-        events.insert(
-            ShareEvent(id: UUID(), shareID: share.id, date: Date(), kind: kind, detail: detail),
-            at: 0
-        )
-        if events.count > Self.maxEvents {
-            events.removeLast(events.count - Self.maxEvents)
-        }
-        save()
-    }
-
-    func events(for shareID: NetworkShare.ID?) -> [ShareEvent] {
-        guard let shareID else { return events }
-        return events.filter { $0.shareID == shareID }
-    }
-
-    func connectionDropCount(for shareID: NetworkShare.ID, within interval: TimeInterval = 24 * 60 * 60) -> Int {
-        let cutoff = Date().addingTimeInterval(-interval)
-        return events
-            .filter { $0.shareID == shareID && $0.kind == .connectionLost && $0.date >= cutoff }
-            .count
-    }
-
-    func pruneShares(keeping shareIDs: Set<NetworkShare.ID>) {
-        let prunedEvents = events.filter { shareIDs.contains($0.shareID) }
-        guard prunedEvents.count != events.count else { return }
-        events = prunedEvents
-        save()
-    }
-
-    func clear() {
-        events = []
-        save()
-    }
-
-    private func save() {
-        guard let data = try? JSONEncoder().encode(events) else { return }
-        UserDefaults.standard.set(data, forKey: Self.storageKey)
-    }
-}
-
-enum RetryBackoff {
-    static let delays: [TimeInterval] = [10, 30, 120, 300]
-
-    static func delay(afterFailures failures: Int) -> TimeInterval {
-        delays[min(max(failures - 1, 0), delays.count - 1)]
-    }
-
-    static func delayWithJitter(afterFailures failures: Int) -> TimeInterval {
-        let baseDelay = delay(afterFailures: failures)
-        let maxJitter = min(baseDelay * 0.1, 30.0)
-        let jitter = Double.random(in: -maxJitter...maxJitter)
-        return max(baseDelay + jitter, 1.0)
-    }
-}
-
 private enum WakeOnLANRetryPolicy {
     static let packetCooldown: TimeInterval = 60
 }
@@ -135,11 +42,13 @@ final class ShareMonitor: ObservableObject {
     @Published private(set) var isChecking = false
 
     private let settings: SettingsStore
-    private let mountService: MountService
-    private let wakeOnLANService: WakeOnLANService
-    private let networkService: NetworkReachabilityService
-    private let notificationService: NotificationService
+    private let mountService: any MountServicing
+    private let wakeOnLANService: any WakeOnLANServicing
+    private let networkService: any NetworkReachabilityProviding
+    private let notificationService: any ShareNotificationProviding
     private let eventLog: ShareEventLog
+    private let defaults: UserDefaults
+    private let now: () -> Date
     private var cancellables = Set<AnyCancellable>()
     private var workspaceObservers: [NSObjectProtocol] = []
     private var fallbackTimer: Timer?
@@ -162,11 +71,13 @@ final class ShareMonitor: ObservableObject {
 
     init(
         settings: SettingsStore,
-        mountService: MountService,
-        wakeOnLANService: WakeOnLANService,
-        networkService: NetworkReachabilityService,
-        notificationService: NotificationService,
-        eventLog: ShareEventLog
+        mountService: any MountServicing,
+        wakeOnLANService: any WakeOnLANServicing,
+        networkService: any NetworkReachabilityProviding,
+        notificationService: any ShareNotificationProviding,
+        eventLog: ShareEventLog,
+        defaults: UserDefaults = .standard,
+        now: @escaping () -> Date = Date.init
     ) {
         self.settings = settings
         self.mountService = mountService
@@ -174,7 +85,9 @@ final class ShareMonitor: ObservableObject {
         self.networkService = networkService
         self.notificationService = notificationService
         self.eventLog = eventLog
-        persistedConnectionTimes = Self.loadPersistedConnectionTimes()
+        self.defaults = defaults
+        self.now = now
+        persistedConnectionTimes = Self.loadPersistedConnectionTimes(from: defaults)
         syncStates(with: settings.shares)
     }
 
@@ -190,7 +103,7 @@ final class ShareMonitor: ObservableObject {
         }
 
         if visibleStates.contains(.connected) {
-            return "externaldrive.fill"
+            return "externaldrive.connected.to.line.below.fill"
         }
 
         return "externaldrive"
@@ -275,7 +188,7 @@ final class ShareMonitor: ObservableObject {
 
             var state = states[share.id] ?? ShareRuntimeState()
             state.status = .wakePacketSent
-            state.lastCheckedAt = Date()
+            state.lastCheckedAt = now()
             state.nextRetryDate = nil
             state.needsCredentials = false
             saveState(state, for: share)
@@ -367,12 +280,18 @@ final class ShareMonitor: ObservableObject {
         await evaluate(share, reason: reason, force: force)
     }
 
-    private func evaluate(_ share: NetworkShare, reason: MonitorReason, force: Bool = false) async {
+    func evaluate(_ share: NetworkShare, reason: MonitorReason, force: Bool = false) async {
         // A check for this share is already running; remember the request and
         // re-run once it finishes so events arriving mid-check aren't lost.
         guard !activeChecks.contains(share.id) else {
             let pendingForce = (pendingChecks[share.id]?.force ?? false) || force
-            pendingChecks[share.id] = (reason, pendingForce)
+            let pendingReason: MonitorReason
+            if pendingChecks[share.id]?.reason.resetsRetryBudget == true && !reason.resetsRetryBudget {
+                pendingReason = pendingChecks[share.id]?.reason ?? reason
+            } else {
+                pendingReason = reason
+            }
+            pendingChecks[share.id] = (pendingReason, pendingForce)
             return
         }
 
@@ -391,6 +310,13 @@ final class ShareMonitor: ObservableObject {
 
         var state = states[share.id] ?? ShareRuntimeState()
 
+        if force || reason.resetsRetryBudget {
+            state.failureCount = 0
+            state.nextRetryDate = nil
+            state.needsCredentials = false
+            cancelRetry(for: share.id)
+        }
+
         let oldShare = lastEvaluatedShares[share.id]
         if let oldShare, oldShare != share {
             state.failureCount = 0
@@ -403,7 +329,7 @@ final class ShareMonitor: ObservableObject {
         }
         lastEvaluatedShares[share.id] = share
 
-        state.lastCheckedAt = Date()
+        state.lastCheckedAt = now()
         await networkService.refreshNetworkDetailsIfStale()
 
         let mountedURL = await mountService.mountedURL(for: share)
@@ -472,8 +398,21 @@ final class ShareMonitor: ObservableObject {
             return
         }
 
-        let now = Date()
-        if !force, let nextRetryDate = state.nextRetryDate, nextRetryDate > now {
+
+        guard force || RetryBackoff.shouldRetry(afterFailures: state.failureCount) else {
+            if case .failed = state.status {
+                // Keep the underlying mount/reachability error that exhausted
+                // the retry budget instead of replacing it on every timer tick.
+            } else {
+                state.status = .failed(retryLimitMessage())
+            }
+            state.nextRetryDate = nil
+            saveState(state, for: share)
+            cancelRetry(for: share.id)
+            return
+        }
+
+        if !force, let nextRetryDate = state.nextRetryDate, nextRetryDate > now() {
             saveState(state, for: share)
             return
         }
@@ -521,8 +460,14 @@ final class ShareMonitor: ObservableObject {
                 }
 
                 state = states[share.id] ?? state
-                state.status = wakePacketSent ? .wakePacketSent : .waitingForNetwork
-                state.nextRetryDate = nextRetryDate(afterFailures: max(state.failureCount, 1))
+                state.failureCount += 1
+                if RetryBackoff.shouldRetry(afterFailures: state.failureCount) {
+                    state.status = wakePacketSent ? .wakePacketSent : .waitingForNetwork
+                    state.nextRetryDate = nextRetryDate(afterFailures: state.failureCount)
+                } else {
+                    state.status = .failed(retryLimitMessage())
+                    state.nextRetryDate = nil
+                }
                 saveState(state, for: share)
                 scheduleRetry(for: share.id, at: state.nextRetryDate)
             }
@@ -558,7 +503,7 @@ final class ShareMonitor: ObservableObject {
     ) async throws -> Bool {
         guard share.wakeOnLAN.isEnabled else { return false }
 
-        let now = Date()
+        let now = now()
         if !ignoringCooldown,
            let lastWakePacketDate = lastWakePacketDates[share.id],
            now.timeIntervalSince(lastWakePacketDate) < WakeOnLANRetryPolicy.packetCooldown {
@@ -582,26 +527,35 @@ final class ShareMonitor: ObservableObject {
 
     private func registerFailure(_ message: String, for shareID: NetworkShare.ID, needsCredentials: Bool = false) {
         var state = states[shareID] ?? ShareRuntimeState()
-        state.status = .failed(message)
         state.failureCount += 1
-        state.lastCheckedAt = Date()
-        state.nextRetryDate = nextRetryDate(afterFailures: state.failureCount)
+        state.lastCheckedAt = now()
         state.needsCredentials = needsCredentials
+        if RetryBackoff.shouldRetry(afterFailures: state.failureCount) {
+            state.status = .failed(message)
+            state.nextRetryDate = nextRetryDate(afterFailures: state.failureCount)
+        } else {
+            state.status = .failed("\(message) \(retryLimitMessage())")
+            state.nextRetryDate = nil
+        }
         saveState(state, for: shareID)
         scheduleRetry(for: shareID, at: state.nextRetryDate)
+    }
+
+    private func retryLimitMessage() -> String {
+        "Automatic reconnect paused after \(RetryBackoff.maxAutomaticAttempts) attempts. It will resume after the Mac wakes, the network or settings change, or you mount manually."
     }
 
     private func updateFailure(_ message: String, for shareID: NetworkShare.ID) {
         var state = states[shareID] ?? ShareRuntimeState()
         state.status = .failed(message)
-        state.lastCheckedAt = Date()
+        state.lastCheckedAt = now()
         saveState(state, for: shareID)
     }
 
     private func updateStatus(_ status: ShareStatus, for shareID: NetworkShare.ID) {
         var state = states[shareID] ?? ShareRuntimeState()
         state.status = status
-        state.lastCheckedAt = Date()
+        state.lastCheckedAt = now()
         saveState(state, for: shareID)
     }
 
@@ -612,11 +566,11 @@ final class ShareMonitor: ObservableObject {
 
         if case .connected = updatedState.status {
             if previousState?.mountedAt == nil {
-                updatedState.mountedAt = Date()
+                updatedState.mountedAt = now()
             } else {
                 updatedState.mountedAt = previousState?.mountedAt
             }
-            updatedState.lastConnectedAt = Date()
+            updatedState.lastConnectedAt = now()
         } else {
             updatedState.mountedAt = nil
             updatedState.lastConnectedAt = previousState?.lastConnectedAt
@@ -640,8 +594,7 @@ final class ShareMonitor: ObservableObject {
             eventLog.record(.wakePacketSent, for: share)
         case .disconnected where previous == .connected:
             eventLog.record(.disconnected, for: share)
-        case let .waitingForAllowedNetwork(requirement) where previous == .connected,
-             let .pausedByRule(requirement) where previous == .connected:
+        case let .waitingForAllowedNetwork(requirement) where previous == .connected:
             eventLog.record(.blockedByRule, for: share, detail: requirement)
         case .reconnecting where previous == .connected,
              .waitingForNetwork where previous == .connected:
@@ -672,11 +625,11 @@ final class ShareMonitor: ObservableObject {
 
     private func savePersistedConnectionTimes() {
         guard let data = try? JSONEncoder().encode(persistedConnectionTimes) else { return }
-        UserDefaults.standard.set(data, forKey: Self.connectionTimesKey)
+        defaults.set(data, forKey: Self.connectionTimesKey)
     }
 
-    private static func loadPersistedConnectionTimes() -> [String: PersistedConnectionTimes] {
-        guard let data = UserDefaults.standard.data(forKey: connectionTimesKey),
+    private static func loadPersistedConnectionTimes(from defaults: UserDefaults) -> [String: PersistedConnectionTimes] {
+        guard let data = defaults.data(forKey: connectionTimesKey),
               let times = try? JSONDecoder().decode([String: PersistedConnectionTimes].self, from: data)
         else { return [:] }
 
@@ -692,7 +645,7 @@ final class ShareMonitor: ObservableObject {
     }
 
     private func nextRetryDate(afterFailures failures: Int) -> Date {
-        Date().addingTimeInterval(RetryBackoff.delayWithJitter(afterFailures: failures))
+        now().addingTimeInterval(RetryBackoff.delayWithJitter(afterFailures: failures))
     }
 
     private func scheduleRetry(for shareID: NetworkShare.ID, at date: Date?) {
@@ -703,8 +656,16 @@ final class ShareMonitor: ObservableObject {
         retryTasks[shareID] = Task { [weak self] in
             try? await Task.sleep(nanoseconds: nanoseconds(for: delay))
             guard !Task.isCancelled else { return }
-            await self?.evaluateShare(id: shareID, reason: .retry)
+            await self?.runScheduledRetry(for: shareID)
         }
+    }
+
+    private func runScheduledRetry(for shareID: NetworkShare.ID) async {
+        // Remove the completed task before evaluating. If the evaluation
+        // schedules another attempt, it should not cancel the task currently
+        // executing this method.
+        retryTasks[shareID] = nil
+        await evaluateShare(id: shareID, reason: .retry)
     }
 
     private func cancelRetry(for shareID: NetworkShare.ID) {
@@ -729,8 +690,15 @@ final class ShareMonitor: ObservableObject {
 
     private func syncStates(with shares: [NetworkShare]) {
         let shareIDs = Set(shares.map(\.id))
+
+        for shareID in Array(retryTasks.keys) where !shareIDs.contains(shareID) {
+            cancelRetry(for: shareID)
+        }
+
         states = states.filter { shareIDs.contains($0.key) }
         lastWakePacketDates = lastWakePacketDates.filter { shareIDs.contains($0.key) }
+        pendingChecks = pendingChecks.filter { shareIDs.contains($0.key) }
+        lastEvaluatedShares = lastEvaluatedShares.filter { shareIDs.contains($0.key) }
 
         for share in shares where states[share.id] == nil {
             var state = ShareRuntimeState()
