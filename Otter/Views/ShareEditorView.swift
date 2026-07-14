@@ -5,6 +5,7 @@ struct ShareEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var networkService: NetworkReachabilityService
     @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var discovery: SMBDiscoveryService
     @State private var draft: DraftShare
     @State private var validationMessage: String?
     @State private var mountedShareSuggestions: [MountedShareSuggestion] = []
@@ -85,6 +86,38 @@ struct ShareEditorView: View {
                         .tahoeSecondaryActionButton()
                     } header: {
                         finderSectionHeader
+                    }
+
+                    if !discovery.servers.isEmpty || discovery.state == .searching {
+                        Section("Nearby SMB Servers") {
+                            if discovery.servers.isEmpty {
+                                HStack {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                    Text("Searching the local network…")
+                                        .foregroundStyle(.secondary)
+                                }
+                            } else {
+                                ForEach(discovery.servers) { server in
+                                    Button {
+                                        if let url = server.finderURL {
+                                            NSWorkspace.shared.open(url)
+                                        }
+                                    } label: {
+                                        HStack {
+                                            Label(server.name, systemImage: "server.rack")
+                                            Spacer()
+                                            Text("Open in Finder")
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text("Connect once in Finder, save the password to Keychain, then return and refresh the mounted-share list.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -302,6 +335,7 @@ struct ShareEditorView: View {
             networkService.refreshNetworkDetails()
             if !isEditing {
                 refreshMountedShares()
+                discovery.start()
             }
         }
         .onChange(of: networkService.currentWiFiNetworkName) {
@@ -309,6 +343,11 @@ struct ShareEditorView: View {
         }
         .onChange(of: networkService.currentIPv4Subnets) {
             fillDraftFromCurrentNetwork()
+        }
+        .onDisappear {
+            if !isEditing {
+                discovery.stop()
+            }
         }
     }
 
@@ -536,9 +575,11 @@ struct ShareEditorView: View {
             keepMounted: draft.keepMounted,
             mountAtLaunch: draft.mountAtLaunch,
             autoConnectWhenReachable: draft.autoConnectWhenReachable,
+            pauseState: draft.pauseState,
             wakeOnLAN: draft.wakeOnLAN,
             rules: draft.rules,
             cachedIPAddress: draft.cachedIPAddress,
+            ipAddressChangeObservations: draft.ipAddressChangeObservations,
             createdAt: draft.createdAt ?? now,
             updatedAt: now
         )

@@ -14,12 +14,16 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
-      - name: Build
+      - name: Build universal macOS 15+ app
         run: |
           xcodebuild build \
             -project Otter.xcodeproj \
             -scheme Otter \
             -configuration Debug \
+            -destination 'generic/platform=macOS' \
+            MACOSX_DEPLOYMENT_TARGET=15.0 \
+            ARCHS='arm64 x86_64' \
+            ONLY_ACTIVE_ARCH=NO \
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_ALLOWED=YES
 
@@ -29,5 +33,6 @@ jobs:
             -project Otter.xcodeproj \
             -scheme Otter \
             -destination 'platform=macOS' \
+            MACOSX_DEPLOYMENT_TARGET=15.0 \
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_ALLOWED=YES

@@ -1,7 +1,30 @@
 import Darwin
 import Foundation
 
+struct IPAddressChangeObservation: Codable, Hashable, Sendable {
+    let previousAddress: String
+    let currentAddress: String
+    let observedAt: Date
+}
+
+enum CachedIPAddressUpdate: Equatable, Sendable {
+    case ignored
+    case unchanged
+    case initial
+    case changed(recentChangeCount: Int)
+
+    var didChangeAddress: Bool {
+        if case .changed = self { return true }
+        return false
+    }
+}
+
 struct NetworkShare: Identifiable, Codable, Hashable {
+    static let ipAddressInstabilityWindow: TimeInterval = 30 * 24 * 60 * 60
+    static let ipAddressInstabilityThreshold = 2
+    private static let ipAddressHistoryRetention: TimeInterval = 180 * 24 * 60 * 60
+    private static let maxIPAddressChangeObservations = 12
+
     var id: UUID
     var displayName: String
     var urlString: String
@@ -9,9 +32,11 @@ struct NetworkShare: Identifiable, Codable, Hashable {
     var keepMounted: Bool
     var mountAtLaunch: Bool
     var autoConnectWhenReachable: Bool
+    var pauseState: PauseState
     var wakeOnLAN: WakeOnLANConfiguration
     var rules: ShareRules
     var cachedIPAddress: String?
+    var ipAddressChangeObservations: [IPAddressChangeObservation]
     var createdAt: Date
     var updatedAt: Date
 
@@ -23,9 +48,11 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         keepMounted: Bool = true,
         mountAtLaunch: Bool = true,
         autoConnectWhenReachable: Bool = false,
+        pauseState: PauseState = .inactive,
         wakeOnLAN: WakeOnLANConfiguration = WakeOnLANConfiguration(),
         rules: ShareRules = ShareRules(),
         cachedIPAddress: String? = nil,
+        ipAddressChangeObservations: [IPAddressChangeObservation] = [],
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -36,9 +63,11 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         self.keepMounted = keepMounted
         self.mountAtLaunch = mountAtLaunch
         self.autoConnectWhenReachable = autoConnectWhenReachable
+        self.pauseState = pauseState
         self.wakeOnLAN = wakeOnLAN
         self.rules = rules
         self.cachedIPAddress = cachedIPAddress
+        self.ipAddressChangeObservations = ipAddressChangeObservations
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         normalize()
@@ -52,9 +81,11 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         case keepMounted
         case mountAtLaunch
         case autoConnectWhenReachable
+        case pauseState
         case wakeOnLAN
         case rules
         case cachedIPAddress
+        case ipAddressChangeObservations
         case createdAt
         case updatedAt
     }
@@ -68,9 +99,14 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         keepMounted = try container.decode(Bool.self, forKey: .keepMounted)
         mountAtLaunch = try container.decode(Bool.self, forKey: .mountAtLaunch)
         autoConnectWhenReachable = try container.decodeIfPresent(Bool.self, forKey: .autoConnectWhenReachable) ?? false
+        pauseState = try container.decodeIfPresent(PauseState.self, forKey: .pauseState) ?? .inactive
         wakeOnLAN = try container.decodeIfPresent(WakeOnLANConfiguration.self, forKey: .wakeOnLAN) ?? WakeOnLANConfiguration()
         rules = try container.decodeIfPresent(ShareRules.self, forKey: .rules) ?? ShareRules()
         cachedIPAddress = try container.decodeIfPresent(String.self, forKey: .cachedIPAddress)
+        ipAddressChangeObservations = try container.decodeIfPresent(
+            [IPAddressChangeObservation].self,
+            forKey: .ipAddressChangeObservations
+        ) ?? []
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         normalize()
@@ -88,8 +124,72 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         displayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         urlString = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         mountPath = Self.normalizedMountPath(mountPath, displayName: displayName, urlString: urlString)
+        pauseState.clearIfExpired()
         wakeOnLAN.normalize()
         rules.normalize()
+        cachedIPAddress = cachedIPAddress?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if cachedIPAddress?.isEmpty == true {
+            cachedIPAddress = nil
+        }
+        ipAddressChangeObservations = Array(
+            ipAddressChangeObservations
+                .filter {
+                    Self.isIPAddress($0.previousAddress)
+                        && Self.isIPAddress($0.currentAddress)
+                        && $0.previousAddress != $0.currentAddress
+                }
+                .sorted { $0.observedAt < $1.observedAt }
+                .suffix(Self.maxIPAddressChangeObservations)
+        )
+    }
+
+    mutating func recordResolvedIPAddress(
+        _ address: String,
+        observedAt date: Date = Date()
+    ) -> CachedIPAddressUpdate {
+        let normalizedAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.isIPAddress(normalizedAddress) else { return .ignored }
+
+        if cachedIPAddress?.localizedCaseInsensitiveCompare(normalizedAddress) == .orderedSame {
+            return .unchanged
+        }
+
+        let previousAddress = cachedIPAddress
+        cachedIPAddress = normalizedAddress
+
+        guard let previousAddress else { return .initial }
+
+        ipAddressChangeObservations.append(
+            IPAddressChangeObservation(
+                previousAddress: previousAddress,
+                currentAddress: normalizedAddress,
+                observedAt: date
+            )
+        )
+        let retentionCutoff = date.addingTimeInterval(-Self.ipAddressHistoryRetention)
+        ipAddressChangeObservations = Array(
+            ipAddressChangeObservations
+                .filter { $0.observedAt >= retentionCutoff }
+                .sorted { $0.observedAt < $1.observedAt }
+                .suffix(Self.maxIPAddressChangeObservations)
+        )
+
+        return .changed(recentChangeCount: recentIPAddressChangeCount(at: date))
+    }
+
+    func recentIPAddressChangeCount(
+        at date: Date = Date(),
+        within interval: TimeInterval = NetworkShare.ipAddressInstabilityWindow
+    ) -> Int {
+        let cutoff = date.addingTimeInterval(-interval)
+        return ipAddressChangeObservations.filter {
+            $0.observedAt >= cutoff && $0.observedAt <= date
+        }.count
+    }
+
+    func hasUnstableIPAddress(at date: Date = Date()) -> Bool {
+        recentIPAddressChangeCount(at: date) >= Self.ipAddressInstabilityThreshold
     }
 
     static func inferredShareName(from urlString: String) -> String? {
@@ -114,6 +214,13 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         using resolver: any HostResolving = SystemHostResolver()
     ) async -> String? {
         await resolver.resolveIPAddress(for: hostname)
+    }
+
+    static func resolveIPAddresses(
+        for hostname: String,
+        using resolver: any HostResolving = SystemHostResolver()
+    ) async -> [String] {
+        await resolver.resolveIPAddresses(for: hostname)
     }
 
     static func defaultMountPath(displayName: String, urlString: String) -> String {

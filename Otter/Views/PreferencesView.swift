@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct PreferencesView: View {
     @EnvironmentObject private var appModel: AppModel
@@ -45,6 +46,8 @@ struct ShareManagementView: View {
     @State private var selection: NetworkShare.ID?
     @State private var didRegisterWindowAppearance = false
     @State private var isShowingActivityLog = false
+    @State private var isShowingConnectionDoctor = false
+    @State private var isShowingOnboarding = false
     @Namespace private var selectionHighlightNamespace
     @State private var rowFrames: [NetworkShare.ID: CGRect] = [:]
 
@@ -63,13 +66,6 @@ struct ShareManagementView: View {
         }
         .toolbar {
             ToolbarItemGroup {
-                Button {
-                    appModel.requestNewShare()
-                } label: {
-                    Label("Add Share", systemImage: "plus")
-                }
-                .help("Add Share")
-
                 if let selectedShare {
                     let status = monitor.status(for: selectedShare)
 
@@ -98,10 +94,14 @@ struct ShareManagementView: View {
                         Task { await monitor.disconnect(selectedShare) }
                     }
                 } label: {
-                    Label("Disconnect", systemImage: "eject")
+                    Label("Disconnect & Pause", systemImage: "eject")
                 }
                 .disabled(!canDisconnectSelectedShare)
-                .help("Disconnect")
+                .help("Disconnect and pause automatic mounting")
+
+                if let selectedShare {
+                    SharePauseMenu(share: selectedShare)
+                }
 
                 Button {
                     if let selectedShare {
@@ -121,19 +121,29 @@ struct ShareManagementView: View {
                 .help("Activity Log")
 
                 Button {
-                    if let selectedShare {
-                        settings.removeShare(id: selectedShare.id)
-                        selection = settings.shares.first?.id
-                    }
+                    isShowingConnectionDoctor = true
                 } label: {
-                    Label("Remove Share", systemImage: "minus")
+                    Label("Connection Doctor", systemImage: "stethoscope")
                 }
                 .disabled(selectedShare == nil)
-                .help("Remove Share")
+                .help("Run Connection Doctor")
             }
         }
         .sheet(isPresented: $isShowingActivityLog) {
             ActivityLogView(initialShareFilter: selection)
+        }
+        .sheet(isPresented: $isShowingConnectionDoctor) {
+            if let selectedShare {
+                ConnectionDoctorView(share: selectedShare)
+            }
+        }
+        .sheet(isPresented: $isShowingOnboarding) {
+            OnboardingView {
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    appModel.requestNewShare()
+                }
+            }
         }
         .sheet(item: $appModel.editorRequest) { request in
             let editingShare = share(for: request)
@@ -166,9 +176,21 @@ struct ShareManagementView: View {
             }
 
             loginItemService.refresh()
+
+            if !settings.preferences.hasCompletedOnboarding {
+                Task { @MainActor in
+                    await Task.yield()
+                    isShowingOnboarding = true
+                }
+            }
         }
         .onChange(of: appModel.screenshotDemoShares != nil) {
             selection = shares.first?.id
+        }
+        .onChange(of: settings.shares.map(\.id)) {
+            if selection == nil || !settings.shares.contains(where: { $0.id == selection }) {
+                selection = settings.shares.first?.id
+            }
         }
         .onDisappear {
             if didRegisterWindowAppearance {
@@ -184,7 +206,38 @@ struct ShareManagementView: View {
         ZStack {
             SidebarMaterialBackground()
 
-            sidebarRows
+            VStack(spacing: 0) {
+                sidebarRows
+
+                Divider()
+
+                HStack(spacing: 2) {
+                    Button {
+                        appModel.requestNewShare()
+                    } label: {
+                        Image(systemName: "plus")
+                            .frame(width: 24, height: 22)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Add Share")
+                    .accessibilityLabel("Add Share")
+
+                    Button {
+                        removeSelectedShare()
+                    } label: {
+                        Image(systemName: "minus")
+                            .frame(width: 24, height: 22)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(!canRemoveSelectedShare)
+                    .help("Remove Share")
+                    .accessibilityLabel("Remove Share")
+
+                    Spacer()
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+            }
         }
     }
 
@@ -264,7 +317,25 @@ struct ShareManagementView: View {
     private var canDisconnectSelectedShare: Bool {
         guard let selectedShare else { return false }
         return monitor.status(for: selectedShare) == .connected
-            && !selectedShare.autoConnectWhenReachable
+    }
+
+    private var canRemoveSelectedShare: Bool {
+        guard let selectedShare else { return false }
+        return settings.share(id: selectedShare.id) != nil
+    }
+
+    private func removeSelectedShare() {
+        guard let selectedShare,
+              let selectedIndex = settings.shares.firstIndex(where: { $0.id == selectedShare.id })
+        else { return }
+
+        settings.removeShare(id: selectedShare.id)
+        guard !settings.shares.isEmpty else {
+            selection = nil
+            return
+        }
+
+        selection = settings.shares[min(selectedIndex, settings.shares.count - 1)].id
     }
 
     private func share(for request: ShareEditorRequest) -> NetworkShare? {
@@ -333,6 +404,7 @@ private struct GeneralPreferencesView: View {
     @EnvironmentObject private var networkService: NetworkReachabilityService
     @EnvironmentObject private var notificationService: NotificationService
     @EnvironmentObject private var loginItemService: LoginItemService
+    @State private var configurationMessage: String?
 
     var body: some View {
         Form {
@@ -396,8 +468,44 @@ private struct GeneralPreferencesView: View {
                     Text("Fallback check: \(fallbackIntervalLabel(settings.preferences.fallbackCheckInterval))")
                 }
                 SettingsSecondaryText("Also checks after wake, network, and volume changes.")
+
+                Toggle("Recover unresponsive mounted volumes", isOn: Binding(
+                    get: { settings.preferences.recoverUnresponsiveMounts },
+                    set: { enabled in
+                        settings.updatePreferences { $0.recoverUnresponsiveMounts = enabled }
+                    }
+                ))
+                SettingsSecondaryText("Uses a time-limited helper probe and only attempts a normal unmount. Otter never force-unmounts a busy volume.")
             } header: {
                 Text("Monitoring")
+            }
+
+            Section {
+                HStack {
+                    Button {
+                        exportConfiguration()
+                    } label: {
+                        Label("Export Configuration…", systemImage: "square.and.arrow.up")
+                    }
+                    .tahoeSecondaryActionButton()
+
+                    Button {
+                        importConfiguration()
+                    } label: {
+                        Label("Import Configuration…", systemImage: "square.and.arrow.down")
+                    }
+                    .tahoeSecondaryActionButton()
+                }
+
+                SettingsSecondaryText("Includes shares, network rules, Wake-on-LAN, and monitoring settings. Keychain credentials are never exported.")
+
+                if let configurationMessage {
+                    Text(configurationMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Configuration")
             }
 
             Section {
@@ -536,6 +644,65 @@ private struct GeneralPreferencesView: View {
     private func openLocationPrivacySettings() {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices") else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    private var configurationFileType: UTType {
+        UTType(filenameExtension: "otterconfig", conformingTo: .json) ?? .json
+    }
+
+    private func exportConfiguration() {
+        let panel = NSSavePanel()
+        panel.title = "Export Otter Configuration"
+        panel.nameFieldStringValue = "Otter Configuration.otterconfig"
+        panel.allowedContentTypes = [configurationFileType]
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let data = try ConfigurationTransferService.encode(settings.configurationArchive())
+            try data.write(to: url, options: .atomic)
+            configurationMessage = "Configuration exported. Credentials were not included."
+        } catch {
+            configurationMessage = "Export failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func importConfiguration() {
+        let panel = NSOpenPanel()
+        panel.title = "Import Otter Configuration"
+        panel.allowedContentTypes = [configurationFileType, .json]
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let archive = try ConfigurationTransferService.decode(Data(contentsOf: url))
+            let alert = NSAlert()
+            alert.messageText = "Import \(archive.shares.count) Share\(archive.shares.count == 1 ? "" : "s")?"
+            alert.informativeText = "Merge updates matching SMB addresses and keeps other shares. Replace removes the current share list first. Keychain credentials are not changed."
+            alert.addButton(withTitle: "Merge")
+            alert.addButton(withTitle: "Replace")
+            alert.addButton(withTitle: "Cancel")
+
+            let response = alert.runModal()
+            let strategy: ConfigurationImportStrategy
+            switch response {
+            case .alertFirstButtonReturn:
+                strategy = .merge
+            case .alertSecondButtonReturn:
+                strategy = .replace
+            default:
+                return
+            }
+
+            let result = settings.importConfiguration(archive, strategy: strategy)
+            configurationMessage = "Imported: \(result.added) added, \(result.updated) updated, \(result.removed) removed."
+        } catch {
+            configurationMessage = "Import failed: \(error.localizedDescription)"
+        }
     }
 }
 

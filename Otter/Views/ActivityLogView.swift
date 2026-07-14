@@ -167,6 +167,10 @@ private extension ShareEventKind {
             "Mount failed"
         case .wakePacketSent:
             "Wake-on-LAN packet sent"
+        case .unresponsiveDetected:
+            "Mounted volume stopped responding"
+        case .recoveryAttempted:
+            "Recovery started"
         }
     }
 
@@ -184,6 +188,10 @@ private extension ShareEventKind {
             "exclamationmark.triangle.fill"
         case .wakePacketSent:
             "power.circle.fill"
+        case .unresponsiveDetected:
+            "externaldrive.badge.exclamationmark"
+        case .recoveryAttempted:
+            "wrench.and.screwdriver.fill"
         }
     }
 
@@ -200,6 +208,10 @@ private extension ShareEventKind {
         case .mountFailed:
             .red
         case .wakePacketSent:
+            .blue
+        case .unresponsiveDetected:
+            .red
+        case .recoveryAttempted:
             .blue
         }
     }

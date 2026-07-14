@@ -41,9 +41,11 @@ struct MenuBarView: View {
         Button {
             Task { await monitor.disconnectAll() }
         } label: {
-            Label("Disconnect All", systemImage: "eject")
+            Label("Disconnect & Pause All", systemImage: "eject")
         }
         .disabled(shares.isEmpty)
+
+        GlobalPauseMenu()
 
         Divider()
 
@@ -140,10 +142,12 @@ private struct ShareMenu: View {
                 }
             }
 
+            SharePauseMenu(share: share)
+
             Button {
                 Task { await monitor.disconnect(share) }
             } label: {
-                Label("Disconnect", systemImage: "eject")
+                Label("Disconnect & Pause", systemImage: "eject")
             }
 
             Button {
@@ -181,5 +185,71 @@ private struct ShareMenu: View {
     private var statusLabel: some View {
         let status = monitor.status(for: share)
         return Label(status.label, systemImage: status.systemImage)
+    }
+}
+
+struct GlobalPauseMenu: View {
+    @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var monitor: ShareMonitor
+
+    var body: some View {
+        if settings.isGloballyPaused {
+            Button {
+                Task { await monitor.resumeAll() }
+            } label: {
+                Label("Resume Automatic Mounting", systemImage: "play.fill")
+            }
+        } else {
+            Menu {
+                pauseButtons { resumeAt in
+                    Task { await monitor.pauseAll(until: resumeAt) }
+                }
+            } label: {
+                Label("Pause Automatic Mounting", systemImage: "pause.fill")
+            }
+        }
+    }
+}
+
+struct SharePauseMenu: View {
+    @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var monitor: ShareMonitor
+    let share: NetworkShare
+
+    private var currentShare: NetworkShare {
+        settings.share(id: share.id) ?? share
+    }
+
+    var body: some View {
+        if currentShare.pauseState.isActive() {
+            Button {
+                Task { await monitor.resume(currentShare) }
+            } label: {
+                Label("Resume Automatic Mounting", systemImage: "play.fill")
+            }
+        } else {
+            Menu {
+                pauseButtons { resumeAt in
+                    Task { await monitor.pause(currentShare, until: resumeAt) }
+                }
+            } label: {
+                Label("Pause Automatic Mounting", systemImage: "pause.fill")
+            }
+        }
+    }
+}
+
+@ViewBuilder
+private func pauseButtons(action: @escaping (Date?) -> Void) -> some View {
+    Button("For 1 Hour") {
+        action(Date().addingTimeInterval(60 * 60))
+    }
+    Button("Until Tomorrow") {
+        let calendar = Calendar.current
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date()))
+        action(tomorrow)
+    }
+    Button("Until Resumed") {
+        action(nil)
     }
 }

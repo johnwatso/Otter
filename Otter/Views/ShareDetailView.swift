@@ -68,10 +68,25 @@ struct ShareDetailView: View {
 
                     VStack(spacing: 6) {
                         DetailRow(label: "Server", value: currentShare.host ?? "Unknown")
+                        if let cachedIPAddress = currentShare.cachedIPAddress {
+                            DetailRow(label: "LAN fallback", value: cachedIPAddress)
+                        }
                         DetailRow(label: "Share", value: NetworkShare.inferredShareName(from: currentShare.urlString) ?? currentShare.displayName)
                         DetailRow(label: "Mount location", value: currentShare.mountPath)
                         DetailRow(label: "Protocol", value: "SMB")
                         DetailRow(label: "Keychain credentials", value: hasKeychainCredentials ? "✓ Saved" : "✕ Not found")
+
+                        if currentShare.hasUnstableIPAddress() {
+                            HStack(alignment: .top, spacing: 7) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                                Text("The LAN address has changed repeatedly this month. Otter still connects by hostname first; a DHCP reservation may improve fallback reliability.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                            }
+                            .padding(.top, 3)
+                        }
                     }
                 }
                 
@@ -86,6 +101,9 @@ struct ShareDetailView: View {
                     
                     VStack(spacing: 6) {
                         ConfigStatusRow(label: "Reconnect automatically", isEnabled: currentShare.keepMounted)
+                        if let pauseState = settings.effectivePauseState(for: currentShare) {
+                            DetailRow(label: "Automatic mounting", value: pauseDescription(pauseState))
+                        }
                         ConfigStatusRow(label: "Connect when server becomes available", isEnabled: currentShare.autoConnectWhenReachable)
                         ConfigStatusRow(label: "Mount at login", isEnabled: currentShare.mountAtLaunch)
                         ConfigStatusRow(label: "Wake sleeping server", isEnabled: currentShare.wakeOnLAN.isEnabled)
@@ -135,6 +153,13 @@ struct ShareDetailView: View {
         } else {
             return "Last connected on \(date.formatted(.dateTime.month().day().hour().minute()))"
         }
+    }
+
+    private func pauseDescription(_ pauseState: PauseState) -> String {
+        if let resumeAt = pauseState.resumeAt {
+            return "Paused until \(resumeAt.formatted(date: .abbreviated, time: .shortened))"
+        }
+        return "Paused until resumed"
     }
 
     private var hasKeychainCredentials: Bool {

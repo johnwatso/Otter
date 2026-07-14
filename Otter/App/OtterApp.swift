@@ -18,7 +18,7 @@ struct OtterApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra {
+        MenuBarExtra(isInserted: menuBarExtraBinding) {
             MenuBarView()
                 .environmentObject(appModel)
                 .environmentObject(appModel.settings)
@@ -40,10 +40,12 @@ struct OtterApp: App {
                 .environmentObject(appModel.monitor)
                 .environmentObject(appModel.networkService)
                 .environmentObject(appModel.loginItemService)
+                .environmentObject(appModel.notificationService)
                 .environmentObject(appModel.eventLog)
-                .frame(minWidth: 600, minHeight: 560)
+                .environmentObject(appModel.discoveryService)
+                .frame(minWidth: 660, minHeight: 560)
         }
-        .defaultSize(width: 600, height: 600)
+        .defaultSize(width: 680, height: 600)
 
         Window("Preferences", id: AppModel.preferencesWindowID) {
             PreferencesView()
@@ -57,6 +59,13 @@ struct OtterApp: App {
         .defaultSize(width: 520, height: 420)
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
+    }
+
+    private var menuBarExtraBinding: Binding<Bool> {
+        Binding(
+            get: { appModel.isMenuBarExtraInserted },
+            set: { _ in appModel.refreshDockIconVisibility() }
+        )
     }
 }
 

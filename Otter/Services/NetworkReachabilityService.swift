@@ -74,12 +74,19 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
             return false
         }
 
-        if url.scheme?.lowercased() == "smb", Self.isBonjourSMBServiceHost(host) {
-            return true
+        let reachableHost: String
+        if url.scheme?.lowercased() == "smb",
+           SystemHostResolver.bonjourServiceIdentity(for: host) != nil {
+            guard let resolvedAddress = await SystemHostResolver().resolveIPAddress(for: host) else {
+                return false
+            }
+            reachableHost = resolvedAddress
+        } else {
+            reachableHost = host
         }
 
         let port = NWEndpoint.Port(rawValue: UInt16(url.port ?? 445)) ?? NWEndpoint.Port(rawValue: 445)!
-        let connection = NWConnection(host: NWEndpoint.Host(host), port: port, using: .tcp)
+        let connection = NWConnection(host: NWEndpoint.Host(reachableHost), port: port, using: .tcp)
 
         return await withCheckedContinuation { continuation in
             let attempt = ReachabilityAttempt(connection: connection, continuation: continuation)
@@ -232,11 +239,6 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
         if shouldNotify {
             onPathChange?()
         }
-    }
-
-    private nonisolated static func isBonjourSMBServiceHost(_ host: String) -> Bool {
-        let normalizedHost = host.lowercased()
-        return normalizedHost.contains("._smb._tcp.")
     }
 
     private nonisolated static func readCurrentWiFiNetworkName() -> String? {

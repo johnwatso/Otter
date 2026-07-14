@@ -1,6 +1,6 @@
 import Foundation
 
-struct MountedShareSuggestion: Identifiable, Hashable {
+struct MountedShareSuggestion: Identifiable, Hashable, Sendable {
     var id: String { mountPath }
 
     let displayName: String
@@ -45,6 +45,45 @@ struct MountedShareSuggestion: Identifiable, Hashable {
             urlString: urlString,
             mountPath: volumeURL.standardizedFileURL.resolvingSymlinksInPath().path
         )
+    }
+
+    func matches(server: DiscoveredSMBServer) -> Bool {
+        guard let host = URL(string: urlString)?.host(percentEncoded: false) else { return false }
+        let suggestionIdentity = Self.normalizedServerIdentity(host)
+        return suggestionIdentity == Self.normalizedServerIdentity(server.hostName)
+            || suggestionIdentity == Self.normalizedServerIdentity(server.name)
+    }
+
+    static func finderImportCandidates(
+        in suggestions: [MountedShareSuggestion],
+        for server: DiscoveredSMBServer,
+        excludingMountPaths existingMountPaths: Set<String>
+    ) -> [MountedShareSuggestion] {
+        let matchingServerShares = suggestions.filter { $0.matches(server: server) }
+        if !matchingServerShares.isEmpty {
+            return matchingServerShares
+        }
+
+        let newlyMountedShares = suggestions.filter {
+            !existingMountPaths.contains($0.mountPath)
+        }
+        // If the mount advertises an unexpected alias, accept it only when the
+        // Finder round-trip produced one unambiguous new SMB volume.
+        return newlyMountedShares.count == 1 ? newlyMountedShares : []
+    }
+
+    private static func normalizedServerIdentity(_ value: String) -> String {
+        var normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            .lowercased()
+
+        if let serviceMarker = normalized.range(of: "._smb._tcp.") {
+            normalized = String(normalized[..<serviceMarker.lowerBound])
+        } else if normalized.hasSuffix(".local") {
+            normalized.removeLast(".local".count)
+        }
+        return normalized
     }
 
     private static var resourceKeys: Set<URLResourceKey> {
@@ -100,7 +139,9 @@ struct DraftShare {
     var keepMounted: Bool
     var mountAtLaunch: Bool
     var cachedIPAddress: String?
+    var ipAddressChangeObservations: [IPAddressChangeObservation]
     var autoConnectWhenReachable: Bool
+    var pauseState: PauseState
     var wakeOnLANEnabled: Bool
     var wakeOnLANMACAddress: String
     var wakeOnLANBroadcastAddress: String
@@ -120,7 +161,9 @@ struct DraftShare {
         keepMounted = share?.keepMounted ?? true
         mountAtLaunch = share?.mountAtLaunch ?? true
         cachedIPAddress = share?.cachedIPAddress
+        ipAddressChangeObservations = share?.ipAddressChangeObservations ?? []
         autoConnectWhenReachable = share?.autoConnectWhenReachable ?? false
+        pauseState = share?.pauseState ?? .inactive
         wakeOnLANEnabled = share?.wakeOnLAN.isEnabled ?? false
         wakeOnLANMACAddress = share?.wakeOnLAN.macAddress ?? ""
         wakeOnLANBroadcastAddress = share?.wakeOnLAN.broadcastAddress ?? WakeOnLANConfiguration.defaultBroadcastAddress

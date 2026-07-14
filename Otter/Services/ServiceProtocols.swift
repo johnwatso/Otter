@@ -10,6 +10,17 @@ protocol WakeOnLANServicing: Sendable {
     func sendWakePacket(using configuration: WakeOnLANConfiguration) async throws
 }
 
+enum MountHealthResult: Equatable, Sendable {
+    case healthy
+    case unresponsive
+    case unavailable(String)
+}
+
+protocol MountHealthChecking: Sendable {
+    func checkMount(at url: URL, timeout: TimeInterval) async -> MountHealthResult
+    func unmountForRecovery(at url: URL, timeout: TimeInterval) async -> Bool
+}
+
 @MainActor
 protocol NetworkReachabilityProviding: AnyObject {
     var isOnline: Bool { get }
@@ -40,5 +51,6 @@ protocol ShareNotificationProviding: AnyObject {
 
 extension MountService: MountServicing {}
 extension WakeOnLANService: WakeOnLANServicing {}
+extension MountHealthService: MountHealthChecking {}
 extension NetworkReachabilityService: NetworkReachabilityProviding {}
 extension NotificationService: ShareNotificationProviding {}

@@ -1,7 +1,54 @@
+import AppKit
 import XCTest
 @testable import Otter
 
+final class AppIconAssetTests: XCTestCase {
+    func testAppIconRendersDifferentLightAndDarkAppearances() throws {
+        let lightImage = try XCTUnwrap(AdaptiveOtterIcon.image(for: .light))
+        let darkImage = try XCTUnwrap(AdaptiveOtterIcon.image(for: .dark))
+        let lightData = try XCTUnwrap(lightImage.tiffRepresentation)
+        let darkData = try XCTUnwrap(darkImage.tiffRepresentation)
+
+        XCTAssertNotEqual(lightData, darkData)
+    }
+}
+
 final class NetworkShareTests: XCTestCase {
+    func testMountedSuggestionMatchesBonjourDiscoveryIdentity() {
+        let suggestion = MountedShareSuggestion(
+            displayName: "Media",
+            urlString: "smb://Living%20Room%20NAS._smb._tcp.local/Media",
+            mountPath: "/Volumes/Media"
+        )
+        let matchingServer = DiscoveredSMBServer(name: "Living Room NAS", domain: "local.")
+        let otherServer = DiscoveredSMBServer(name: "Archive NAS", domain: "local.")
+
+        XCTAssertTrue(suggestion.matches(server: matchingServer))
+        XCTAssertFalse(suggestion.matches(server: otherServer))
+    }
+
+    func testFinderImportCandidatesPreferTheSelectedBonjourServer() {
+        let selectedServer = DiscoveredSMBServer(name: "Living Room NAS", domain: "local.")
+        let selectedShare = MountedShareSuggestion(
+            displayName: "Media",
+            urlString: "smb://Living%20Room%20NAS._smb._tcp.local/Media",
+            mountPath: "/Volumes/Media"
+        )
+        let unrelatedShare = MountedShareSuggestion(
+            displayName: "Archive",
+            urlString: "smb://archive.local/Archive",
+            mountPath: "/Volumes/Archive"
+        )
+
+        let candidates = MountedShareSuggestion.finderImportCandidates(
+            in: [unrelatedShare, selectedShare],
+            for: selectedServer,
+            excludingMountPaths: [unrelatedShare.mountPath]
+        )
+
+        XCTAssertEqual(candidates, [selectedShare])
+    }
+
     func testInferredShareNameFromURL() {
         XCTAssertEqual(NetworkShare.inferredShareName(from: "smb://server.local/Dawn"), "Dawn")
         XCTAssertEqual(NetworkShare.inferredShareName(from: "smb://server.local/media/Movies"), "Movies")
@@ -68,11 +115,13 @@ final class NetworkShareTests: XCTestCase {
 
         let share = try JSONDecoder().decode(NetworkShare.self, from: Data(json.utf8))
         XCTAssertFalse(share.autoConnectWhenReachable)
+        XCTAssertEqual(share.pauseState, .inactive)
         XCTAssertFalse(share.wakeOnLAN.isEnabled)
         XCTAssertEqual(share.wakeOnLAN.broadcastAddress, WakeOnLANConfiguration.defaultBroadcastAddress)
         XCTAssertEqual(share.wakeOnLAN.port, WakeOnLANConfiguration.defaultPort)
         XCTAssertFalse(share.rules.hasVPNRule)
         XCTAssertFalse(share.rules.hasWiFiNetworkRule)
+        XCTAssertTrue(share.ipAddressChangeObservations.isEmpty)
     }
 
     func testIPAddressIdentification() {
@@ -100,6 +149,45 @@ final class NetworkShareTests: XCTestCase {
         XCTAssertNil(invalid)
     }
 
+    func testBonjourSMBServiceIdentityIsParsedBeforeAddressLookup() {
+        XCTAssertEqual(
+            SystemHostResolver.bonjourServiceIdentity(for: "Living Room NAS._smb._tcp.local"),
+            BonjourServiceIdentity(name: "Living Room NAS", type: "_smb._tcp.", domain: "local.")
+        )
+        XCTAssertNil(SystemHostResolver.bonjourServiceIdentity(for: "living-room-nas.local"))
+    }
+
+    func testResolvedIPAddressCacheKeepsHostnameAndTracksInstability() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        var share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media"
+        )
+
+        XCTAssertEqual(
+            share.recordResolvedIPAddress("192.168.1.20", observedAt: now.addingTimeInterval(-300)),
+            .initial
+        )
+        XCTAssertEqual(
+            share.recordResolvedIPAddress("192.168.1.20", observedAt: now.addingTimeInterval(-200)),
+            .unchanged
+        )
+        XCTAssertEqual(
+            share.recordResolvedIPAddress("192.168.1.21", observedAt: now.addingTimeInterval(-100)),
+            .changed(recentChangeCount: 1)
+        )
+        XCTAssertEqual(
+            share.recordResolvedIPAddress("192.168.1.22", observedAt: now),
+            .changed(recentChangeCount: 2)
+        )
+
+        XCTAssertEqual(share.host, "server.local")
+        XCTAssertEqual(share.cachedIPAddress, "192.168.1.22")
+        XCTAssertEqual(share.recentIPAddressChangeCount(at: now), 2)
+        XCTAssertTrue(share.hasUnstableIPAddress(at: now))
+    }
+
     func testLegacyRuleActionFieldsRemainDecodable() throws {
         let legacyJSON = """
         {
@@ -117,6 +205,18 @@ final class NetworkShareTests: XCTestCase {
         XCTAssertEqual(rules.requiredWiFiNetworkName, "Home")
         XCTAssertEqual(rules.registeredSubnets, ["192.168.1.0/24"])
         XCTAssertEqual(rules.requiredVPNName, "Work VPN")
+    }
+
+    func testEditorDraftPreservesPauseState() {
+        let resumeAt = Date().addingTimeInterval(3_600)
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            pauseState: .paused(until: resumeAt)
+        )
+
+        XCTAssertEqual(DraftShare(share: share).pauseState, .paused(until: resumeAt))
     }
 }
 
@@ -376,6 +476,71 @@ final class RetryBackoffTests: XCTestCase {
 
 final class ShareMonitorRetryTests: XCTestCase {
     @MainActor
+    func testPausedShareDoesNotReachOrMountAutomatically() async {
+        let suiteName = "OtterTests.ShareMonitorRetryTests.Paused"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let resumeAt = Date().addingTimeInterval(3_600)
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            pauseState: .paused(until: resumeAt)
+        )
+        settings.addShare(share)
+        let network = StubNetworkReachability(isOnline: true, isReachable: true)
+        let mountService = StubMountService()
+        let monitor = ShareMonitor(
+            settings: settings,
+            mountService: mountService,
+            wakeOnLANService: StubWakeOnLANService(),
+            networkService: network,
+            notificationService: RecordingNotificationService(),
+            eventLog: ShareEventLog(defaults: defaults),
+            defaults: defaults
+        )
+
+        await monitor.evaluate(share, reason: .timer)
+        let mountCallCount = await mountService.mountCallCount
+
+        XCTAssertEqual(monitor.status(for: share), .paused(resumeAt))
+        XCTAssertEqual(network.canReachCallCount, 0)
+        XCTAssertEqual(mountCallCount, 0)
+        XCTAssertTrue(settings.share(id: share.id)?.keepMounted == true)
+    }
+
+    @MainActor
+    func testDisconnectPausesWithoutDisablingAutomaticMounting() async {
+        let suiteName = "OtterTests.ShareMonitorRetryTests.Disconnect"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            keepMounted: true
+        )
+        settings.addShare(share)
+        let monitor = ShareMonitor(
+            settings: settings,
+            mountService: StubMountService(),
+            wakeOnLANService: StubWakeOnLANService(),
+            networkService: StubNetworkReachability(isOnline: true, isReachable: true),
+            notificationService: RecordingNotificationService(),
+            eventLog: ShareEventLog(defaults: defaults),
+            defaults: defaults
+        )
+
+        await monitor.disconnect(share)
+
+        XCTAssertEqual(monitor.status(for: share), .paused(nil))
+        XCTAssertEqual(settings.share(id: share.id)?.pauseState, .paused())
+        XCTAssertTrue(settings.share(id: share.id)?.keepMounted == true)
+    }
+
+    @MainActor
     func testUnreachableServerConsumesRetryBudgetAndSchedulesBackoff() async {
         let suiteName = "OtterTests.ShareMonitorRetryTests"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -503,6 +668,486 @@ final class MountIdentityTests: XCTestCase {
     }
 }
 
+final class MountHealthServiceTests: XCTestCase {
+    func testProbeReportsLocalDirectoryAsHealthy() async {
+        let result = await MountHealthService().checkMount(
+            at: URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true),
+            timeout: 1
+        )
+
+        XCTAssertEqual(result, .healthy)
+    }
+
+    func testRecoveryRefusesPathsOutsideVolumes() async {
+        let recovered = await MountHealthService().unmountForRecovery(
+            at: URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true),
+            timeout: 1
+        )
+
+        XCTAssertFalse(recovered)
+    }
+}
+
+final class ConnectionDoctorTests: XCTestCase {
+    @MainActor
+    func testSuccessfulResolutionCachesFallbackWithoutReplacingHostname() async {
+        let suiteName = "OtterTests.ConnectionDoctorTests.AddressCache"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media"
+        )
+        settings.addShare(share)
+        let mountedURL = URL(fileURLWithPath: "/Volumes/Media", isDirectory: true)
+        let mountService = StubMountService(mountedURL: mountedURL)
+        let network = StubNetworkReachability(isOnline: true, isReachable: true)
+        let monitor = makeMonitor(
+            settings: settings,
+            mountService: mountService,
+            network: network,
+            defaults: defaults
+        )
+        let doctor = ConnectionDoctor(
+            settings: settings,
+            mountService: mountService,
+            mountHealthService: StubMountHealthService(result: .healthy),
+            networkService: network,
+            monitor: monitor,
+            hostResolver: StubHostResolver(result: "192.168.1.20")
+        )
+
+        let report = await doctor.run(for: share, attemptMount: false)
+        let stability = report.steps.first { $0.title == "LAN address stability" }
+
+        XCTAssertEqual(settings.share(id: share.id)?.host, "server.local")
+        XCTAssertEqual(settings.share(id: share.id)?.cachedIPAddress, "192.168.1.20")
+        XCTAssertEqual(stability?.status, .passed)
+        XCTAssertTrue(stability?.detail.contains("hostname remains primary") == true)
+    }
+
+    @MainActor
+    func testRepeatedLANAddressChangesProduceWarning() async {
+        let suiteName = "OtterTests.ConnectionDoctorTests.AddressChanges"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let now = Date()
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            cachedIPAddress: "192.168.1.22",
+            ipAddressChangeObservations: [
+                IPAddressChangeObservation(
+                    previousAddress: "192.168.1.20",
+                    currentAddress: "192.168.1.21",
+                    observedAt: now.addingTimeInterval(-2 * 24 * 60 * 60)
+                ),
+                IPAddressChangeObservation(
+                    previousAddress: "192.168.1.21",
+                    currentAddress: "192.168.1.22",
+                    observedAt: now.addingTimeInterval(-24 * 60 * 60)
+                )
+            ]
+        )
+        settings.addShare(share)
+        let mountedURL = URL(fileURLWithPath: "/Volumes/Media", isDirectory: true)
+        let mountService = StubMountService(mountedURL: mountedURL)
+        let network = StubNetworkReachability(isOnline: true, isReachable: true)
+        let monitor = makeMonitor(
+            settings: settings,
+            mountService: mountService,
+            network: network,
+            defaults: defaults
+        )
+        let doctor = ConnectionDoctor(
+            settings: settings,
+            mountService: mountService,
+            mountHealthService: StubMountHealthService(result: .healthy),
+            networkService: network,
+            monitor: monitor,
+            hostResolver: StubHostResolver(result: "192.168.1.22")
+        )
+
+        let report = await doctor.run(for: share, attemptMount: false)
+        let stability = report.steps.first { $0.title == "LAN address stability" }
+
+        XCTAssertEqual(stability?.status, .warning)
+        XCTAssertTrue(stability?.detail.contains("2 times") == true)
+        XCTAssertEqual(settings.share(id: share.id)?.urlString, "smb://server.local/Media")
+        XCTAssertFalse(report.hasRepairableItems)
+    }
+
+    @MainActor
+    func testMissingExpectedShareOffersRepair() async {
+        let suiteName = "OtterTests.ConnectionDoctorTests.RepairAvailability.Missing"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            keepMounted: true
+        )
+        settings.addShare(share)
+        let mountService = StubMountService()
+        let network = StubNetworkReachability(isOnline: true, isReachable: true)
+        let monitor = makeMonitor(
+            settings: settings,
+            mountService: mountService,
+            network: network,
+            defaults: defaults
+        )
+        let doctor = ConnectionDoctor(
+            settings: settings,
+            mountService: mountService,
+            mountHealthService: StubMountHealthService(),
+            networkService: network,
+            monitor: monitor,
+            hostResolver: StubHostResolver(result: "192.168.1.20")
+        )
+
+        let report = await doctor.run(for: share, attemptMount: false)
+
+        XCTAssertTrue(report.hasRepairableItems)
+    }
+
+    @MainActor
+    func testOfflineShareDoesNotOfferUnavailableRepair() async {
+        let suiteName = "OtterTests.ConnectionDoctorTests.RepairAvailability.Offline"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media"
+        )
+        settings.addShare(share)
+        let mountService = StubMountService()
+        let network = StubNetworkReachability(isOnline: false, isReachable: false)
+        let monitor = makeMonitor(
+            settings: settings,
+            mountService: mountService,
+            network: network,
+            defaults: defaults
+        )
+        let doctor = ConnectionDoctor(
+            settings: settings,
+            mountService: mountService,
+            mountHealthService: StubMountHealthService(),
+            networkService: network,
+            monitor: monitor,
+            hostResolver: StubHostResolver(result: nil)
+        )
+
+        let report = await doctor.run(for: share, attemptMount: false)
+
+        XCTAssertFalse(report.hasRepairableItems)
+    }
+
+    @MainActor
+    func testUnresponsiveMountedShareOffersRepair() async {
+        let suiteName = "OtterTests.ConnectionDoctorTests.RepairAvailability.Unresponsive"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media"
+        )
+        settings.addShare(share)
+        let mountedURL = URL(fileURLWithPath: "/Volumes/Media", isDirectory: true)
+        let mountService = StubMountService(mountedURL: mountedURL)
+        let network = StubNetworkReachability(isOnline: true, isReachable: true)
+        let monitor = makeMonitor(
+            settings: settings,
+            mountService: mountService,
+            network: network,
+            defaults: defaults
+        )
+        let doctor = ConnectionDoctor(
+            settings: settings,
+            mountService: mountService,
+            mountHealthService: StubMountHealthService(result: .unresponsive),
+            networkService: network,
+            monitor: monitor,
+            hostResolver: StubHostResolver(result: "192.168.1.20")
+        )
+
+        let report = await doctor.run(for: share, attemptMount: false)
+
+        XCTAssertTrue(report.hasRepairableItems)
+    }
+
+    @MainActor
+    func testReachableSMBServiceDowngradesDirectDNSFailureToInformation() async {
+        let suiteName = "OtterTests.ConnectionDoctorTests.NameResolution"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://bonjour-name.local/Media",
+            mountPath: "/Volumes/Media"
+        )
+        settings.addShare(share)
+        let mountService = StubMountService()
+        let network = StubNetworkReachability(isOnline: true, isReachable: true)
+        let monitor = makeMonitor(
+            settings: settings,
+            mountService: mountService,
+            network: network,
+            defaults: defaults
+        )
+        let doctor = ConnectionDoctor(
+            settings: settings,
+            mountService: mountService,
+            mountHealthService: StubMountHealthService(),
+            networkService: network,
+            monitor: monitor,
+            hostResolver: StubHostResolver(result: nil)
+        )
+
+        let report = await doctor.run(for: share, attemptMount: false)
+        let nameResolution = report.steps.first { $0.title == "Name resolution" }
+
+        XCTAssertEqual(nameResolution?.status, .information)
+        XCTAssertTrue(nameResolution?.detail.contains("macOS can still reach") == true)
+        XCTAssertFalse(report.hasFailures)
+    }
+
+    @MainActor
+    func testRepairMountsAndResumesShareWithoutChangingKeepMountedPreference() async {
+        let suiteName = "OtterTests.ConnectionDoctorTests.Repair"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            keepMounted: false,
+            pauseState: .paused()
+        )
+        settings.addShare(share)
+        let mountedURL = URL(fileURLWithPath: "/Volumes/Media", isDirectory: true)
+        let mountService = StubMountService(mountResult: mountedURL)
+        let network = StubNetworkReachability(isOnline: true, isReachable: true)
+        let monitor = makeMonitor(
+            settings: settings,
+            mountService: mountService,
+            network: network,
+            defaults: defaults
+        )
+        let doctor = ConnectionDoctor(
+            settings: settings,
+            mountService: mountService,
+            mountHealthService: StubMountHealthService(),
+            networkService: network,
+            monitor: monitor
+        )
+
+        let result = await doctor.attemptRepair(for: share)
+        let mountCallCount = await mountService.mountCallCount
+
+        XCTAssertEqual(result.status, .passed)
+        XCTAssertEqual(mountCallCount, 1)
+        XCTAssertEqual(monitor.status(for: share), .connected)
+        XCTAssertEqual(settings.share(id: share.id)?.pauseState, .inactive)
+        XCTAssertFalse(settings.share(id: share.id)?.keepMounted == true)
+    }
+
+    @MainActor
+    func testRepairDoesNotDisturbHealthyMountedShare() async {
+        let suiteName = "OtterTests.ConnectionDoctorTests.Healthy"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media"
+        )
+        settings.addShare(share)
+        let mountedURL = URL(fileURLWithPath: "/Volumes/Media", isDirectory: true)
+        let mountService = StubMountService(mountedURL: mountedURL)
+        let healthService = StubMountHealthService(result: .healthy)
+        let network = StubNetworkReachability(isOnline: true, isReachable: true)
+        let monitor = makeMonitor(
+            settings: settings,
+            mountService: mountService,
+            network: network,
+            defaults: defaults
+        )
+        let doctor = ConnectionDoctor(
+            settings: settings,
+            mountService: mountService,
+            mountHealthService: healthService,
+            networkService: network,
+            monitor: monitor,
+            hostResolver: StubHostResolver(result: "192.168.1.20")
+        )
+
+        let report = await doctor.run(for: share, attemptMount: false)
+        let result = await doctor.attemptRepair(for: share)
+        let mountCallCount = await mountService.mountCallCount
+        let recoveryCallCount = await healthService.recoveryCallCount
+
+        XCTAssertEqual(result.status, .passed)
+        XCTAssertTrue(result.detail.contains("No repair was needed"))
+        XCTAssertFalse(report.hasRepairableItems)
+        XCTAssertEqual(mountCallCount, 0)
+        XCTAssertEqual(recoveryCallCount, 0)
+    }
+
+    @MainActor
+    func testRepairSafelyUnmountsAndReconnectsUnresponsiveShare() async {
+        let suiteName = "OtterTests.ConnectionDoctorTests.Unresponsive"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media"
+        )
+        settings.addShare(share)
+        let mountedURL = URL(fileURLWithPath: "/Volumes/Media", isDirectory: true)
+        let mountService = StubMountService(
+            mountedURL: mountedURL,
+            mountResult: mountedURL,
+            mountedURLReadsBeforeMissing: 1
+        )
+        let healthService = StubMountHealthService(result: .unresponsive, recoveryResult: true)
+        let network = StubNetworkReachability(isOnline: true, isReachable: true)
+        let monitor = makeMonitor(
+            settings: settings,
+            mountService: mountService,
+            network: network,
+            defaults: defaults
+        )
+        let doctor = ConnectionDoctor(
+            settings: settings,
+            mountService: mountService,
+            mountHealthService: healthService,
+            networkService: network,
+            monitor: monitor
+        )
+
+        let result = await doctor.attemptRepair(for: share)
+        let mountCallCount = await mountService.mountCallCount
+        let recoveryCallCount = await healthService.recoveryCallCount
+
+        XCTAssertEqual(result.status, .passed)
+        XCTAssertTrue(result.detail.contains("safely unmounted"))
+        XCTAssertEqual(recoveryCallCount, 1)
+        XCTAssertEqual(mountCallCount, 1)
+        XCTAssertEqual(monitor.status(for: share), .connected)
+    }
+
+    @MainActor
+    func testRepairDoesNotOverrideGlobalPause() async {
+        let suiteName = "OtterTests.ConnectionDoctorTests.GlobalPause"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media"
+        )
+        settings.addShare(share)
+        settings.pauseAll(until: nil)
+        let mountedURL = URL(fileURLWithPath: "/Volumes/Media", isDirectory: true)
+        let mountService = StubMountService(mountResult: mountedURL)
+        let network = StubNetworkReachability(isOnline: true, isReachable: true)
+        let monitor = makeMonitor(
+            settings: settings,
+            mountService: mountService,
+            network: network,
+            defaults: defaults
+        )
+        let doctor = ConnectionDoctor(
+            settings: settings,
+            mountService: mountService,
+            mountHealthService: StubMountHealthService(),
+            networkService: network,
+            monitor: monitor
+        )
+
+        let result = await doctor.attemptRepair(for: share)
+        let mountCallCount = await mountService.mountCallCount
+
+        XCTAssertEqual(result.status, .warning)
+        XCTAssertTrue(result.detail.contains("paused globally"))
+        XCTAssertEqual(mountCallCount, 0)
+        XCTAssertTrue(settings.preferences.pauseState.isActive())
+    }
+
+    @MainActor
+    func testCopiedReportOmitsShareAndServerIdentifiers() async {
+        let suiteName = "OtterTests.ConnectionDoctorTests.Redaction"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Secret Finance Share",
+            urlString: "smb://192.0.2.99/Confidential",
+            mountPath: "/Volumes/Confidential"
+        )
+        settings.addShare(share)
+        let mountService = StubMountService()
+        let network = StubNetworkReachability(isOnline: true, isReachable: false)
+        let monitor = ShareMonitor(
+            settings: settings,
+            mountService: mountService,
+            wakeOnLANService: StubWakeOnLANService(),
+            networkService: network,
+            notificationService: RecordingNotificationService(),
+            eventLog: ShareEventLog(defaults: defaults),
+            defaults: defaults
+        )
+        let doctor = ConnectionDoctor(
+            settings: settings,
+            mountService: mountService,
+            mountHealthService: StubMountHealthService(),
+            networkService: network,
+            monitor: monitor
+        )
+
+        let report = await doctor.run(for: share, attemptMount: false).redactedText
+
+        XCTAssertFalse(report.contains("Secret Finance Share"))
+        XCTAssertFalse(report.contains("192.0.2.99"))
+        XCTAssertFalse(report.contains("Confidential"))
+        XCTAssertTrue(report.contains("Share and network identifiers: redacted"))
+    }
+
+    @MainActor
+    private func makeMonitor(
+        settings: SettingsStore,
+        mountService: StubMountService,
+        network: StubNetworkReachability,
+        defaults: UserDefaults
+    ) -> ShareMonitor {
+        ShareMonitor(
+            settings: settings,
+            mountService: mountService,
+            wakeOnLANService: StubWakeOnLANService(),
+            networkService: network,
+            notificationService: RecordingNotificationService(),
+            eventLog: ShareEventLog(defaults: defaults),
+            defaults: defaults
+        )
+    }
+}
+
 final class ProblemNotificationTrackerTests: XCTestCase {
     func testRecoveryClearsSuppressionEvenWithoutARecoveryNotification() {
         let shareID = UUID()
@@ -528,6 +1173,79 @@ final class ProblemNotificationTrackerTests: XCTestCase {
 }
 
 final class SettingsStoreTests: XCTestCase {
+    @MainActor
+    func testAddedOnboardingSharePersistsImmediately() {
+        let suiteName = "OtterTests.SettingsStoreTests.OnboardingPersistence"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let credentialStore = RecordingCredentialStore()
+        let store = SettingsStore(defaults: defaults, credentialStore: credentialStore)
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media"
+        )
+
+        store.addShare(share)
+        let reloadedStore = SettingsStore(defaults: defaults, credentialStore: credentialStore)
+
+        XCTAssertEqual(reloadedStore.shares, [share])
+    }
+
+    @MainActor
+    func testMultipleResolvedAddressesDoNotCreateFalseChangeHistoryWhenOrderChanges() {
+        let suiteName = "OtterTests.SettingsStoreTests.MultiAddressCache"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let store = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media"
+        )
+        store.addShare(share)
+
+        XCTAssertEqual(
+            store.recordResolvedIPAddresses(["192.168.1.20", "192.168.1.21"], for: share.id),
+            .initial
+        )
+        XCTAssertEqual(
+            store.recordResolvedIPAddresses(["192.168.1.21", "192.168.1.20"], for: share.id),
+            .unchanged
+        )
+        XCTAssertEqual(store.share(id: share.id)?.cachedIPAddress, "192.168.1.20")
+        XCTAssertTrue(store.share(id: share.id)?.ipAddressChangeObservations.isEmpty == true)
+    }
+
+    @MainActor
+    func testChangingPrimaryHostnameClearsLearnedFallbackAndHistory() {
+        let suiteName = "OtterTests.SettingsStoreTests.HostChange"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let store = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        var share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://old-server.local/Media",
+            mountPath: "/Volumes/Media",
+            cachedIPAddress: "192.168.1.20",
+            ipAddressChangeObservations: [
+                IPAddressChangeObservation(
+                    previousAddress: "192.168.1.19",
+                    currentAddress: "192.168.1.20",
+                    observedAt: Date()
+                )
+            ]
+        )
+        store.addShare(share)
+
+        share.urlString = "smb://new-server.local/Media"
+        store.updateShare(share)
+
+        XCTAssertEqual(store.share(id: share.id)?.host, "new-server.local")
+        XCTAssertNil(store.share(id: share.id)?.cachedIPAddress)
+        XCTAssertTrue(store.share(id: share.id)?.ipAddressChangeObservations.isEmpty == true)
+    }
+
     @MainActor
     func testIsDuplicateShareMatchesIdenticalAddresses() {
         let defaults = UserDefaults(suiteName: "OtterTests.SettingsStoreTests")!
@@ -602,6 +1320,121 @@ final class SettingsStoreTests: XCTestCase {
         store.removeShare(id: second.id)
         XCTAssertEqual(credentialStore.removedHosts, ["192.168.1.20"])
     }
+
+    @MainActor
+    func testPausingDoesNotDisableKeepMountedPreference() {
+        let suiteName = "OtterTests.SettingsStoreTests.Pause"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let store = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            keepMounted: true
+        )
+        store.addShare(share)
+
+        store.pauseShare(id: share.id, until: nil)
+
+        XCTAssertTrue(store.share(id: share.id)?.keepMounted == true)
+        XCTAssertEqual(store.share(id: share.id)?.pauseState, .paused())
+    }
+
+    @MainActor
+    func testConfigurationExportOmitsRuntimeAndPrivateState() throws {
+        let suiteName = "OtterTests.SettingsStoreTests.Export"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let store = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://private-user:private-password@server.local/Media",
+            mountPath: "/Volumes/Media",
+            pauseState: .paused(until: Date().addingTimeInterval(3_600)),
+            cachedIPAddress: "203.0.113.42",
+            ipAddressChangeObservations: [
+                IPAddressChangeObservation(
+                    previousAddress: "203.0.113.41",
+                    currentAddress: "203.0.113.42",
+                    observedAt: Date()
+                )
+            ]
+        )
+        store.addShare(share)
+
+        let data = try ConfigurationTransferService.encode(store.configurationArchive())
+        let json = String(decoding: data, as: UTF8.self)
+        let decoded = try ConfigurationTransferService.decode(data)
+
+        XCTAssertEqual(decoded.shares.count, 1)
+        XCTAssertEqual(decoded.shares[0].displayName, "Media")
+        XCTAssertEqual(decoded.shares[0].urlString, "smb://server.local/Media")
+        XCTAssertFalse(json.contains("cachedIPAddress"))
+        XCTAssertFalse(json.contains("ipAddressChangeObservations"))
+        XCTAssertFalse(json.contains("203.0.113.42"))
+        XCTAssertFalse(json.contains("203.0.113.41"))
+        XCTAssertFalse(json.contains("private-user"))
+        XCTAssertFalse(json.contains("private-password"))
+        XCTAssertFalse(json.contains("pauseState"))
+        XCTAssertFalse(json.contains("hasCompletedOnboarding"))
+        XCTAssertFalse(json.contains("notificationsEnabled"))
+
+        let credentialedJSON = json.replacingOccurrences(
+            of: "smb://server.local/Media",
+            with: "smb://user:password@server.local/Media"
+        )
+        XCTAssertThrowsError(
+            try ConfigurationTransferService.decode(Data(credentialedJSON.utf8))
+        )
+    }
+
+    @MainActor
+    func testConfigurationMergePreservesLocalRuntimeState() {
+        let suiteName = "OtterTests.SettingsStoreTests.Import"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let store = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let resumeAt = Date().addingTimeInterval(3_600)
+        let existing = NetworkShare(
+            displayName: "Old Name",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            pauseState: .paused(until: resumeAt),
+            cachedIPAddress: "192.0.2.10",
+            ipAddressChangeObservations: [
+                IPAddressChangeObservation(
+                    previousAddress: "192.0.2.9",
+                    currentAddress: "192.0.2.10",
+                    observedAt: Date()
+                )
+            ]
+        )
+        store.addShare(existing)
+        let incoming = NetworkShare(
+            displayName: "New Name",
+            urlString: "smb://SERVER.local:445/Media/",
+            mountPath: "/Volumes/Renamed Media",
+            keepMounted: false
+        )
+        let archive = ConfigurationTransferService.archive(
+            shares: [incoming],
+            preferences: AppPreferences(fallbackCheckInterval: 120, recoverUnresponsiveMounts: true)
+        )
+
+        let result = store.importConfiguration(archive, strategy: .merge)
+        let merged = store.shares[0]
+
+        XCTAssertEqual(result, ConfigurationImportResult(added: 0, updated: 1, removed: 0))
+        XCTAssertEqual(merged.id, existing.id)
+        XCTAssertEqual(merged.displayName, "New Name")
+        XCTAssertEqual(merged.cachedIPAddress, "192.0.2.10")
+        XCTAssertEqual(merged.ipAddressChangeObservations, existing.ipAddressChangeObservations)
+        XCTAssertEqual(merged.pauseState, .paused(until: resumeAt))
+        XCTAssertFalse(merged.keepMounted)
+        XCTAssertEqual(store.preferences.fallbackCheckInterval, 120)
+        XCTAssertTrue(store.preferences.recoverUnresponsiveMounts)
+    }
 }
 
 final class AppPreferencesTests: XCTestCase {
@@ -624,15 +1457,53 @@ final class AppPreferencesTests: XCTestCase {
         """
 
         let enabledPreferences = try JSONDecoder().decode(AppPreferences.self, from: Data(legacyEnabledJSON.utf8))
-        XCTAssertEqual(enabledPreferences.appPresenceMode, .dockWhilePreferencesOpen)
+        XCTAssertEqual(enabledPreferences.appPresenceMode, .dockAndMenuBar)
+    }
+
+    func testLegacyPresenceModeNamesMigrateToDockAndMenuBar() throws {
+        for legacyMode in ["dockWhilePreferencesOpen", "alwaysShowDockIcon"] {
+            let json = """
+            {"fallbackCheckInterval": 60, "appPresenceMode": "\(legacyMode)"}
+            """
+
+            let preferences = try JSONDecoder().decode(AppPreferences.self, from: Data(json.utf8))
+            XCTAssertEqual(preferences.appPresenceMode, .dockAndMenuBar)
+        }
+    }
+
+    func testPresenceModesControlDockAndMenuBarVisibility() {
+        XCTAssertEqual(AppPresenceMode.allCases, [.dockAndMenuBar, .dockOnly, .menuBarOnly])
+
+        XCTAssertTrue(AppPresenceMode.dockAndMenuBar.showsDockIcon)
+        XCTAssertTrue(AppPresenceMode.dockAndMenuBar.showsMenuBarIcon)
+        XCTAssertTrue(AppPresenceMode.dockOnly.showsDockIcon)
+        XCTAssertFalse(AppPresenceMode.dockOnly.showsMenuBarIcon)
+        XCTAssertFalse(AppPresenceMode.menuBarOnly.showsDockIcon)
+        XCTAssertTrue(AppPresenceMode.menuBarOnly.showsMenuBarIcon)
+
+        for mode in AppPresenceMode.allCases {
+            XCTAssertTrue(mode.shouldShowDockIcon(duringOnboarding: true))
+            XCTAssertTrue(mode.shouldShowMenuBarIcon(duringOnboarding: true))
+        }
+    }
+
+    func testPauseStateExpiresAtItsResumeDate() {
+        let now = Date(timeIntervalSince1970: 1_000)
+        var pause = PauseState.paused(until: now.addingTimeInterval(60))
+
+        XCTAssertTrue(pause.isActive(at: now))
+        XCTAssertFalse(pause.isActive(at: now.addingTimeInterval(60)))
+
+        pause.clearIfExpired(at: now.addingTimeInterval(60))
+        XCTAssertEqual(pause, .inactive)
     }
 }
 
 private struct StubHostResolver: HostResolving {
     let result: String?
 
-    func resolveIPAddress(for hostname: String) async -> String? {
-        result
+    func resolveIPAddresses(for hostname: String) async -> [String] {
+        result.map { [$0] } ?? []
     }
 }
 
@@ -653,12 +1524,34 @@ private final class RecordingCredentialStore: CredentialStoring, @unchecked Send
 }
 
 private actor StubMountService: MountServicing {
+    private(set) var mountCallCount = 0
+    private let mountedURLValue: URL?
+    private let mountResult: URL?
+    private let mountedURLReadsBeforeMissing: Int?
+    private var mountedURLReadCount = 0
+
+    init(
+        mountedURL: URL? = nil,
+        mountResult: URL? = nil,
+        mountedURLReadsBeforeMissing: Int? = nil
+    ) {
+        self.mountedURLValue = mountedURL
+        self.mountResult = mountResult
+        self.mountedURLReadsBeforeMissing = mountedURLReadsBeforeMissing
+    }
+
     func mountedURL(for share: NetworkShare) async -> URL? {
-        nil
+        defer { mountedURLReadCount += 1 }
+        if let mountedURLReadsBeforeMissing,
+           mountedURLReadCount >= mountedURLReadsBeforeMissing {
+            return nil
+        }
+        return mountedURLValue
     }
 
     func mount(_ share: NetworkShare, urlOverride: URL?) async throws -> URL? {
-        nil
+        mountCallCount += 1
+        return mountResult
     }
 
     func unmount(_ share: NetworkShare) async throws {}
@@ -666,6 +1559,26 @@ private actor StubMountService: MountServicing {
 
 private actor StubWakeOnLANService: WakeOnLANServicing {
     func sendWakePacket(using configuration: WakeOnLANConfiguration) async throws {}
+}
+
+private actor StubMountHealthService: MountHealthChecking {
+    private let result: MountHealthResult
+    private let recoveryResult: Bool
+    private(set) var recoveryCallCount = 0
+
+    init(result: MountHealthResult = .healthy, recoveryResult: Bool = false) {
+        self.result = result
+        self.recoveryResult = recoveryResult
+    }
+
+    func checkMount(at url: URL, timeout: TimeInterval) async -> MountHealthResult {
+        result
+    }
+
+    func unmountForRecovery(at url: URL, timeout: TimeInterval) async -> Bool {
+        recoveryCallCount += 1
+        return recoveryResult
+    }
 }
 
 @MainActor
