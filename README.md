@@ -4,6 +4,14 @@
 
 # 🦦 Otter
 
+<p align="center">
+  <a href="https://github.com/johnwatso/Otter/actions/workflows/ci.yml"><img src="https://github.com/johnwatso/Otter/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
+  <img src="https://img.shields.io/badge/platform-macOS%2026+-blue" alt="Platform: macOS 26+">
+  <img src="https://img.shields.io/badge/swift-5.0-orange" alt="Swift 5.0">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/status-active%20development-orange" alt="Status: active development">
+</p>
+
 A lightweight native macOS menu bar app that quietly keeps your network drives connected.
 
 Otter automatically reconnects SMB shares after sleep, network changes, VPN reconnects, or unexpected disconnects, so Finder, Plex, backup jobs, and other apps always have access to the volumes they expect.
