@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# The bundled product website is documentation, not application source.
+website/** linguist-documentation
