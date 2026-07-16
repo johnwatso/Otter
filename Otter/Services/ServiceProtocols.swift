@@ -10,6 +10,27 @@ protocol WakeOnLANServicing: Sendable {
     func sendWakePacket(using configuration: WakeOnLANConfiguration) async throws
 }
 
+protocol VPNConnecting: Sendable {
+    func connect(named serviceName: String, timeout: TimeInterval) async throws
+}
+
+extension VPNConnecting {
+    func connect(named serviceName: String) async throws {
+        try await connect(named: serviceName, timeout: 30)
+    }
+}
+
+enum MountHealthResult: Equatable, Sendable {
+    case healthy
+    case unresponsive
+    case unavailable(String)
+}
+
+protocol MountHealthChecking: Sendable {
+    func checkMount(at url: URL, timeout: TimeInterval) async -> MountHealthResult
+    func unmountForRecovery(at url: URL, timeout: TimeInterval) async -> Bool
+}
+
 @MainActor
 protocol NetworkReachabilityProviding: AnyObject {
     var isOnline: Bool { get }
@@ -21,6 +42,7 @@ protocol NetworkReachabilityProviding: AnyObject {
 
     func canReachServer(for url: URL, timeout: TimeInterval) async -> Bool
     func refreshNetworkDetailsIfStale(maxAge: TimeInterval) async
+    func refreshNetworkDetailsNow() async
 }
 
 extension NetworkReachabilityProviding {
@@ -40,5 +62,6 @@ protocol ShareNotificationProviding: AnyObject {
 
 extension MountService: MountServicing {}
 extension WakeOnLANService: WakeOnLANServicing {}
+extension MountHealthService: MountHealthChecking {}
 extension NetworkReachabilityService: NetworkReachabilityProviding {}
 extension NotificationService: ShareNotificationProviding {}

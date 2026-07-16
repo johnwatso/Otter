@@ -35,6 +35,15 @@
 		1A2B3C4D5E6F70010000001A /* ShareDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000011A /* ShareDetailView.swift */; };
 		1A2B3C4D5E6F70010000001B /* ShareEditorModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000011B /* ShareEditorModels.swift */; };
 		1A2B3C4D5E6F70010000001C /* VPNServiceDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000011C /* VPNServiceDiscovery.swift */; };
+		1A2B3C4D5E6F70010000001D /* otter-icon-light.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000011D /* otter-icon-light.png */; };
+		1A2B3C4D5E6F70010000001E /* otter-icon-dark.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000011E /* otter-icon-dark.png */; };
+		1A2B3C4D5E6F700100000024 /* MountHealthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000120 /* MountHealthService.swift */; };
+		1A2B3C4D5E6F700100000025 /* ConnectionDoctor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000121 /* ConnectionDoctor.swift */; };
+		1A2B3C4D5E6F700100000026 /* SMBDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000122 /* SMBDiscoveryService.swift */; };
+		1A2B3C4D5E6F700100000027 /* ConfigurationTransferService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000123 /* ConfigurationTransferService.swift */; };
+		1A2B3C4D5E6F700100000028 /* ConnectionDoctorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000124 /* ConnectionDoctorView.swift */; };
+		1A2B3C4D5E6F700100000029 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000125 /* OnboardingView.swift */; };
+		1A2B3C4D5E6F70010000002A /* OtterShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000126 /* OtterShortcuts.swift */; };
 		1A2B3C4D5E6F700100000202 /* OtterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000203 /* OtterTests.swift */; };
 		1A2B3C4D5E6F700100000302 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F700100000301 /* Sparkle */; };
 /* End PBXBuildFile section */
@@ -70,6 +79,15 @@
 		1A2B3C4D5E6F70010000011A /* ShareDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareDetailView.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F70010000011B /* ShareEditorModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareEditorModels.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F70010000011C /* VPNServiceDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VPNServiceDiscovery.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F70010000011D /* otter-icon-light.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "website/assets/otter-icon-light.png"; sourceTree = SOURCE_ROOT; };
+		1A2B3C4D5E6F70010000011E /* otter-icon-dark.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "website/assets/otter-icon-dark.png"; sourceTree = SOURCE_ROOT; };
+		1A2B3C4D5E6F700100000120 /* MountHealthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MountHealthService.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000121 /* ConnectionDoctor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionDoctor.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000122 /* SMBDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBDiscoveryService.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000123 /* ConfigurationTransferService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigurationTransferService.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000124 /* ConnectionDoctorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionDoctorView.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000125 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000126 /* OtterShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtterShortcuts.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000201 /* OtterTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OtterTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A2B3C4D5E6F700100000203 /* OtterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtterTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -92,6 +110,8 @@
 				1A2B3C4D5E6F700100000041 /* Otter */,
 				1A2B3C4D5E6F700100000205 /* OtterTests */,
 				1A2B3C4D5E6F70010000010F /* Otter.icon */,
+				1A2B3C4D5E6F70010000011D /* otter-icon-light.png */,
+				1A2B3C4D5E6F70010000011E /* otter-icon-dark.png */,
 				1A2B3C4D5E6F700100000050 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -114,6 +134,7 @@
 			children = (
 				1A2B3C4D5E6F700100000101 /* OtterApp.swift */,
 				1A2B3C4D5E6F700100000102 /* AppModel.swift */,
+				1A2B3C4D5E6F700100000126 /* OtterShortcuts.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -145,6 +166,10 @@
 				1A2B3C4D5E6F700100000111 /* UpdaterViewModel.swift */,
 				1A2B3C4D5E6F70010000011C /* VPNServiceDiscovery.swift */,
 				1A2B3C4D5E6F700100000112 /* WakeOnLANService.swift */,
+				1A2B3C4D5E6F700100000120 /* MountHealthService.swift */,
+				1A2B3C4D5E6F700100000121 /* ConnectionDoctor.swift */,
+				1A2B3C4D5E6F700100000122 /* SMBDiscoveryService.swift */,
+				1A2B3C4D5E6F700100000123 /* ConfigurationTransferService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -159,6 +184,8 @@
 				1A2B3C4D5E6F70010000011A /* ShareDetailView.swift */,
 				1A2B3C4D5E6F70010000011B /* ShareEditorModels.swift */,
 				1A2B3C4D5E6F70010000010D /* ShareEditorView.swift */,
+				1A2B3C4D5E6F700100000124 /* ConnectionDoctorView.swift */,
+				1A2B3C4D5E6F700100000125 /* OnboardingView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -281,6 +308,8 @@
 			files = (
 				1A2B3C4D5E6F70010000000E /* Assets.xcassets in Resources */,
 				1A2B3C4D5E6F70010000000F /* Otter.icon in Resources */,
+				1A2B3C4D5E6F70010000001D /* otter-icon-light.png in Resources */,
+				1A2B3C4D5E6F70010000001E /* otter-icon-dark.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -317,6 +346,13 @@
 				1A2B3C4D5E6F70010000001A /* ShareDetailView.swift in Sources */,
 				1A2B3C4D5E6F70010000001B /* ShareEditorModels.swift in Sources */,
 				1A2B3C4D5E6F70010000001C /* VPNServiceDiscovery.swift in Sources */,
+				1A2B3C4D5E6F700100000024 /* MountHealthService.swift in Sources */,
+				1A2B3C4D5E6F700100000025 /* ConnectionDoctor.swift in Sources */,
+				1A2B3C4D5E6F700100000026 /* SMBDiscoveryService.swift in Sources */,
+				1A2B3C4D5E6F700100000027 /* ConfigurationTransferService.swift in Sources */,
+				1A2B3C4D5E6F700100000028 /* ConnectionDoctorView.swift in Sources */,
+				1A2B3C4D5E6F700100000029 /* OnboardingView.swift in Sources */,
+				1A2B3C4D5E6F70010000002A /* OtterShortcuts.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -379,7 +415,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -432,7 +468,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;

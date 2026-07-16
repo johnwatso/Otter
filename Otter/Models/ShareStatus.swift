@@ -5,6 +5,8 @@ enum ShareStatus: Equatable {
     case disconnected
     case waitingForNetwork
     case waitingForAllowedNetwork(String)
+    case waitingForVPN(String)
+    case paused(Date?)
     case wakePacketSent
     case reconnecting
     case failed(String)
@@ -19,6 +21,10 @@ enum ShareStatus: Equatable {
             "Waiting for network"
         case .waitingForAllowedNetwork:
             "Waiting for network rule"
+        case .waitingForVPN:
+            "VPN required"
+        case .paused:
+            "Paused"
         case .wakePacketSent:
             "Wake sent"
         case .reconnecting:
@@ -32,6 +38,13 @@ enum ShareStatus: Equatable {
         switch self {
         case let .waitingForAllowedNetwork(requirement):
             return "Connect to \(requirement) to mount this share."
+        case let .waitingForVPN(name):
+            return "Connect to “\(name)” to access this server."
+        case let .paused(resumeAt):
+            if let resumeAt {
+                return "Automatic mounting resumes \(resumeAt.formatted(date: .abbreviated, time: .shortened))."
+            }
+            return "Automatic mounting is paused until you resume it."
         case .wakePacketSent:
             return "Otter sent a Wake-on-LAN packet."
         case let .failed(message):
@@ -45,7 +58,7 @@ enum ShareStatus: Equatable {
         switch self {
         case .failed:
             "Last error"
-        case .connected, .disconnected, .waitingForNetwork, .waitingForAllowedNetwork, .wakePacketSent, .reconnecting:
+        case .connected, .disconnected, .waitingForNetwork, .waitingForAllowedNetwork, .waitingForVPN, .paused, .wakePacketSent, .reconnecting:
             "Details"
         }
     }
@@ -60,6 +73,10 @@ enum ShareStatus: Equatable {
             "externaldrive.badge.questionmark"
         case .waitingForAllowedNetwork:
             "externaldrive.badge.minus"
+        case .waitingForVPN:
+            "lock.shield.fill"
+        case .paused:
+            "pause.circle.fill"
         case .wakePacketSent:
             "externaldrive.badge.plus"
         case .reconnecting:
@@ -80,6 +97,10 @@ enum ShareStatus: Equatable {
             "questionmark.circle.fill"
         case .waitingForAllowedNetwork:
             "pause.circle.fill"
+        case .waitingForVPN:
+            "exclamationmark.circle.fill"
+        case .paused:
+            "pause.circle.fill"
         case .wakePacketSent:
             "power.circle.fill"
         case .reconnecting:
@@ -99,6 +120,10 @@ enum ShareStatus: Equatable {
             .orange
         case .waitingForAllowedNetwork:
             .secondary
+        case .waitingForVPN:
+            .orange
+        case .paused:
+            .indigo
         case .wakePacketSent:
             .orange
         case .reconnecting:
@@ -110,9 +135,9 @@ enum ShareStatus: Equatable {
 
     var needsAttention: Bool {
         switch self {
-        case .failed, .waitingForNetwork:
+        case .failed, .waitingForNetwork, .waitingForVPN:
             true
-        case .connected, .disconnected, .waitingForAllowedNetwork, .wakePacketSent, .reconnecting:
+        case .connected, .disconnected, .waitingForAllowedNetwork, .paused, .wakePacketSent, .reconnecting:
             false
         }
     }

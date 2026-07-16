@@ -43,7 +43,9 @@ final class ShareMonitor: ObservableObject {
 
     private let settings: SettingsStore
     private let mountService: any MountServicing
+    private let mountHealthService: any MountHealthChecking
     private let wakeOnLANService: any WakeOnLANServicing
+    private let vpnConnectionService: any VPNConnecting
     private let networkService: any NetworkReachabilityProviding
     private let notificationService: any ShareNotificationProviding
     private let eventLog: ShareEventLog
@@ -53,6 +55,7 @@ final class ShareMonitor: ObservableObject {
     private var workspaceObservers: [NSObjectProtocol] = []
     private var fallbackTimer: Timer?
     private var retryTasks: [NetworkShare.ID: Task<Void, Never>] = [:]
+    private var pauseResumeTask: Task<Void, Never>?
     private var lastWakePacketDates: [NetworkShare.ID: Date] = [:]
     private var activeChecks = Set<NetworkShare.ID>()
     private var pendingChecks: [NetworkShare.ID: (reason: MonitorReason, force: Bool)] = [:]
@@ -72,7 +75,9 @@ final class ShareMonitor: ObservableObject {
     init(
         settings: SettingsStore,
         mountService: any MountServicing,
+        mountHealthService: any MountHealthChecking = MountHealthService(),
         wakeOnLANService: any WakeOnLANServicing,
+        vpnConnectionService: any VPNConnecting = SystemVPNConnectionService(),
         networkService: any NetworkReachabilityProviding,
         notificationService: any ShareNotificationProviding,
         eventLog: ShareEventLog,
@@ -81,7 +86,9 @@ final class ShareMonitor: ObservableObject {
     ) {
         self.settings = settings
         self.mountService = mountService
+        self.mountHealthService = mountHealthService
         self.wakeOnLANService = wakeOnLANService
+        self.vpnConnectionService = vpnConnectionService
         self.networkService = networkService
         self.notificationService = notificationService
         self.eventLog = eventLog
@@ -92,6 +99,10 @@ final class ShareMonitor: ObservableObject {
     }
 
     var menuBarSystemImage: String {
+        if settings.isGloballyPaused {
+            return "pause.circle.fill"
+        }
+
         let visibleStates = settings.shares.map { status(for: $0) }
 
         if visibleStates.contains(where: { $0 == .reconnecting }) {
@@ -117,6 +128,8 @@ final class ShareMonitor: ObservableObject {
         installSettingsObservers()
         installNetworkObserver()
         scheduleFallbackTimer()
+        settings.clearExpiredPauses(at: now())
+        schedulePauseResume()
         scheduleCheck(reason: .launch)
     }
 
@@ -144,36 +157,88 @@ final class ShareMonitor: ObservableObject {
     }
 
     func mountAll() async {
+        settings.resumeAll(clearSharePauses: true)
         settings.setAllKeepMounted(true)
         await evaluateAll(reason: .manual, force: true)
     }
 
     func disconnectAll() async {
-        settings.setAllKeepMounted(false)
-
-        for share in settings.shares {
-            await disconnect(share, disableKeepMounted: false)
-        }
+        await pauseAll(until: nil, disconnect: true)
     }
 
     func mount(_ share: NetworkShare) async {
+        settings.resumeShare(id: share.id)
         settings.updateShare(id: share.id) { $0.keepMounted = true }
         let updatedShare = settings.share(id: share.id) ?? share
         await evaluate(updatedShare, reason: .manual, force: true)
     }
 
-    func disconnect(_ share: NetworkShare, disableKeepMounted: Bool = true) async {
-        if disableKeepMounted {
-            settings.updateShare(id: share.id) { $0.keepMounted = false }
+    // Retry a connection without changing the share's long-term keep-mounted
+    // preference. Repair flows can explicitly clear a per-share pause while a
+    // notification retry simply restarts the current connection attempt.
+    func retry(_ share: NetworkShare, resumeAutomaticMounting: Bool = false) async {
+        if resumeAutomaticMounting {
+            settings.resumeShare(id: share.id)
+        }
+        let updatedShare = settings.share(id: share.id) ?? share
+        await evaluate(updatedShare, reason: .manual, force: true)
+    }
+
+    func disconnect(_ share: NetworkShare, pauseAutomaticMounting: Bool = true) async {
+        if pauseAutomaticMounting {
+            settings.pauseShare(id: share.id, until: nil)
         }
 
         cancelRetry(for: share.id)
 
         do {
             try await mountService.unmount(share)
-            updateStatus(.disconnected, for: share.id)
+            let currentShare = settings.share(id: share.id) ?? share
+            if let pauseState = settings.effectivePauseState(for: currentShare, at: now()) {
+                updateStatus(.paused(pauseState.resumeAt), for: share.id)
+            } else {
+                updateStatus(.disconnected, for: share.id)
+            }
         } catch {
             updateFailure(error.localizedDescription, for: share.id)
+        }
+    }
+
+    func pauseAll(until resumeAt: Date?, disconnect: Bool = false) async {
+        settings.pauseAll(until: resumeAt)
+        schedulePauseResume()
+
+        if disconnect {
+            for share in settings.shares {
+                await self.disconnect(share, pauseAutomaticMounting: false)
+            }
+        } else {
+            await evaluateAll(reason: .configurationChanged)
+        }
+    }
+
+    func resumeAll() async {
+        settings.resumeAll(clearSharePauses: true)
+        schedulePauseResume()
+        await evaluateAll(reason: .configurationChanged)
+    }
+
+    func pause(_ share: NetworkShare, until resumeAt: Date?, disconnect: Bool = false) async {
+        settings.pauseShare(id: share.id, until: resumeAt)
+        schedulePauseResume()
+
+        if disconnect {
+            await self.disconnect(share, pauseAutomaticMounting: false)
+        } else if let updatedShare = settings.share(id: share.id) {
+            await evaluate(updatedShare, reason: .configurationChanged)
+        }
+    }
+
+    func resume(_ share: NetworkShare) async {
+        settings.resumeShare(id: share.id)
+        schedulePauseResume()
+        if let updatedShare = settings.share(id: share.id) {
+            await evaluate(updatedShare, reason: .configurationChanged)
         }
     }
 
@@ -220,6 +285,18 @@ final class ShareMonitor: ObservableObject {
             .sink { [weak self] shares in
                 Task { @MainActor in
                     self?.syncStates(with: shares)
+                    self?.schedulePauseResume()
+                    self?.scheduleCheck(reason: .configurationChanged)
+                }
+            }
+            .store(in: &cancellables)
+
+        settings.$preferences
+            .map(\.pauseState)
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.schedulePauseResume()
                     self?.scheduleCheck(reason: .configurationChanged)
                 }
             }
@@ -264,6 +341,25 @@ final class ShareMonitor: ObservableObject {
 
             guard !Task.isCancelled else { return }
             await self?.evaluateAll(reason: reason)
+        }
+    }
+
+    private func schedulePauseResume() {
+        pauseResumeTask?.cancel()
+        pauseResumeTask = nil
+
+        let currentDate = now()
+        settings.clearExpiredPauses(at: currentDate)
+        guard let resumeDate = settings.nextPauseResumeDate(after: currentDate) else { return }
+
+        pauseResumeTask = Task { [weak self] in
+            guard let self else { return }
+            let delay = max(0, resumeDate.timeIntervalSince(self.now()))
+            try? await Task.sleep(nanoseconds: nanoseconds(for: delay))
+            guard !Task.isCancelled else { return }
+            self.settings.clearExpiredPauses(at: self.now())
+            self.schedulePauseResume()
+            await self.evaluateAll(reason: .configurationChanged)
         }
     }
 
@@ -334,12 +430,117 @@ final class ShareMonitor: ObservableObject {
 
         let mountedURL = await mountService.mountedURL(for: share)
         let isMounted = mountedURL != nil
-        let ruleEvaluation = share.rules.evaluate(
+
+        if !force, let pauseState = settings.effectivePauseState(for: share, at: now()) {
+            cancelRetry(for: share.id)
+            state.status = isMounted ? .connected : .paused(pauseState.resumeAt)
+            state.failureCount = 0
+            state.nextRetryDate = nil
+            state.needsCredentials = false
+            saveState(state, for: share)
+            return
+        }
+
+        var ruleEvaluation = share.rules.evaluate(
             currentWiFiNetworkName: networkService.currentWiFiNetworkName,
             isVPNConnected: networkService.isVPNConnected,
             activeVPNNames: networkService.activeVPNNames,
             currentIPv4Subnets: networkService.currentIPv4Subnets
         )
+
+        // A named VPN rule gives Otter an unambiguous service to start. "Any
+        // VPN" remains passive because choosing an arbitrary configured VPN
+        // could route traffic through the wrong network.
+        if !ruleEvaluation.allowsConnection,
+           share.rules.hasVPNRule,
+           let requiredVPNName = share.rules.requiredVPNName,
+           networkService.isOnline {
+            if !force, !RetryBackoff.shouldRetry(afterFailures: state.failureCount) {
+                if case .failed = state.status {
+                    // Preserve the specific VPN error that exhausted retries.
+                } else {
+                    state.status = .failed(retryLimitMessage())
+                }
+                state.nextRetryDate = nil
+                saveState(state, for: share)
+                cancelRetry(for: share.id)
+                return
+            }
+
+            if !force, let nextRetryDate = state.nextRetryDate, nextRetryDate > now() {
+                saveState(state, for: share)
+                return
+            }
+
+            if !isMounted {
+                state.status = .reconnecting
+                saveState(state, for: share)
+            }
+
+            do {
+                try await vpnConnectionService.connect(named: requiredVPNName)
+
+                // A path-change refresh may still be finishing with a snapshot
+                // captured during negotiation. Re-read briefly until the newly
+                // connected service is visible before moving on to SMB.
+                for refreshAttempt in 0..<5 {
+                    await networkService.refreshNetworkDetailsNow()
+                    ruleEvaluation = share.rules.evaluate(
+                        currentWiFiNetworkName: networkService.currentWiFiNetworkName,
+                        isVPNConnected: networkService.isVPNConnected,
+                        activeVPNNames: networkService.activeVPNNames,
+                        currentIPv4Subnets: networkService.currentIPv4Subnets
+                    )
+                    if ruleEvaluation.allowsConnection {
+                        break
+                    }
+                    if refreshAttempt < 4 {
+                        try? await Task.sleep(nanoseconds: nanoseconds(for: 0.25))
+                    }
+                }
+
+                guard ruleEvaluation.allowsConnection else {
+                    throw SystemVPNConnectionError.disconnected(requiredVPNName)
+                }
+            } catch {
+                if let vpnError = error as? SystemVPNConnectionError,
+                   case .notControllable = vpnError {
+                    if isMounted && ruleEvaluation.shouldDisconnectMountedShare {
+                        do {
+                            try await mountService.unmount(share)
+                        } catch {
+                            updateFailure(
+                                "Connect to “\(requiredVPNName)” to access this server. The mounted share also could not be disconnected: \(error.localizedDescription)",
+                                for: share.id
+                            )
+                            return
+                        }
+                    }
+
+                    cancelRetry(for: share.id)
+                    state.status = .waitingForVPN(requiredVPNName)
+                    state.failureCount = 0
+                    state.nextRetryDate = nil
+                    state.needsCredentials = false
+                    saveState(state, for: share)
+                    return
+                }
+
+                var message = error.localizedDescription
+
+                if isMounted && ruleEvaluation.shouldDisconnectMountedShare {
+                    do {
+                        try await mountService.unmount(share)
+                    } catch {
+                        message += " The mounted share also could not be disconnected: \(error.localizedDescription)"
+                    }
+                }
+
+                registerFailure(message, for: share.id)
+                return
+            }
+        }
+
         if !ruleEvaluation.allowsConnection {
             cancelRetry(for: share.id)
             state.status = ruleEvaluation.blockedStatus ?? .disconnected
@@ -362,6 +563,36 @@ final class ShareMonitor: ObservableObject {
 
         if isMounted {
             if let mountedURL {
+                if settings.preferences.recoverUnresponsiveMounts, reason == .timer {
+                    let health = await mountHealthService.checkMount(at: mountedURL, timeout: 3)
+                    if health == .unresponsive {
+                        eventLog.record(
+                            .unresponsiveDetected,
+                            for: share,
+                            detail: "The mounted volume stopped responding."
+                        )
+
+                        if await mountHealthService.unmountForRecovery(at: mountedURL, timeout: 10) {
+                            eventLog.record(
+                                .recoveryAttempted,
+                                for: share,
+                                detail: "Safely unmounted the unresponsive volume."
+                            )
+                            state.status = .reconnecting
+                            state.failureCount = 0
+                            state.nextRetryDate = nil
+                            saveState(state, for: share)
+                            scheduleCheck(reason: .manual, delay: 1)
+                        } else {
+                            registerFailure(
+                                "The mounted volume is not responding and could not be safely unmounted. Otter did not force it.",
+                                for: share.id
+                            )
+                        }
+                        return
+                    }
+                }
+
                 syncMountPathIfNeeded(mountedURL, for: share)
             }
 
@@ -594,8 +825,12 @@ final class ShareMonitor: ObservableObject {
             eventLog.record(.wakePacketSent, for: share)
         case .disconnected where previous == .connected:
             eventLog.record(.disconnected, for: share)
+        case .paused where previous == .connected:
+            eventLog.record(.disconnected, for: share, detail: "Automatic mounting paused.")
         case let .waitingForAllowedNetwork(requirement) where previous == .connected:
             eventLog.record(.blockedByRule, for: share, detail: requirement)
+        case let .waitingForVPN(name) where previous == .connected:
+            eventLog.record(.blockedByRule, for: share, detail: "VPN required: \(name)")
         case .reconnecting where previous == .connected,
              .waitingForNetwork where previous == .connected:
             eventLog.record(.connectionLost, for: share)
@@ -678,13 +913,8 @@ final class ShareMonitor: ObservableObject {
         guard !networkService.isVPNConnected else { return }
 
         Task { @MainActor [weak self] in
-            if let resolvedIP = await NetworkShare.resolveIPAddress(for: host) {
-                if share.cachedIPAddress != resolvedIP {
-                    self?.settings.updateShare(id: share.id) { updatedShare in
-                        updatedShare.cachedIPAddress = resolvedIP
-                    }
-                }
-            }
+            let resolvedAddresses = await NetworkShare.resolveIPAddresses(for: host)
+            self?.settings.recordResolvedIPAddresses(resolvedAddresses, for: share.id)
         }
     }
 

@@ -8,6 +8,8 @@ enum ShareEventKind: String, Codable {
     case blockedByRule
     case mountFailed
     case wakePacketSent
+    case unresponsiveDetected
+    case recoveryAttempted
 }
 
 struct ShareEvent: Identifiable, Codable, Equatable {

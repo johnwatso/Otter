@@ -1,6 +1,13 @@
 import Foundation
 import UserNotifications
 
+enum ShareNotificationAction: Sendable {
+    case retry
+    case openInFinder
+    case pause
+    case showShare
+}
+
 @MainActor
 final class NotificationService: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     @Published private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
@@ -12,6 +19,15 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
     // Retry cycles flip between "waiting" and "failed" states, and without this
     // every retry would fire another notification.
     private var problemNotificationTracker = ProblemNotificationTracker()
+    var actionHandler: ((ShareNotificationAction, NetworkShare.ID) -> Void)?
+
+    private enum ActionIdentifier {
+        static let retry = "share.retry"
+        static let openInFinder = "share.open"
+        static let pause = "share.pause"
+        static let category = "share-status"
+        static let shareIDKey = "shareID"
+    }
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -41,13 +57,16 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
 
     func start() {
         center.delegate = self
+        registerNotificationActions()
 
         Task {
             await refreshAuthorizationStatus()
 
             // Ask at launch rather than from a background status change, so the
             // permission dialog appears at a predictable moment.
-            if authorizationStatus == .notDetermined && settings.preferences.notificationsEnabled {
+            if authorizationStatus == .notDetermined,
+               settings.preferences.notificationsEnabled,
+               settings.preferences.hasCompletedOnboarding {
                 await requestAuthorization()
             }
         }
@@ -112,6 +131,33 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
         return options
     }
 
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        guard let shareIDString = response.notification.request.content.userInfo[ActionIdentifier.shareIDKey] as? String,
+              let shareID = UUID(uuidString: shareIDString)
+        else { return }
+
+        let action: ShareNotificationAction
+        switch response.actionIdentifier {
+        case ActionIdentifier.retry:
+            action = .retry
+        case ActionIdentifier.openInFinder:
+            action = .openInFinder
+        case ActionIdentifier.pause:
+            action = .pause
+        case UNNotificationDefaultActionIdentifier:
+            action = .showShare
+        default:
+            return
+        }
+
+        await MainActor.run {
+            self.actionHandler?(action, shareID)
+        }
+    }
+
     private func deliver(_ message: ShareNotificationMessage) async -> Bool {
         guard await hasPermissionToNotify() else { return false }
 
@@ -119,7 +165,8 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
         content.title = message.title
         content.body = message.body
         content.threadIdentifier = "share.\(message.shareID.uuidString)"
-        content.categoryIdentifier = "share-status"
+        content.categoryIdentifier = ActionIdentifier.category
+        content.userInfo[ActionIdentifier.shareIDKey] = message.shareID.uuidString
 
         if settings.preferences.notificationSoundsEnabled {
             content.sound = .default
@@ -137,6 +184,31 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
         } catch {
             return false
         }
+    }
+
+    private func registerNotificationActions() {
+        let retry = UNNotificationAction(
+            identifier: ActionIdentifier.retry,
+            title: "Retry Now",
+            options: []
+        )
+        let open = UNNotificationAction(
+            identifier: ActionIdentifier.openInFinder,
+            title: "Open in Finder",
+            options: [.foreground]
+        )
+        let pause = UNNotificationAction(
+            identifier: ActionIdentifier.pause,
+            title: "Pause Automatic Mounting",
+            options: []
+        )
+        let category = UNNotificationCategory(
+            identifier: ActionIdentifier.category,
+            actions: [retry, open, pause],
+            intentIdentifiers: [],
+            options: []
+        )
+        center.setNotificationCategories([category])
     }
 
     private func hasPermissionToNotify() async -> Bool {
@@ -196,6 +268,14 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
                 title: "\(share.displayName) paused by rule",
                 body: "Connect to \(requirement) to mount this share."
             )
+        case let .waitingForVPN(name):
+            guard settings.preferences.notifyProblems else { return nil }
+            return ShareNotificationMessage(
+                shareID: share.id,
+                kind: .waitingForVPN,
+                title: "VPN required for \(share.displayName)",
+                body: "Connect to “\(name)” to access this server."
+            )
         case let .failed(message):
             guard settings.preferences.notifyProblems else { return nil }
             return ShareNotificationMessage(
@@ -204,7 +284,7 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
                 title: "Couldn't connect \(share.displayName)",
                 body: message
             )
-        case .wakePacketSent, .reconnecting:
+        case .paused, .wakePacketSent, .reconnecting:
             return nil
         }
     }
@@ -223,9 +303,9 @@ struct ProblemNotificationTracker {
 
     mutating func resolveIfNeeded(shareID: NetworkShare.ID, status: ShareStatus) {
         switch status {
-        case .connected, .disconnected, .waitingForAllowedNetwork:
+        case .connected, .disconnected, .paused, .waitingForAllowedNetwork:
             notifiedShareIDs.remove(shareID)
-        case .waitingForNetwork, .wakePacketSent, .reconnecting, .failed:
+        case .waitingForNetwork, .waitingForVPN, .wakePacketSent, .reconnecting, .failed:
             break
         }
     }
@@ -243,11 +323,12 @@ private enum ShareNotificationKind: String {
     case disconnected
     case waitingForNetwork
     case waitingForAllowedNetwork
+    case waitingForVPN
     case failed
 
     var isProblem: Bool {
         switch self {
-        case .waitingForNetwork, .failed:
+        case .waitingForNetwork, .waitingForVPN, .failed:
             true
         case .connected, .disconnected, .waitingForAllowedNetwork:
             false

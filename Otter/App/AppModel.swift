@@ -26,15 +26,21 @@ final class AppModel: ObservableObject {
     let settings: SettingsStore
     let networkService: NetworkReachabilityService
     let mountService: MountService
+    let mountHealthService: MountHealthService
+    let vpnConnectionService: SystemVPNConnectionService
+    let discoveryService: SMBDiscoveryService
+    let shareBrowserService: SMBShareBrowserService
     let wakeOnLANService: WakeOnLANService
     let notificationService: NotificationService
     let loginItemService: LoginItemService
     let updaterViewModel: UpdaterViewModel
     let eventLog: ShareEventLog
     let monitor: ShareMonitor
+    let connectionDoctor: ConnectionDoctor
 
     @Published var editorRequest: ShareEditorRequest?
     @Published var shouldOpenSharesWindow = false
+    @Published private(set) var isMenuBarExtraInserted = true
 
 #if DEBUG
     @Published private(set) var isScreenshotDemoEnabled = false
@@ -86,7 +92,7 @@ final class AppModel: ObservableObject {
     }
 
     private var hasStarted = false
-    private var preferencesWindowOpenCount = 0
+    private var isOnboardingPresented = false
     private var lastAppliedDockIconVisibility: Bool?
     private var cancellables = Set<AnyCancellable>()
 
@@ -102,32 +108,52 @@ final class AppModel: ObservableObject {
         let settings = SettingsStore(defaults: defaults, credentialStore: credentialStore)
         let networkService = NetworkReachabilityService()
         let mountService = MountService(credentialStore: credentialStore)
+        let mountHealthService = MountHealthService()
+        let vpnConnectionService = SystemVPNConnectionService()
         let wakeOnLANService = WakeOnLANService()
         let notificationService = NotificationService(settings: settings)
         let eventLog = ShareEventLog(defaults: defaults)
+        let monitor = ShareMonitor(
+            settings: settings,
+            mountService: mountService,
+            mountHealthService: mountHealthService,
+            wakeOnLANService: wakeOnLANService,
+            vpnConnectionService: vpnConnectionService,
+            networkService: networkService,
+            notificationService: notificationService,
+            eventLog: eventLog,
+            defaults: defaults
+        )
 
         self.settings = settings
         self.networkService = networkService
         self.mountService = mountService
+        self.mountHealthService = mountHealthService
+        self.vpnConnectionService = vpnConnectionService
+        self.discoveryService = SMBDiscoveryService()
+        self.shareBrowserService = SMBShareBrowserService()
         self.wakeOnLANService = wakeOnLANService
         self.notificationService = notificationService
         self.loginItemService = LoginItemService()
         self.updaterViewModel = UpdaterViewModel(startingUpdater: !isRunningTests)
         self.eventLog = eventLog
-        self.monitor = ShareMonitor(
+        self.monitor = monitor
+        self.connectionDoctor = ConnectionDoctor(
             settings: settings,
             mountService: mountService,
-            wakeOnLANService: wakeOnLANService,
+            mountHealthService: mountHealthService,
             networkService: networkService,
-            notificationService: notificationService,
-            eventLog: eventLog,
-            defaults: defaults
+            monitor: monitor
         )
     }
 
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
+        notificationService.actionHandler = { [weak self] action, shareID in
+            self?.handleNotificationAction(action, shareID: shareID)
+        }
+        OtterIntentBridge.configure(with: self)
         loginItemService.refresh()
         notificationService.start()
         networkService.start()
@@ -136,34 +162,60 @@ final class AppModel: ObservableObject {
         refreshDockIconVisibility()
     }
 
+    private func handleNotificationAction(_ action: ShareNotificationAction, shareID: NetworkShare.ID) {
+        guard let share = settings.share(id: shareID) else { return }
+
+        switch action {
+        case .retry:
+            Task { await monitor.retry(share) }
+        case .openInFinder:
+            if monitor.status(for: share) == .connected {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: share.mountPath)])
+            } else if let url = share.url {
+                NSWorkspace.shared.open(url)
+            }
+        case .pause:
+            Task { await monitor.pause(share, until: nil) }
+        case .showShare:
+            triggerOpenSharesWindow()
+        }
+    }
+
     func requestNewShare() {
         editorRequest = ShareEditorRequest(mode: .add)
     }
 
     func requestEditShare(_ share: NetworkShare) {
+        guard !settings.isManagedShare(id: share.id) else { return }
         editorRequest = ShareEditorRequest(mode: .edit(share.id))
     }
 
     func preferencesWindowDidAppear() {
-        preferencesWindowOpenCount += 1
         refreshDockIconVisibility(activateIfShowing: true)
     }
 
     func preferencesWindowDidDisappear() {
-        preferencesWindowOpenCount = max(0, preferencesWindowOpenCount - 1)
+        refreshDockIconVisibility()
+    }
+
+    func onboardingDidBegin() {
+        isOnboardingPresented = true
+        refreshDockIconVisibility(activateIfShowing: true)
+    }
+
+    func onboardingDidEnd() {
+        isOnboardingPresented = false
         refreshDockIconVisibility()
     }
 
     func refreshDockIconVisibility(activateIfShowing: Bool = false) {
-        let shouldShowDockIcon: Bool
-        switch settings.preferences.appPresenceMode {
-        case .menuBarOnly:
-            shouldShowDockIcon = false
-        case .dockWhilePreferencesOpen:
-            shouldShowDockIcon = preferencesWindowOpenCount > 0
-        case .alwaysShowDockIcon:
-            shouldShowDockIcon = true
+        let mode = settings.preferences.appPresenceMode
+        let shouldShowMenuBarIcon = mode.shouldShowMenuBarIcon(duringOnboarding: isOnboardingPresented)
+        if isMenuBarExtraInserted != shouldShowMenuBarIcon {
+            isMenuBarExtraInserted = shouldShowMenuBarIcon
         }
+
+        let shouldShowDockIcon = mode.shouldShowDockIcon(duringOnboarding: isOnboardingPresented)
 
         guard lastAppliedDockIconVisibility != shouldShowDockIcon else { return }
         lastAppliedDockIconVisibility = shouldShowDockIcon
@@ -233,7 +285,8 @@ enum ScreenshotDemo {
             rules: ShareRules(
                 wifiNetworkName: "Homebase",
                 registeredSubnets: ["192.168.1.0/24"],
-                vpnRuleEnabled: true
+                vpnRuleEnabled: true,
+                vpnName: "Work VPN"
             )
         ),
         NetworkShare(
@@ -268,7 +321,7 @@ enum ScreenshotDemo {
             return state
         case timeMachineID:
             var state = ShareRuntimeState()
-            state.status = .waitingForAllowedNetwork("the registered network or VPN")
+            state.status = .waitingForAllowedNetwork("the registered network or VPN Work VPN")
             state.lastConnectedAt = now.addingTimeInterval(-11 * 3600)
             return state
         case archiveID:
@@ -303,7 +356,7 @@ enum ScreenshotDemo {
             event(.connectionLost, projectsID, minutesAgo: 65),
             event(.mounted, mediaID, minutesAgo: 167),
             event(.mountFailed, archiveID, minutesAgo: 180, detail: "Authentication failed. Connect once in Finder and save the password to Keychain."),
-            event(.blockedByRule, timeMachineID, minutesAgo: 11 * 60, detail: "the registered network or VPN"),
+            event(.blockedByRule, timeMachineID, minutesAgo: 11 * 60, detail: "the registered network or VPN Work VPN"),
             event(.wakePacketSent, mediaID, minutesAgo: 11.5 * 60),
             event(.connectionLost, projectsID, minutesAgo: 18 * 60),
             event(.disconnected, backupsID, minutesAgo: 26 * 60),

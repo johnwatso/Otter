@@ -1,6 +1,6 @@
 import Foundation
 
-struct MountedShareSuggestion: Identifiable, Hashable {
+struct MountedShareSuggestion: Identifiable, Hashable, Sendable {
     var id: String { mountPath }
 
     let displayName: String
@@ -47,6 +47,45 @@ struct MountedShareSuggestion: Identifiable, Hashable {
         )
     }
 
+    func matches(server: DiscoveredSMBServer) -> Bool {
+        guard let host = URL(string: urlString)?.host(percentEncoded: false) else { return false }
+        let suggestionIdentity = Self.normalizedServerIdentity(host)
+        return suggestionIdentity == Self.normalizedServerIdentity(server.hostName)
+            || suggestionIdentity == Self.normalizedServerIdentity(server.name)
+    }
+
+    static func finderImportCandidates(
+        in suggestions: [MountedShareSuggestion],
+        for server: DiscoveredSMBServer,
+        excludingMountPaths existingMountPaths: Set<String>
+    ) -> [MountedShareSuggestion] {
+        let matchingServerShares = suggestions.filter { $0.matches(server: server) }
+        if !matchingServerShares.isEmpty {
+            return matchingServerShares
+        }
+
+        let newlyMountedShares = suggestions.filter {
+            !existingMountPaths.contains($0.mountPath)
+        }
+        // If the mount advertises an unexpected alias, accept it only when the
+        // Finder round-trip produced one unambiguous new SMB volume.
+        return newlyMountedShares.count == 1 ? newlyMountedShares : []
+    }
+
+    private static func normalizedServerIdentity(_ value: String) -> String {
+        var normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            .lowercased()
+
+        if let serviceMarker = normalized.range(of: "._smb._tcp.") {
+            normalized = String(normalized[..<serviceMarker.lowerBound])
+        } else if normalized.hasSuffix(".local") {
+            normalized.removeLast(".local".count)
+        }
+        return normalized
+    }
+
     private static var resourceKeys: Set<URLResourceKey> {
         [
             .volumeURLKey,
@@ -73,9 +112,34 @@ struct MountedShareSuggestion: Identifiable, Hashable {
 }
 
 enum VPNNameSelection: Hashable {
-    case any
+    case unconfigured
     case known(String)
     case custom
+}
+
+enum VPNVerificationResult: Equatable {
+    case connected(String)
+    case differentVPN(required: String, active: [String])
+    case unidentifiedTunnel(String)
+    case disconnected(String)
+
+    var message: String {
+        switch self {
+        case let .connected(name):
+            "Connected to \u{201c}\(name)\u{201d}."
+        case let .differentVPN(required, active):
+            "Otter detected \u{201c}\(active.joined(separator: ", "))\u{201d}, not \u{201c}\(required)\u{201d}."
+        case let .unidentifiedTunnel(name):
+            "A VPN tunnel is active, but macOS did not identify it as \u{201c}\(name)\u{201d}."
+        case let .disconnected(name):
+            "Connect to \u{201c}\(name)\u{201d}, then verify again."
+        }
+    }
+
+    var isVerified: Bool {
+        if case .connected = self { return true }
+        return false
+    }
 }
 
 private enum MountedShareSuggestionError: LocalizedError {
@@ -100,7 +164,9 @@ struct DraftShare {
     var keepMounted: Bool
     var mountAtLaunch: Bool
     var cachedIPAddress: String?
+    var ipAddressChangeObservations: [IPAddressChangeObservation]
     var autoConnectWhenReachable: Bool
+    var pauseState: PauseState
     var wakeOnLANEnabled: Bool
     var wakeOnLANMACAddress: String
     var wakeOnLANBroadcastAddress: String
@@ -108,7 +174,7 @@ struct DraftShare {
     var limitsToRegisteredNetwork: Bool
     var wifiNetworkName: String
     var registeredSubnets: [String]
-    var matchesAnyVPN: Bool
+    var usesVPNRule: Bool
     var vpnName: String
     var createdAt: Date?
 
@@ -120,17 +186,20 @@ struct DraftShare {
         keepMounted = share?.keepMounted ?? true
         mountAtLaunch = share?.mountAtLaunch ?? true
         cachedIPAddress = share?.cachedIPAddress
+        ipAddressChangeObservations = share?.ipAddressChangeObservations ?? []
         autoConnectWhenReachable = share?.autoConnectWhenReachable ?? false
+        pauseState = share?.pauseState ?? .inactive
         wakeOnLANEnabled = share?.wakeOnLAN.isEnabled ?? false
         wakeOnLANMACAddress = share?.wakeOnLAN.macAddress ?? ""
         wakeOnLANBroadcastAddress = share?.wakeOnLAN.broadcastAddress ?? WakeOnLANConfiguration.defaultBroadcastAddress
         wakeOnLANPort = share?.wakeOnLAN.port ?? WakeOnLANConfiguration.defaultPort
-        // A share may carry a network rule, a VPN rule, or both; the editor
-        // presents them as a single "registered network" condition.
-        limitsToRegisteredNetwork = (share?.rules.hasNetworkRule ?? false) || (share?.rules.hasVPNRule ?? false)
+        limitsToRegisteredNetwork = share?.rules.hasNetworkRule ?? false
         wifiNetworkName = share?.rules.wifiNetworkName ?? ""
         registeredSubnets = share?.rules.registeredSubnets ?? []
-        matchesAnyVPN = share?.rules.requiredVPNName == nil
+        // An enabled rule with no name is the retired "arbitrary VPN" format.
+        // Present it as off so editing and saving an older share removes that
+        // rule instead of trapping the user behind an unselectable validation.
+        usesVPNRule = share?.rules.requiredVPNName != nil
         vpnName = share?.rules.vpnName ?? ""
         createdAt = share?.createdAt
     }
@@ -139,8 +208,8 @@ struct DraftShare {
         ShareRules(
             wifiNetworkName: limitsToRegisteredNetwork ? wifiNetworkName : "",
             registeredSubnets: limitsToRegisteredNetwork ? registeredSubnets : [],
-            vpnRuleEnabled: limitsToRegisteredNetwork,
-            vpnName: limitsToRegisteredNetwork && !matchesAnyVPN ? vpnName : ""
+            vpnRuleEnabled: usesVPNRule,
+            vpnName: usesVPNRule ? vpnName : ""
         )
     }
 

@@ -12,6 +12,7 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
     @Published private(set) var currentIPv4Subnets: [String] = []
     @Published private(set) var activeVPNNames: [String] = []
     @Published private(set) var knownVPNNames: [String] = []
+    @Published private(set) var controllableVPNNames: [String] = []
     @Published private(set) var hasUnidentifiedTunnel = false
     @Published private(set) var locationAuthorizationStatus: CLAuthorizationStatus = .notDetermined
 
@@ -29,6 +30,12 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
 
     var isVPNNameUnavailable: Bool {
         hasUnidentifiedTunnel
+    }
+
+    func canControlVPN(named name: String) -> Bool {
+        controllableVPNNames.contains {
+            $0.localizedCaseInsensitiveCompare(name) == .orderedSame
+        }
     }
 
     // macOS only exposes the Wi-Fi network name to apps with Location Services access.
@@ -74,12 +81,19 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
             return false
         }
 
-        if url.scheme?.lowercased() == "smb", Self.isBonjourSMBServiceHost(host) {
-            return true
+        let reachableHost: String
+        if url.scheme?.lowercased() == "smb",
+           SystemHostResolver.bonjourServiceIdentity(for: host) != nil {
+            guard let resolvedAddress = await SystemHostResolver().resolveIPAddress(for: host) else {
+                return false
+            }
+            reachableHost = resolvedAddress
+        } else {
+            reachableHost = host
         }
 
         let port = NWEndpoint.Port(rawValue: UInt16(url.port ?? 445)) ?? NWEndpoint.Port(rawValue: 445)!
-        let connection = NWConnection(host: NWEndpoint.Host(host), port: port, using: .tcp)
+        let connection = NWConnection(host: NWEndpoint.Host(reachableHost), port: port, using: .tcp)
 
         return await withCheckedContinuation { continuation in
             let attempt = ReachabilityAttempt(connection: connection, continuation: continuation)
@@ -159,6 +173,7 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
             currentIPv4Subnets = snapshot.currentIPv4Subnets
             activeVPNNames = snapshot.activeVPNNames
             knownVPNNames = snapshot.knownVPNNames
+            controllableVPNNames = snapshot.controllableVPNNames
             isVPNConnected = snapshot.isVPNConnected
             hasUnidentifiedTunnel = snapshot.hasUnidentifiedTunnel
         }
@@ -173,6 +188,7 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
         var currentIPv4Subnets: [String]
         var activeVPNNames: [String]
         var knownVPNNames: [String]
+        var controllableVPNNames: [String]
         var isVPNConnected: Bool
         var hasUnidentifiedTunnel: Bool
     }
@@ -202,7 +218,8 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
             currentWiFiNetworkName: currentWiFiNetworkName,
             currentIPv4Subnets: readCurrentIPv4Subnets(),
             activeVPNNames: identity.activeNames,
-            knownVPNNames: VPNServiceDiscovery.readKnownVPNNames(including: identity.activeNames),
+            knownVPNNames: VPNServiceDiscovery.readKnownVPNNames(),
+            controllableVPNNames: VPNServiceDiscovery.readControllableVPNNames(),
             isVPNConnected: identity.isConnected,
             hasUnidentifiedTunnel: identity.hasUnidentifiedTunnel
         )
@@ -217,6 +234,7 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
         let hadUnidentifiedTunnel = hasUnidentifiedTunnel
         let previousVPNNames = activeVPNNames
         let previousKnownVPNNames = knownVPNNames
+        let previousControllableVPNNames = controllableVPNNames
         isOnline = newOnlineState
         await refreshNetworkDetailsNow()
 
@@ -226,17 +244,13 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
             || hadUnidentifiedTunnel != hasUnidentifiedTunnel
             || previousVPNNames != activeVPNNames
             || previousKnownVPNNames != knownVPNNames
+            || previousControllableVPNNames != controllableVPNNames
         let shouldNotify = changed || wifiNetworkChanged || subnetsChanged || vpnChanged || !hasReceivedPathUpdate
         hasReceivedPathUpdate = true
 
         if shouldNotify {
             onPathChange?()
         }
-    }
-
-    private nonisolated static func isBonjourSMBServiceHost(_ host: String) -> Bool {
-        let normalizedHost = host.lowercased()
-        return normalizedHost.contains("._smb._tcp.")
     }
 
     private nonisolated static func readCurrentWiFiNetworkName() -> String? {

@@ -7,9 +7,17 @@ struct ActivityLogView: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var eventLog: ShareEventLog
     @State private var shareFilter: NetworkShare.ID?
+    private let includedShareIDs: Set<NetworkShare.ID>?
+    private let includedSharesLabel: String?
 
-    init(initialShareFilter: NetworkShare.ID? = nil) {
+    init(
+        initialShareFilter: NetworkShare.ID? = nil,
+        includedShareIDs: Set<NetworkShare.ID>? = nil,
+        includedSharesLabel: String? = nil
+    ) {
         _shareFilter = State(initialValue: initialShareFilter)
+        self.includedShareIDs = includedShareIDs
+        self.includedSharesLabel = includedSharesLabel
     }
 
     private var allShares: [NetworkShare] {
@@ -18,14 +26,26 @@ struct ActivityLogView: View {
 
     private var visibleEvents: [ShareEvent] {
         let events = appModel.screenshotDemoEvents ?? eventLog.events(for: nil)
-        guard let resolvedFilter else { return events }
-        return events.filter { $0.shareID == resolvedFilter }
+        if let resolvedFilter {
+            return events.filter { $0.shareID == resolvedFilter }
+        }
+        if let includedShareIDs {
+            return events.filter { includedShareIDs.contains($0.shareID) }
+        }
+        return events
     }
 
     // A filter pointing at a share that was removed falls back to All Shares.
     private var resolvedFilter: NetworkShare.ID? {
-        guard let shareFilter, allShares.contains(where: { $0.id == shareFilter }) else { return nil }
+        guard let shareFilter,
+              filterableShares.contains(where: { $0.id == shareFilter })
+        else { return nil }
         return shareFilter
+    }
+
+    private var filterableShares: [NetworkShare] {
+        guard let includedShareIDs else { return allShares }
+        return allShares.filter { includedShareIDs.contains($0.id) }
     }
 
     var body: some View {
@@ -38,9 +58,10 @@ struct ActivityLogView: View {
                 Spacer()
 
                 Picker("Share", selection: $shareFilter) {
-                    Text("All Shares").tag(NetworkShare.ID?.none)
+                    Text(includedSharesLabel.map { "All on \($0)" } ?? "All Shares")
+                        .tag(NetworkShare.ID?.none)
 
-                    ForEach(allShares) { share in
+                    ForEach(filterableShares) { share in
                         Text(share.displayName).tag(Optional(share.id))
                     }
                 }
@@ -167,6 +188,10 @@ private extension ShareEventKind {
             "Mount failed"
         case .wakePacketSent:
             "Wake-on-LAN packet sent"
+        case .unresponsiveDetected:
+            "Mounted volume stopped responding"
+        case .recoveryAttempted:
+            "Recovery started"
         }
     }
 
@@ -184,6 +209,10 @@ private extension ShareEventKind {
             "exclamationmark.triangle.fill"
         case .wakePacketSent:
             "power.circle.fill"
+        case .unresponsiveDetected:
+            "externaldrive.badge.exclamationmark"
+        case .recoveryAttempted:
+            "wrench.and.screwdriver.fill"
         }
     }
 
@@ -200,6 +229,10 @@ private extension ShareEventKind {
         case .mountFailed:
             .red
         case .wakePacketSent:
+            .blue
+        case .unresponsiveDetected:
+            .red
+        case .recoveryAttempted:
             .blue
         }
     }
