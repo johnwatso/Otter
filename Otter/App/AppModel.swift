@@ -27,7 +27,9 @@ final class AppModel: ObservableObject {
     let networkService: NetworkReachabilityService
     let mountService: MountService
     let mountHealthService: MountHealthService
+    let vpnConnectionService: SystemVPNConnectionService
     let discoveryService: SMBDiscoveryService
+    let shareBrowserService: SMBShareBrowserService
     let wakeOnLANService: WakeOnLANService
     let notificationService: NotificationService
     let loginItemService: LoginItemService
@@ -107,6 +109,7 @@ final class AppModel: ObservableObject {
         let networkService = NetworkReachabilityService()
         let mountService = MountService(credentialStore: credentialStore)
         let mountHealthService = MountHealthService()
+        let vpnConnectionService = SystemVPNConnectionService()
         let wakeOnLANService = WakeOnLANService()
         let notificationService = NotificationService(settings: settings)
         let eventLog = ShareEventLog(defaults: defaults)
@@ -115,6 +118,7 @@ final class AppModel: ObservableObject {
             mountService: mountService,
             mountHealthService: mountHealthService,
             wakeOnLANService: wakeOnLANService,
+            vpnConnectionService: vpnConnectionService,
             networkService: networkService,
             notificationService: notificationService,
             eventLog: eventLog,
@@ -125,7 +129,9 @@ final class AppModel: ObservableObject {
         self.networkService = networkService
         self.mountService = mountService
         self.mountHealthService = mountHealthService
+        self.vpnConnectionService = vpnConnectionService
         self.discoveryService = SMBDiscoveryService()
+        self.shareBrowserService = SMBShareBrowserService()
         self.wakeOnLANService = wakeOnLANService
         self.notificationService = notificationService
         self.loginItemService = LoginItemService()
@@ -180,6 +186,7 @@ final class AppModel: ObservableObject {
     }
 
     func requestEditShare(_ share: NetworkShare) {
+        guard !settings.isManagedShare(id: share.id) else { return }
         editorRequest = ShareEditorRequest(mode: .edit(share.id))
     }
 
@@ -278,7 +285,8 @@ enum ScreenshotDemo {
             rules: ShareRules(
                 wifiNetworkName: "Homebase",
                 registeredSubnets: ["192.168.1.0/24"],
-                vpnRuleEnabled: true
+                vpnRuleEnabled: true,
+                vpnName: "Work VPN"
             )
         ),
         NetworkShare(
@@ -313,7 +321,7 @@ enum ScreenshotDemo {
             return state
         case timeMachineID:
             var state = ShareRuntimeState()
-            state.status = .waitingForAllowedNetwork("the registered network or VPN")
+            state.status = .waitingForAllowedNetwork("the registered network or VPN Work VPN")
             state.lastConnectedAt = now.addingTimeInterval(-11 * 3600)
             return state
         case archiveID:
@@ -348,7 +356,7 @@ enum ScreenshotDemo {
             event(.connectionLost, projectsID, minutesAgo: 65),
             event(.mounted, mediaID, minutesAgo: 167),
             event(.mountFailed, archiveID, minutesAgo: 180, detail: "Authentication failed. Connect once in Finder and save the password to Keychain."),
-            event(.blockedByRule, timeMachineID, minutesAgo: 11 * 60, detail: "the registered network or VPN"),
+            event(.blockedByRule, timeMachineID, minutesAgo: 11 * 60, detail: "the registered network or VPN Work VPN"),
             event(.wakePacketSent, mediaID, minutesAgo: 11.5 * 60),
             event(.connectionLost, projectsID, minutesAgo: 18 * 60),
             event(.disconnected, backupsID, minutesAgo: 26 * 60),

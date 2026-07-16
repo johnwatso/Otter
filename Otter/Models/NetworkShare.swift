@@ -120,6 +120,29 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         url?.host(percentEncoded: false)
     }
 
+    var serverIdentity: String? {
+        guard let host else { return nil }
+        return Self.normalizedServerIdentity(host)
+    }
+
+    var serverDisplayName: String {
+        guard let host else { return "Unknown Server" }
+
+        let trimmedHost = host
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+
+        if let serviceMarker = trimmedHost.range(of: "._smb._tcp.", options: .caseInsensitive) {
+            return String(trimmedHost[..<serviceMarker.lowerBound])
+        }
+
+        if trimmedHost.lowercased().hasSuffix(".local") {
+            return String(trimmedHost.dropLast(".local".count))
+        }
+
+        return trimmedHost.isEmpty ? "Unknown Server" : trimmedHost
+    }
+
     mutating func normalize() {
         displayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         urlString = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -209,6 +232,21 @@ struct NetworkShare: Identifiable, Codable, Hashable {
             || host.withCString { inet_pton(AF_INET6, $0, &sin6) } == 1
     }
 
+    private static func normalizedServerIdentity(_ host: String) -> String? {
+        var normalized = host
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            .lowercased()
+
+        if let serviceMarker = normalized.range(of: "._smb._tcp.") {
+            normalized = String(normalized[..<serviceMarker.lowerBound])
+        } else if normalized.hasSuffix(".local") {
+            normalized.removeLast(".local".count)
+        }
+
+        return normalized.isEmpty ? nil : normalized
+    }
+
     static func resolveIPAddress(
         for hostname: String,
         using resolver: any HostResolving = SystemHostResolver()
@@ -276,6 +314,43 @@ struct NetworkShare: Identifiable, Codable, Hashable {
             .split(separator: "/", omittingEmptySubsequences: true)
             .last
             .map(String.init)
+    }
+}
+
+struct NetworkShareServerGroup: Identifiable, Hashable {
+    let id: String
+    let serverName: String
+    let shares: [NetworkShare]
+
+    var isGrouped: Bool {
+        shares.count > 1
+    }
+
+    static func make(from shares: [NetworkShare]) -> [NetworkShareServerGroup] {
+        var sharesByKey: [String: [NetworkShare]] = [:]
+        var serverNamesByKey: [String: String] = [:]
+        var orderedKeys: [String] = []
+
+        for share in shares {
+            let key = share.serverIdentity.map { "server:\($0)" } ?? "share:\(share.id.uuidString)"
+            if sharesByKey[key] == nil {
+                orderedKeys.append(key)
+                serverNamesByKey[key] = share.serverDisplayName
+            }
+            sharesByKey[key, default: []].append(share)
+        }
+
+        return orderedKeys.compactMap { key in
+            guard let groupedShares = sharesByKey[key],
+                  let serverName = serverNamesByKey[key]
+            else { return nil }
+
+            return NetworkShareServerGroup(
+                id: key,
+                serverName: serverName,
+                shares: groupedShares
+            )
+        }
     }
 }
 
@@ -460,10 +535,6 @@ struct ShareRules: Codable, Hashable {
         return trimmedName.isEmpty ? nil : trimmedName
     }
 
-    var vpnRuleTitle: String {
-        requiredVPNName ?? "Any VPN"
-    }
-
     mutating func normalize() {
         wifiNetworkName = wifiNetworkName.trimmingCharacters(in: .whitespacesAndNewlines)
         vpnName = vpnName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -506,26 +577,21 @@ extension ShareRules {
             // compare against, so any wired connection keeps counting as a match.
             let isLegacyEthernet = registeredSubnets.isEmpty && currentNetworkName == nil && !isVPNConnected
 
-            let isVPNActive: Bool
-            if vpnRuleEnabled {
-                if let requiredVPNName = requiredVPNName {
-                    isVPNActive = activeVPNNames.contains { activeVPNName in
-                        activeVPNName.localizedCaseInsensitiveCompare(requiredVPNName) == .orderedSame
-                    }
-                } else {
-                    isVPNActive = isVPNConnected
+            let isVPNActive = vpnRuleEnabled && (requiredVPNName.map { requiredName in
+                activeVPNNames.contains { activeVPNName in
+                    activeVPNName.localizedCaseInsensitiveCompare(requiredName) == .orderedSame
                 }
-            } else {
-                isVPNActive = isVPNConnected
-            }
+            } ?? false)
 
             let matches = matchesWiFiName || matchesRegisteredSubnet || isLegacyEthernet || isVPNActive
 
             if !matches {
-                let vpnSuffix = vpnRuleEnabled && !vpnName.isEmpty ? " \(vpnName)" : ""
+                let requirement = requiredVPNName.map {
+                    "the registered network or VPN \($0)"
+                } ?? "the registered network"
                 return ShareRuleEvaluation(
                     allowsConnection: false,
-                    blockedStatus: .waitingForAllowedNetwork("the registered network or VPN\(vpnSuffix)"),
+                    blockedStatus: .waitingForAllowedNetwork(requirement),
                     shouldDisconnectMountedShare: true,
                     shouldAttemptMount: false
                 )
@@ -540,20 +606,23 @@ extension ShareRules {
         }
 
         if vpnRuleEnabled {
-            let matches: Bool
-            if let requiredVPNName {
-                matches = activeVPNNames.contains { activeVPNName in
-                    activeVPNName.localizedCaseInsensitiveCompare(requiredVPNName) == .orderedSame
-                }
-            } else {
-                matches = isVPNConnected
+            guard let requiredVPNName else {
+                return ShareRuleEvaluation(
+                    allowsConnection: false,
+                    blockedStatus: .waitingForAllowedNetwork("a named VPN selected in this share’s settings"),
+                    shouldDisconnectMountedShare: true,
+                    shouldAttemptMount: false
+                )
+            }
+
+            let matches = activeVPNNames.contains { activeVPNName in
+                activeVPNName.localizedCaseInsensitiveCompare(requiredVPNName) == .orderedSame
             }
 
             if !matches {
-                let requirement = requiredVPNName.map { "VPN \($0)" } ?? "a VPN"
                 return ShareRuleEvaluation(
                     allowsConnection: false,
-                    blockedStatus: .waitingForAllowedNetwork(requirement),
+                    blockedStatus: .waitingForAllowedNetwork("VPN \(requiredVPNName)"),
                     shouldDisconnectMountedShare: true,
                     shouldAttemptMount: false
                 )

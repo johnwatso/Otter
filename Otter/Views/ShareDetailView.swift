@@ -55,6 +55,17 @@ struct ShareDetailView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .padding(.leading, 14)
+
+                    if case .waitingForVPN = status {
+                        Button {
+                            openVPNSettings()
+                        } label: {
+                            Label("Open VPN Settings", systemImage: "gearshape")
+                        }
+                        .tahoeSecondaryActionButton()
+                        .padding(.top, 8)
+                        .padding(.leading, 14)
+                    }
                 }
                 
                 Divider()
@@ -94,10 +105,17 @@ struct ShareDetailView: View {
                 
                 // Configuration Section (Read-Only)
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Configuration")
-                        .font(.subheadline)
-                        .fontWeight(.bold)
-                        .foregroundStyle(.secondary)
+                    HStack {
+                        Text("Configuration")
+                            .font(.subheadline)
+                            .fontWeight(.bold)
+                            .foregroundStyle(.secondary)
+                        if settings.isManagedShare(id: currentShare.id) {
+                            Label("Managed", systemImage: "checkmark.shield.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                     
                     VStack(spacing: 6) {
                         ConfigStatusRow(label: "Reconnect automatically", isEnabled: currentShare.keepMounted)
@@ -121,14 +139,16 @@ struct ShareDetailView: View {
                     
                     VStack(spacing: 6) {
                         if currentShare.rules.hasNetworkRule || currentShare.rules.hasVPNRule {
-                            DetailRow(label: "Connect on", value: "Registered network or VPN")
+                            DetailRow(label: "Connect on", value: connectionConditionLabel)
                             if !currentShare.rules.registeredSubnets.isEmpty {
                                 DetailRow(label: "Network", value: currentShare.rules.registeredSubnets.joined(separator: ", "))
                             }
                             if let ssid = currentShare.rules.requiredWiFiNetworkName {
                                 DetailRow(label: "Wi-Fi", value: ssid)
                             }
-                            DetailRow(label: "VPN", value: currentShare.rules.requiredVPNName ?? "Any VPN")
+                            if currentShare.rules.hasVPNRule {
+                                DetailRow(label: "VPN", value: currentShare.rules.requiredVPNName ?? "Selection required")
+                            }
                         } else {
                             DetailRow(label: "Connect on", value: "Any network")
                         }
@@ -141,6 +161,19 @@ struct ShareDetailView: View {
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
             networkService.refreshNetworkDetails()
+        }
+    }
+
+    private var connectionConditionLabel: String {
+        switch (currentShare.rules.hasNetworkRule, currentShare.rules.hasVPNRule) {
+        case (true, true):
+            return "Registered network or named VPN"
+        case (true, false):
+            return "Registered network"
+        case (false, true):
+            return "Named VPN"
+        case (false, false):
+            return "Any network"
         }
     }
 
@@ -160,6 +193,11 @@ struct ShareDetailView: View {
             return "Paused until \(resumeAt.formatted(date: .abbreviated, time: .shortened))"
         }
         return "Paused until resumed"
+    }
+
+    private func openVPNSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.Network-Settings.extension?VPN") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private var hasKeychainCredentials: Bool {
@@ -206,6 +244,255 @@ struct ShareDetailView: View {
         }
     }
 
+}
+
+struct ServerDetailView: View {
+    @EnvironmentObject private var appModel: AppModel
+    @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var monitor: ShareMonitor
+    @EnvironmentObject private var eventLog: ShareEventLog
+    let group: NetworkShareServerGroup
+
+    var body: some View {
+        let summary = statusSummary
+
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Image(systemName: summary.symbol)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(summary.color)
+
+                        Text(summary.label)
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                    }
+
+                    Text(summary.detail)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 14)
+
+                    if connectionDropCount > 0 {
+                        Text("Connection dropped \(connectionDropCount) time\(connectionDropCount == 1 ? "" : "s") across this server in the last 24 hours")
+                            .font(.subheadline)
+                            .foregroundStyle(.orange)
+                            .padding(.leading, 14)
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Details")
+                        .font(.subheadline)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.secondary)
+
+                    VStack(spacing: 6) {
+                        DetailRow(label: "Server", value: group.serverName)
+                        if let host = currentShares.first?.host,
+                           host.localizedCaseInsensitiveCompare(group.serverName) != .orderedSame {
+                            DetailRow(label: "Address", value: host)
+                        }
+                        DetailRow(label: "Shares", value: "\(currentShares.count)")
+                        DetailRow(label: "Protocol", value: "SMB")
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Shares")
+                        .font(.subheadline)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.secondary)
+
+                    VStack(spacing: 8) {
+                        ForEach(currentShares) { share in
+                            ServerShareStatusRow(share: share)
+                        }
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Configuration Summary")
+                        .font(.subheadline)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.secondary)
+
+                    VStack(spacing: 6) {
+                        ServerConfigSummaryRow(
+                            label: "Reconnect automatically",
+                            enabledCount: currentShares.filter(\.keepMounted).count,
+                            totalCount: currentShares.count
+                        )
+                        ServerConfigSummaryRow(
+                            label: "Connect when server becomes available",
+                            enabledCount: currentShares.filter(\.autoConnectWhenReachable).count,
+                            totalCount: currentShares.count
+                        )
+                        ServerConfigSummaryRow(
+                            label: "Mount at login",
+                            enabledCount: currentShares.filter(\.mountAtLaunch).count,
+                            totalCount: currentShares.count
+                        )
+                        ServerConfigSummaryRow(
+                            label: "Wake sleeping server",
+                            enabledCount: currentShares.filter { $0.wakeOnLAN.isEnabled }.count,
+                            totalCount: currentShares.count
+                        )
+                    }
+                }
+            }
+            .padding(20)
+        }
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    private var currentShares: [NetworkShare] {
+        group.shares.map { settings.share(id: $0.id) ?? $0 }
+    }
+
+    private var connectionDropCount: Int {
+        currentShares.reduce(into: 0) { count, share in
+            count += appModel.screenshotDemoDropCount(for: share.id)
+                ?? eventLog.connectionDropCount(for: share.id)
+        }
+    }
+
+    private var statusSummary: ServerStatusSummary {
+        let statuses = currentShares.map { monitor.status(for: $0) }
+        let connectedCount = statuses.filter { $0 == .connected }.count
+        let detail = "\(connectedCount) of \(statuses.count) shares connected"
+
+        if !statuses.isEmpty && connectedCount == statuses.count {
+            return ServerStatusSummary(
+                symbol: "checkmark.circle.fill",
+                color: .green,
+                label: "All shares connected",
+                detail: detail
+            )
+        }
+        if statuses.contains(where: { if case .failed = $0 { true } else { false } }) {
+            return ServerStatusSummary(
+                symbol: "exclamationmark.circle.fill",
+                color: .red,
+                label: "Some shares need attention",
+                detail: detail
+            )
+        }
+        if statuses.contains(.reconnecting) {
+            return ServerStatusSummary(
+                symbol: "arrow.triangle.2.circlepath.circle.fill",
+                color: .blue,
+                label: "Connecting shares",
+                detail: detail
+            )
+        }
+        if connectedCount > 0 {
+            return ServerStatusSummary(
+                symbol: "circle.lefthalf.filled",
+                color: .orange,
+                label: "Partially connected",
+                detail: detail
+            )
+        }
+        if statuses.contains(where: { if case .paused = $0 { true } else { false } }) {
+            return ServerStatusSummary(
+                symbol: "pause.circle.fill",
+                color: .indigo,
+                label: "Automatic mounting paused",
+                detail: detail
+            )
+        }
+        return ServerStatusSummary(
+            symbol: "minus.circle.fill",
+            color: .secondary,
+            label: "No shares connected",
+            detail: detail
+        )
+    }
+}
+
+private struct ServerStatusSummary {
+    let symbol: String
+    let color: Color
+    let label: String
+    let detail: String
+}
+
+private struct ServerShareStatusRow: View {
+    @EnvironmentObject private var monitor: ShareMonitor
+    let share: NetworkShare
+
+    var body: some View {
+        let status = monitor.status(for: share)
+
+        HStack(spacing: 8) {
+            Image(systemName: status.circleSymbol)
+                .font(.caption)
+                .foregroundStyle(status.color)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(share.displayName)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                Text(NetworkShare.inferredShareName(from: share.urlString) ?? share.mountPath)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Text(status.label)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 1)
+    }
+}
+
+private struct ServerConfigSummaryRow: View {
+    let label: String
+    let enabledCount: Int
+    let totalCount: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .foregroundStyle(color)
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+            Spacer()
+            Text(value)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 1)
+    }
+
+    private var symbol: String {
+        if enabledCount == 0 { return "minus.circle" }
+        if enabledCount == totalCount { return "checkmark.circle.fill" }
+        return "circle.lefthalf.filled"
+    }
+
+    private var color: Color {
+        if enabledCount == 0 { return .secondary }
+        if enabledCount == totalCount { return .green }
+        return .orange
+    }
+
+    private var value: String {
+        if enabledCount == 0 { return "Off for all" }
+        if enabledCount == totalCount { return "On for all" }
+        return "On for \(enabledCount) of \(totalCount)"
+    }
 }
 
 private struct DetailRow: View {

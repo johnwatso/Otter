@@ -123,17 +123,40 @@ final class ConnectionDoctor {
             status: networkService.isOnline ? .passed : .failed
         ))
 
-        let ruleEvaluation = share.rules.evaluate(
+        var ruleEvaluation = share.rules.evaluate(
             currentWiFiNetworkName: networkService.currentWiFiNetworkName,
             isVPNConnected: networkService.isVPNConnected,
             activeVPNNames: networkService.activeVPNNames,
             currentIPv4Subnets: networkService.currentIPv4Subnets
         )
+
+        if attemptMount,
+           !ruleEvaluation.allowsConnection,
+           effectivePauseState == nil,
+           networkService.isOnline,
+           share.rules.hasVPNRule,
+           share.rules.requiredVPNName != nil {
+            await monitor.retry(share)
+            await networkService.refreshNetworkDetailsNow()
+            ruleEvaluation = share.rules.evaluate(
+                currentWiFiNetworkName: networkService.currentWiFiNetworkName,
+                isVPNConnected: networkService.isVPNConnected,
+                activeVPNNames: networkService.activeVPNNames,
+                currentIPv4Subnets: networkService.currentIPv4Subnets
+            )
+        }
+        let connectionConditionsDetail: String
+        if ruleEvaluation.allowsConnection {
+            connectionConditionsDetail = "The current network satisfies this share's conditions."
+        } else if case let .waitingForVPN(name) = monitor.status(for: share) {
+            connectionConditionsDetail = "Connect to “\(name)” to satisfy this share's VPN condition."
+        } else {
+            connectionConditionsDetail = "The current network does not satisfy this share's conditions."
+        }
+
         steps.append(.init(
             title: "Connection conditions",
-            detail: ruleEvaluation.allowsConnection
-                ? "The current network satisfies this share's conditions."
-                : "The current network does not satisfy this share's conditions.",
+            detail: connectionConditionsDetail,
             status: ruleEvaluation.allowsConnection ? .passed : .warning
         ))
         let configurationCanBeRepaired = url.user(percentEncoded: false) == nil
@@ -141,7 +164,8 @@ final class ConnectionDoctor {
         let canSafelyAttemptRepair = configurationCanBeRepaired
             && effectivePauseState == nil
             && networkService.isOnline
-            && ruleEvaluation.allowsConnection
+            && (ruleEvaluation.allowsConnection
+                || (share.rules.hasVPNRule && share.rules.requiredVPNName != nil))
 
         let originalHost = url.host(percentEncoded: false) ?? ""
         let hasCredentials = settings.hasCredentials(for: originalHost)
@@ -308,7 +332,7 @@ final class ConnectionDoctor {
                 switch monitor.status(for: share) {
                 case .connected, .waitingForNetwork, .wakePacketSent, .reconnecting, .failed:
                     statusSuggestsConnectionShouldExist = true
-                case .disconnected, .waitingForAllowedNetwork, .paused:
+                case .disconnected, .waitingForAllowedNetwork, .waitingForVPN, .paused:
                     statusSuggestsConnectionShouldExist = false
                 }
                 let shareExpectsConnection = share.keepMounted
@@ -376,6 +400,16 @@ final class ConnectionDoctor {
             activeVPNNames: networkService.activeVPNNames,
             currentIPv4Subnets: networkService.currentIPv4Subnets
         )
+        if !ruleEvaluation.allowsConnection,
+           currentShare.rules.hasVPNRule,
+           currentShare.rules.requiredVPNName != nil {
+            await monitor.retry(currentShare, resumeAutomaticMounting: true)
+            return repairResult(
+                status: monitor.status(for: currentShare),
+                recoveredUnresponsiveMount: false
+            )
+        }
+
         guard ruleEvaluation.allowsConnection else {
             return .init(
                 title: "Repair attempt",
@@ -452,6 +486,12 @@ final class ConnectionDoctor {
             return .init(
                 title: "Repair attempt",
                 detail: "The current network does not satisfy this share's conditions.",
+                status: .warning
+            )
+        case let .waitingForVPN(name):
+            return .init(
+                title: "Repair attempt",
+                detail: "Connect to “\(name)” to access this server.",
                 status: .warning
             )
         case .paused:

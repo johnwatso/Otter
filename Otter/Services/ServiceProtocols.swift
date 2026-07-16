@@ -10,6 +10,16 @@ protocol WakeOnLANServicing: Sendable {
     func sendWakePacket(using configuration: WakeOnLANConfiguration) async throws
 }
 
+protocol VPNConnecting: Sendable {
+    func connect(named serviceName: String, timeout: TimeInterval) async throws
+}
+
+extension VPNConnecting {
+    func connect(named serviceName: String) async throws {
+        try await connect(named: serviceName, timeout: 30)
+    }
+}
+
 enum MountHealthResult: Equatable, Sendable {
     case healthy
     case unresponsive
@@ -32,6 +42,7 @@ protocol NetworkReachabilityProviding: AnyObject {
 
     func canReachServer(for url: URL, timeout: TimeInterval) async -> Bool
     func refreshNetworkDetailsIfStale(maxAge: TimeInterval) async
+    func refreshNetworkDetailsNow() async
 }
 
 extension NetworkReachabilityProviding {

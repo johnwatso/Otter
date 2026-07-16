@@ -2,6 +2,11 @@ import AppKit
 import Foundation
 import SystemConfiguration
 
+struct SystemVPNService: Equatable, Sendable {
+    let name: String
+    let id: String
+}
+
 struct VPNConnectionIdentity: Equatable, Sendable {
     let activeNames: [String]
     let isConnected: Bool
@@ -17,6 +22,42 @@ struct VPNConnectionIdentity: Equatable, Sendable {
 }
 
 enum VPNServiceDiscovery {
+    // System Settings can display VPN configurations owned by another app's
+    // Network Extension. Those configurations are visible here, but macOS does
+    // not necessarily expose a connection handle that Otter can start.
+    static func detectedVPNServices() -> [SystemVPNService] {
+        guard let preferences = SCPreferencesCreate(nil, "Otter.NetworkDetails" as CFString, nil),
+              let services = SCNetworkServiceCopyAll(preferences) as? [SCNetworkService]
+        else {
+            return []
+        }
+
+        return services.compactMap { service in
+            guard let serviceName = SCNetworkServiceGetName(service) as String?,
+                  !serviceName.isEmpty,
+                  isVPNService(service, serviceName: serviceName),
+                  let serviceID = SCNetworkServiceGetServiceID(service) as String?
+            else {
+                return nil
+            }
+
+            return SystemVPNService(name: serviceName, id: serviceID)
+        }
+        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    static func controllableVPNServices() -> [SystemVPNService] {
+        detectedVPNServices().filter { service in
+            SCNetworkConnectionCreateWithServiceID(nil, service.id as CFString, nil, nil) != nil
+        }
+    }
+
+    static func detectedVPNService(named serviceName: String) -> SystemVPNService? {
+        detectedVPNServices().first {
+            $0.name.localizedCaseInsensitiveCompare(serviceName) == .orderedSame
+        }
+    }
+
     // Personal VPNs configured in System Settings (IKEv2, L2TP, ...) report a live
     // connection status through SCNetworkConnection, which tells us exactly which
     // configured VPN is connected rather than inferring it from tunnel interfaces.
@@ -84,27 +125,12 @@ enum VPNServiceDiscovery {
         return names
     }
 
-    static func readKnownVPNNames(including activeVPNNames: [String]) -> [String] {
-        var names = Set(activeVPNNames)
+    static func readKnownVPNNames() -> [String] {
+        detectedVPNServices().map(\.name)
+    }
 
-        guard let preferences = SCPreferencesCreate(nil, "Otter.NetworkDetails" as CFString, nil),
-              let services = SCNetworkServiceCopyAll(preferences) as? [SCNetworkService]
-        else {
-            return sorted(names)
-        }
-
-        for service in services {
-            guard let serviceName = SCNetworkServiceGetName(service) as String?,
-                  isVPNService(service, serviceName: serviceName),
-                  !serviceName.isEmpty
-            else {
-                continue
-            }
-
-            names.insert(serviceName)
-        }
-
-        return sorted(names)
+    static func readControllableVPNNames() -> [String] {
+        controllableVPNServices().map(\.name)
     }
 
     private static func isVPNService(_ service: SCNetworkService, serviceName: String) -> Bool {
@@ -249,5 +275,108 @@ enum VPNServiceDiscovery {
                 return nil
             }
         }
+    }
+}
+
+enum SystemVPNConnectionError: LocalizedError, Equatable, Sendable {
+    case serviceNotFound(String)
+    case notControllable(String)
+    case connectionUnavailable(String)
+    case startFailed(String, String)
+    case disconnected(String)
+    case timedOut(String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .serviceNotFound(name):
+            return "VPN \(quoted(name)) is not available in System Settings."
+        case let .notControllable(name):
+            return "macOS does not allow Otter to start VPN \(quoted(name)). It may be managed by another VPN app. Connect it manually or choose a VPN Otter can control."
+        case let .connectionUnavailable(name):
+            return "macOS could not open VPN \(quoted(name))."
+        case let .startFailed(name, detail):
+            return "macOS could not start VPN \(quoted(name)): \(detail)"
+        case let .disconnected(name):
+            return "VPN \(quoted(name)) disconnected before it finished connecting."
+        case let .timedOut(name):
+            return "VPN \(quoted(name)) did not connect within 30 seconds."
+        }
+    }
+
+    private func quoted(_ value: String) -> String {
+        "“\(value)”"
+    }
+}
+
+// Controls only VPN services macOS exposes through SystemConfiguration. This
+// deliberately excludes app-only tunnels, where launching an app would not
+// reliably identify or connect the user's intended VPN profile.
+final class SystemVPNConnectionService: VPNConnecting, @unchecked Sendable {
+    private let queue = DispatchQueue(label: "Otter.SystemVPNConnection", qos: .utility)
+
+    func connect(named serviceName: String, timeout: TimeInterval) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                do {
+                    try Self.connectSynchronously(named: serviceName, timeout: timeout)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    private static func connectSynchronously(named serviceName: String, timeout: TimeInterval) throws {
+        guard let service = VPNServiceDiscovery.detectedVPNService(named: serviceName) else {
+            throw SystemVPNConnectionError.serviceNotFound(serviceName)
+        }
+
+        guard let connection = SCNetworkConnectionCreateWithServiceID(
+            nil,
+            service.id as CFString,
+            nil,
+            nil
+        ) else {
+            throw SystemVPNConnectionError.notControllable(service.name)
+        }
+
+        var status = SCNetworkConnectionGetStatus(connection)
+        if status == .connected {
+            return
+        }
+
+        if status == .disconnected {
+            guard SCNetworkConnectionStart(connection, nil, true) else {
+                let code = SCError()
+                let detail = String(cString: SCErrorString(code))
+                throw SystemVPNConnectionError.startFailed(service.name, detail)
+            }
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        var observedConnectionAttempt = status == .connecting
+
+        while Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+            status = SCNetworkConnectionGetStatus(connection)
+
+            switch status {
+            case .connected:
+                return
+            case .connecting, .disconnecting:
+                observedConnectionAttempt = true
+            case .disconnected where observedConnectionAttempt:
+                throw SystemVPNConnectionError.disconnected(service.name)
+            case .invalid:
+                throw SystemVPNConnectionError.connectionUnavailable(service.name)
+            case .disconnected:
+                break
+            @unknown default:
+                break
+            }
+        }
+
+        throw SystemVPNConnectionError.timedOut(service.name)
     }
 }

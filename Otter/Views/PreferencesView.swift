@@ -38,12 +38,17 @@ struct PreferencesView: View {
     }
 }
 
+private enum ShareManagementSelection: Hashable {
+    case share(NetworkShare.ID)
+    case server(NetworkShareServerGroup.ID)
+}
+
 struct ShareManagementView: View {
     @EnvironmentObject private var appModel: AppModel
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var monitor: ShareMonitor
     @EnvironmentObject private var loginItemService: LoginItemService
-    @State private var selection: NetworkShare.ID?
+    @State private var selection: ShareManagementSelection?
     @State private var didRegisterWindowAppearance = false
     @State private var isShowingActivityLog = false
     @State private var isShowingConnectionDoctor = false
@@ -57,6 +62,16 @@ struct ShareManagementView: View {
         appModel.screenshotDemoShares ?? settings.shares
     }
 
+    private var shareGroups: [NetworkShareServerGroup] {
+        NetworkShareServerGroup.make(from: shares)
+    }
+
+    private var selectionValidationSignature: [String] {
+        shareGroups.map { group in
+            "\(group.id)|\(group.shares.map { $0.id.uuidString }.joined(separator: ","))"
+        }
+    }
+
     var body: some View {
         NavigationSplitView {
             sidebar
@@ -66,52 +81,56 @@ struct ShareManagementView: View {
         }
         .toolbar {
             ToolbarItemGroup {
-                if let selectedShare {
-                    let status = monitor.status(for: selectedShare)
-
-                    if status == .connected {
-                        Button {
-                            NSWorkspace.shared.activateFileViewerSelecting([
-                                URL(fileURLWithPath: selectedShare.mountPath)
-                            ])
-                        } label: {
-                            Label("Show in Finder", systemImage: "finder")
+                if !selectedShares.isEmpty {
+                    if areAllSelectedSharesConnected {
+                        Button(action: showSelectedSharesInFinder) {
+                            Label(
+                                selectedServerGroup == nil ? "Show in Finder" : "Show All in Finder",
+                                systemImage: "finder"
+                            )
                         }
-                        .help("Show in Finder")
+                        .help(selectedServerGroup == nil ? "Show in Finder" : "Show all shares in Finder")
                     } else {
                         Button {
-                            Task { await monitor.mount(selectedShare) }
+                            Task { await mountSelectedShares() }
                         } label: {
-                            Label("Mount Now", systemImage: "arrow.triangle.2.circlepath")
+                            Label(
+                                selectedServerGroup == nil ? "Mount Now" : "Mount All",
+                                systemImage: "arrow.triangle.2.circlepath"
+                            )
                         }
-                        .help("Mount Now")
+                        .help(selectedServerGroup == nil ? "Mount Now" : "Mount all shares on this server")
                     }
-
                 }
 
                 Button {
-                    if let selectedShare {
-                        Task { await monitor.disconnect(selectedShare) }
-                    }
+                    Task { await disconnectSelectedShares() }
                 } label: {
-                    Label("Disconnect & Pause", systemImage: "eject")
+                    Label(
+                        selectedServerGroup == nil ? "Disconnect & Pause" : "Disconnect & Pause All",
+                        systemImage: "eject"
+                    )
                 }
-                .disabled(!canDisconnectSelectedShare)
-                .help("Disconnect and pause automatic mounting")
+                .disabled(!canDisconnectSelectedShares)
+                .help(selectedServerGroup == nil
+                    ? "Disconnect and pause automatic mounting"
+                    : "Disconnect and pause every share on this server")
 
                 if let selectedShare {
                     SharePauseMenu(share: selectedShare)
+                } else if let selectedServerGroup {
+                    ShareGroupPauseMenu(shares: selectedServerGroup.shares)
                 }
 
-                Button {
-                    if let selectedShare {
+                if let selectedShare {
+                    Button {
                         appModel.requestEditShare(selectedShare)
+                    } label: {
+                        Label("Settings…", systemImage: "gearshape")
                     }
-                } label: {
-                    Label("Settings…", systemImage: "gearshape")
+                    .disabled(settings.isManagedShare(id: selectedShare.id))
+                    .help("Share Settings")
                 }
-                .disabled(selectedShare == nil)
-                .help("Share Settings")
 
                 Button {
                     isShowingActivityLog = true
@@ -130,7 +149,11 @@ struct ShareManagementView: View {
             }
         }
         .sheet(isPresented: $isShowingActivityLog) {
-            ActivityLogView(initialShareFilter: selection)
+            ActivityLogView(
+                initialShareFilter: selectedShare?.id,
+                includedShareIDs: selectedServerGroup.map { Set($0.shares.map(\.id)) },
+                includedSharesLabel: selectedServerGroup?.serverName
+            )
         }
         .sheet(isPresented: $isShowingConnectionDoctor) {
             if let selectedShare {
@@ -155,7 +178,7 @@ struct ShareManagementView: View {
                     settings.updateShare(savedShare)
                 }
 
-                selection = savedShare.id
+                selection = .share(savedShare.id)
                 appModel.editorRequest = nil
             } onCancel: {
                 appModel.editorRequest = nil
@@ -172,7 +195,7 @@ struct ShareManagementView: View {
             }
 
             if selection == nil {
-                selection = shares.first?.id
+                selection = defaultSelection
             }
 
             loginItemService.refresh()
@@ -185,12 +208,10 @@ struct ShareManagementView: View {
             }
         }
         .onChange(of: appModel.screenshotDemoShares != nil) {
-            selection = shares.first?.id
+            selection = defaultSelection
         }
-        .onChange(of: settings.shares.map(\.id)) {
-            if selection == nil || !settings.shares.contains(where: { $0.id == selection }) {
-                selection = settings.shares.first?.id
-            }
+        .onChange(of: selectionValidationSignature) {
+            validateSelection()
         }
         .onDisappear {
             if didRegisterWindowAppearance {
@@ -250,14 +271,39 @@ struct ShareManagementView: View {
                     .padding(.horizontal, 12)
                     .padding(.bottom, 2)
 
-                ForEach(shares) { share in
-                    ShareListRow(
-                        share: share,
-                        isSelected: selection == share.id,
-                        selectionHighlightNamespace: selectionHighlightNamespace
-                    ) {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            selection = share.id
+                ForEach(shareGroups) { group in
+                    if group.isGrouped {
+                        ServerListHeader(
+                            group: group,
+                            isSelected: selection == .server(group.id),
+                            selectionHighlightNamespace: selectionHighlightNamespace
+                        ) {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                selection = .server(group.id)
+                            }
+                        }
+
+                        ForEach(group.shares) { share in
+                            ShareListRow(
+                                share: share,
+                                isSelected: selection == .share(share.id),
+                                selectionHighlightNamespace: selectionHighlightNamespace
+                            ) {
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    selection = .share(share.id)
+                                }
+                            }
+                            .padding(.leading, 14)
+                        }
+                    } else if let share = group.shares.first {
+                        ShareListRow(
+                            share: share,
+                            isSelected: selection == .share(share.id),
+                            selectionHighlightNamespace: selectionHighlightNamespace
+                        ) {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                selection = .share(share.id)
+                            }
                         }
                     }
                 }
@@ -279,11 +325,11 @@ struct ShareManagementView: View {
 
     private func updateSelection(forDragLocation point: CGPoint) {
         guard let target = shares.first(where: { rowFrames[$0.id]?.contains(point) ?? false }),
-              selection != target.id
+              selection != .share(target.id)
         else { return }
 
         withAnimation(.easeInOut(duration: 0.18)) {
-            selection = target.id
+            selection = .share(target.id)
         }
     }
 
@@ -302,6 +348,8 @@ struct ShareManagementView: View {
                 }
                 .tahoePrimaryActionButton()
             }
+        } else if let selectedServerGroup {
+            ServerDetailView(group: selectedServerGroup)
         } else if let selectedShare {
             ShareDetailView(share: selectedShare)
         } else {
@@ -310,18 +358,34 @@ struct ShareManagementView: View {
     }
 
     private var selectedShare: NetworkShare? {
-        guard let selection else { return nil }
-        return shares.first { $0.id == selection }
+        guard case let .share(id) = selection else { return nil }
+        return shares.first { $0.id == id }
     }
 
-    private var canDisconnectSelectedShare: Bool {
-        guard let selectedShare else { return false }
-        return monitor.status(for: selectedShare) == .connected
+    private var selectedServerGroup: NetworkShareServerGroup? {
+        guard case let .server(id) = selection else { return nil }
+        return shareGroups.first { $0.id == id && $0.isGrouped }
+    }
+
+    private var selectedShares: [NetworkShare] {
+        if let selectedShare {
+            return [selectedShare]
+        }
+        return selectedServerGroup?.shares ?? []
+    }
+
+    private var areAllSelectedSharesConnected: Bool {
+        !selectedShares.isEmpty && selectedShares.allSatisfy { monitor.status(for: $0) == .connected }
+    }
+
+    private var canDisconnectSelectedShares: Bool {
+        selectedShares.contains { monitor.status(for: $0) == .connected }
     }
 
     private var canRemoveSelectedShare: Bool {
         guard let selectedShare else { return false }
         return settings.share(id: selectedShare.id) != nil
+            && !settings.isManagedShare(id: selectedShare.id)
     }
 
     private func removeSelectedShare() {
@@ -335,7 +399,7 @@ struct ShareManagementView: View {
             return
         }
 
-        selection = settings.shares[min(selectedIndex, settings.shares.count - 1)].id
+        selection = .share(settings.shares[min(selectedIndex, settings.shares.count - 1)].id)
     }
 
     private func share(for request: ShareEditorRequest) -> NetworkShare? {
@@ -348,8 +412,97 @@ struct ShareManagementView: View {
 
     private func selectShare(for request: ShareEditorRequest) {
         if case let .edit(id) = request.mode {
-            selection = id
+            selection = .share(id)
         }
+    }
+
+    private var defaultSelection: ShareManagementSelection? {
+        guard let firstGroup = shareGroups.first else { return nil }
+        if firstGroup.isGrouped {
+            return .server(firstGroup.id)
+        }
+        return firstGroup.shares.first.map { .share($0.id) }
+    }
+
+    private func validateSelection() {
+        let isValid: Bool
+        switch selection {
+        case let .share(id):
+            isValid = shares.contains { $0.id == id }
+        case let .server(id):
+            isValid = shareGroups.contains { $0.id == id && $0.isGrouped }
+        case nil:
+            isValid = false
+        }
+
+        if !isValid {
+            selection = defaultSelection
+        }
+    }
+
+    private func mountSelectedShares() async {
+        for share in selectedShares {
+            await monitor.mount(share)
+        }
+    }
+
+    private func disconnectSelectedShares() async {
+        for share in selectedShares {
+            await monitor.pause(
+                share,
+                until: nil,
+                disconnect: monitor.status(for: share) == .connected
+            )
+        }
+    }
+
+    private func showSelectedSharesInFinder() {
+        let mountedURLs = selectedShares
+            .filter { monitor.status(for: $0) == .connected }
+            .map { URL(fileURLWithPath: $0.mountPath) }
+        guard !mountedURLs.isEmpty else { return }
+        NSWorkspace.shared.activateFileViewerSelecting(mountedURLs)
+    }
+}
+
+private struct ServerListHeader: View {
+    let group: NetworkShareServerGroup
+    let isSelected: Bool
+    let selectionHighlightNamespace: Namespace.ID
+    let action: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "server.rack")
+                .font(.body)
+                .foregroundStyle(isSelected ? .primary : .secondary)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(group.serverName)
+                    .font(.body)
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
+
+                Text("\(group.shares.count) shares")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 7)
+        .padding(.bottom, 3)
+        .background {
+            if isSelected {
+                SidebarSelectionHighlight()
+                    .matchedGeometryEffect(id: "sidebarSelectionHighlight", in: selectionHighlightNamespace)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { action() }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -405,6 +558,7 @@ private struct GeneralPreferencesView: View {
     @EnvironmentObject private var notificationService: NotificationService
     @EnvironmentObject private var loginItemService: LoginItemService
     @State private var configurationMessage: String?
+    @State private var supportPackageMessage: String?
 
     var body: some View {
         Form {
@@ -467,6 +621,7 @@ private struct GeneralPreferencesView: View {
                 Stepper(value: fallbackIntervalBinding, in: 15...3600, step: 15) {
                     Text("Fallback check: \(fallbackIntervalLabel(settings.preferences.fallbackCheckInterval))")
                 }
+                .disabled(settings.hasManagedMonitoringSettings)
                 SettingsSecondaryText("Also checks after wake, network, and volume changes.")
 
                 Toggle("Recover unresponsive mounted volumes", isOn: Binding(
@@ -475,7 +630,14 @@ private struct GeneralPreferencesView: View {
                         settings.updatePreferences { $0.recoverUnresponsiveMounts = enabled }
                     }
                 ))
+                .disabled(settings.hasManagedMonitoringSettings)
                 SettingsSecondaryText("Uses a time-limited helper probe and only attempts a normal unmount. Otter never force-unmounts a busy volume.")
+
+                if settings.hasManagedMonitoringSettings {
+                    Label("These monitoring settings are managed by your organization.", systemImage: "checkmark.shield")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             } header: {
                 Text("Monitoring")
             }
@@ -506,6 +668,25 @@ private struct GeneralPreferencesView: View {
                 }
             } header: {
                 Text("Configuration")
+            }
+
+            Section {
+                Button {
+                    exportSupportPackage()
+                } label: {
+                    Label("Export Support Package\u{2026}", systemImage: "lifepreserver")
+                }
+                .tahoeSecondaryActionButton()
+
+                SettingsSecondaryText("Creates a redacted diagnostic file. Server, share, network, VPN, account, and password details are not included.")
+
+                if let supportPackageMessage {
+                    Text(supportPackageMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Support")
             }
 
             Section {
@@ -544,10 +725,17 @@ private struct GeneralPreferencesView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    LabeledContent("Known VPNs") {
+                    LabeledContent("VPNs in System Settings") {
                         VStack(alignment: .trailing, spacing: 4) {
                             ForEach(networkService.knownVPNNames, id: \.self) { vpnName in
-                                Text(vpnName)
+                                HStack(spacing: 5) {
+                                    Text(vpnName)
+                                    if !networkService.canControlVPN(named: vpnName) {
+                                        Text("Manual")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
                             }
                         }
                     }
@@ -648,6 +836,35 @@ private struct GeneralPreferencesView: View {
 
     private var configurationFileType: UTType {
         UTType(filenameExtension: "otterconfig", conformingTo: .json) ?? .json
+    }
+
+    private var supportPackageFileType: UTType {
+        UTType(filenameExtension: "ottersupport", conformingTo: .json) ?? .json
+    }
+
+    private func exportSupportPackage() {
+        let panel = NSSavePanel()
+        panel.title = "Export Otter Support Package"
+        panel.nameFieldStringValue = "Otter Support.ottersupport"
+        panel.allowedContentTypes = [supportPackageFileType]
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let package = SupportPackageService.make(
+                settings: settings,
+                eventLog: appModel.eventLog,
+                monitor: appModel.monitor,
+                networkService: networkService,
+                notificationService: notificationService,
+                loginItemService: loginItemService
+            )
+            try SupportPackageService.encode(package).write(to: url, options: .atomic)
+            supportPackageMessage = "Support package exported with identifying details removed."
+        } catch {
+            supportPackageMessage = "Export failed: \(error.localizedDescription)"
+        }
     }
 
     private func exportConfiguration() {

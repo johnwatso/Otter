@@ -15,9 +15,8 @@ struct OnboardingView: View {
     @State private var mountedShares: [MountedShareSuggestion] = []
     @State private var isRefreshingMountedShares = false
     @State private var importedPaths = Set<String>()
-    @State private var pendingFinderServer: DiscoveredSMBServer?
-    @State private var mountPathsBeforeOpeningFinder = Set<String>()
-    @State private var finderImportMessage: String?
+    @State private var shareBrowserMessage: String?
+    @State private var browsingServerID: DiscoveredSMBServer.ID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -65,7 +64,6 @@ struct OnboardingView: View {
                             beginDiscovery()
                         default:
                             refreshMountedShares(
-                                autoImportFromFinder: true,
                                 advanceToFinish: true
                             )
                         }
@@ -94,10 +92,6 @@ struct OnboardingView: View {
         .onDisappear {
             discovery.stop()
             appModel.onboardingDidEnd()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            guard step == 2, pendingFinderServer != nil else { return }
-            refreshMountedShares(autoImportFromFinder: true)
         }
     }
 
@@ -229,20 +223,28 @@ struct OnboardingView: View {
                             HStack {
                                 Label(server.name, systemImage: "server.rack")
                                 Spacer()
-                                Button(pendingFinderServer?.id == server.id ? "Open Again" : "Open in Finder") {
-                                    openInFinder(server)
+                                Button {
+                                    browseShares(on: server)
+                                } label: {
+                                    if browsingServerID == server.id {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    } else {
+                                        Text("Browse Shares\u{2026}")
+                                    }
                                 }
+                                .disabled(browsingServerID != nil)
                             }
                         }
                     }
 
-                    if let finderImportMessage {
-                        Label(finderImportMessage, systemImage: pendingFinderServer == nil ? "checkmark.circle.fill" : "arrow.up.forward.app")
+                    if let shareBrowserMessage {
+                        Label(shareBrowserMessage, systemImage: "info.circle.fill")
                             .font(.caption)
-                            .foregroundStyle(pendingFinderServer == nil ? .green : .secondary)
+                            .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
-                        Text("Connect in Finder, then return to Otter. The newly mounted share will be added automatically.")
+                        Text("macOS will show the server's shares and handle sign-in. Save the password to Keychain when prompted.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -327,7 +329,6 @@ struct OnboardingView: View {
     }
 
     private func refreshMountedShares(
-        autoImportFromFinder: Bool = false,
         advanceToFinish: Bool = false
     ) {
         guard !isRefreshingMountedShares else { return }
@@ -338,10 +339,6 @@ struct OnboardingView: View {
             }.value
             mountedShares = suggestions
 
-            if autoImportFromFinder {
-                importFinderShares(from: suggestions)
-            }
-
             isRefreshingMountedShares = false
             if advanceToFinish {
                 step = 3
@@ -349,41 +346,35 @@ struct OnboardingView: View {
         }
     }
 
-    private func openInFinder(_ server: DiscoveredSMBServer) {
-        guard let url = server.finderURL else { return }
-        pendingFinderServer = server
-        finderImportMessage = "Complete the connection in Finder, then return to Otter."
+    private func browseShares(on server: DiscoveredSMBServer) {
+        guard browsingServerID == nil else { return }
+        browsingServerID = server.id
+        shareBrowserMessage = nil
 
         Task {
-            let currentSuggestions = await Task.detached(priority: .userInitiated) {
-                MountedShareSuggestion.discover()
-            }.value
-            mountPathsBeforeOpeningFinder = Set(currentSuggestions.map(\.mountPath))
-            NSWorkspace.shared.open(url)
+            do {
+                let suggestions = try await appModel.shareBrowserService.browse(server)
+                guard !suggestions.isEmpty else {
+                    shareBrowserMessage = "No share was selected."
+                    browsingServerID = nil
+                    return
+                }
+
+                let existing = Set(mountedShares)
+                mountedShares = existing.union(suggestions).sorted {
+                    $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+                }
+                let previousCount = settings.shares.count
+                suggestions.forEach(importSuggestion)
+                let addedCount = settings.shares.count - previousCount
+                shareBrowserMessage = addedCount > 0
+                    ? "Added \(addedCount) share\(addedCount == 1 ? "" : "s")."
+                    : "The selected share was already added."
+            } catch {
+                shareBrowserMessage = "Couldn't browse this server: \(error.localizedDescription)"
+            }
+            browsingServerID = nil
         }
-    }
-
-    private func importFinderShares(from suggestions: [MountedShareSuggestion]) {
-        guard let pendingFinderServer else { return }
-
-        let candidates = MountedShareSuggestion.finderImportCandidates(
-            in: suggestions,
-            for: pendingFinderServer,
-            excludingMountPaths: mountPathsBeforeOpeningFinder
-        )
-        guard !candidates.isEmpty else {
-            finderImportMessage = "Finder has not mounted a new SMB share yet. Complete the connection and return here."
-            return
-        }
-
-        let previousCount = settings.shares.count
-        candidates.forEach(importSuggestion)
-        let addedCount = settings.shares.count - previousCount
-
-        self.pendingFinderServer = nil
-        finderImportMessage = addedCount > 0
-            ? "Added \(addedCount) share\(addedCount == 1 ? "" : "s") from Finder."
-            : "The Finder share was already added."
     }
 
     private func importSuggestion(_ suggestion: MountedShareSuggestion) {

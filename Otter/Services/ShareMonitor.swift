@@ -45,6 +45,7 @@ final class ShareMonitor: ObservableObject {
     private let mountService: any MountServicing
     private let mountHealthService: any MountHealthChecking
     private let wakeOnLANService: any WakeOnLANServicing
+    private let vpnConnectionService: any VPNConnecting
     private let networkService: any NetworkReachabilityProviding
     private let notificationService: any ShareNotificationProviding
     private let eventLog: ShareEventLog
@@ -76,6 +77,7 @@ final class ShareMonitor: ObservableObject {
         mountService: any MountServicing,
         mountHealthService: any MountHealthChecking = MountHealthService(),
         wakeOnLANService: any WakeOnLANServicing,
+        vpnConnectionService: any VPNConnecting = SystemVPNConnectionService(),
         networkService: any NetworkReachabilityProviding,
         notificationService: any ShareNotificationProviding,
         eventLog: ShareEventLog,
@@ -86,6 +88,7 @@ final class ShareMonitor: ObservableObject {
         self.mountService = mountService
         self.mountHealthService = mountHealthService
         self.wakeOnLANService = wakeOnLANService
+        self.vpnConnectionService = vpnConnectionService
         self.networkService = networkService
         self.notificationService = notificationService
         self.eventLog = eventLog
@@ -438,12 +441,106 @@ final class ShareMonitor: ObservableObject {
             return
         }
 
-        let ruleEvaluation = share.rules.evaluate(
+        var ruleEvaluation = share.rules.evaluate(
             currentWiFiNetworkName: networkService.currentWiFiNetworkName,
             isVPNConnected: networkService.isVPNConnected,
             activeVPNNames: networkService.activeVPNNames,
             currentIPv4Subnets: networkService.currentIPv4Subnets
         )
+
+        // A named VPN rule gives Otter an unambiguous service to start. "Any
+        // VPN" remains passive because choosing an arbitrary configured VPN
+        // could route traffic through the wrong network.
+        if !ruleEvaluation.allowsConnection,
+           share.rules.hasVPNRule,
+           let requiredVPNName = share.rules.requiredVPNName,
+           networkService.isOnline {
+            if !force, !RetryBackoff.shouldRetry(afterFailures: state.failureCount) {
+                if case .failed = state.status {
+                    // Preserve the specific VPN error that exhausted retries.
+                } else {
+                    state.status = .failed(retryLimitMessage())
+                }
+                state.nextRetryDate = nil
+                saveState(state, for: share)
+                cancelRetry(for: share.id)
+                return
+            }
+
+            if !force, let nextRetryDate = state.nextRetryDate, nextRetryDate > now() {
+                saveState(state, for: share)
+                return
+            }
+
+            if !isMounted {
+                state.status = .reconnecting
+                saveState(state, for: share)
+            }
+
+            do {
+                try await vpnConnectionService.connect(named: requiredVPNName)
+
+                // A path-change refresh may still be finishing with a snapshot
+                // captured during negotiation. Re-read briefly until the newly
+                // connected service is visible before moving on to SMB.
+                for refreshAttempt in 0..<5 {
+                    await networkService.refreshNetworkDetailsNow()
+                    ruleEvaluation = share.rules.evaluate(
+                        currentWiFiNetworkName: networkService.currentWiFiNetworkName,
+                        isVPNConnected: networkService.isVPNConnected,
+                        activeVPNNames: networkService.activeVPNNames,
+                        currentIPv4Subnets: networkService.currentIPv4Subnets
+                    )
+                    if ruleEvaluation.allowsConnection {
+                        break
+                    }
+                    if refreshAttempt < 4 {
+                        try? await Task.sleep(nanoseconds: nanoseconds(for: 0.25))
+                    }
+                }
+
+                guard ruleEvaluation.allowsConnection else {
+                    throw SystemVPNConnectionError.disconnected(requiredVPNName)
+                }
+            } catch {
+                if let vpnError = error as? SystemVPNConnectionError,
+                   case .notControllable = vpnError {
+                    if isMounted && ruleEvaluation.shouldDisconnectMountedShare {
+                        do {
+                            try await mountService.unmount(share)
+                        } catch {
+                            updateFailure(
+                                "Connect to “\(requiredVPNName)” to access this server. The mounted share also could not be disconnected: \(error.localizedDescription)",
+                                for: share.id
+                            )
+                            return
+                        }
+                    }
+
+                    cancelRetry(for: share.id)
+                    state.status = .waitingForVPN(requiredVPNName)
+                    state.failureCount = 0
+                    state.nextRetryDate = nil
+                    state.needsCredentials = false
+                    saveState(state, for: share)
+                    return
+                }
+
+                var message = error.localizedDescription
+
+                if isMounted && ruleEvaluation.shouldDisconnectMountedShare {
+                    do {
+                        try await mountService.unmount(share)
+                    } catch {
+                        message += " The mounted share also could not be disconnected: \(error.localizedDescription)"
+                    }
+                }
+
+                registerFailure(message, for: share.id)
+                return
+            }
+        }
+
         if !ruleEvaluation.allowsConnection {
             cancelRetry(for: share.id)
             state.status = ruleEvaluation.blockedStatus ?? .disconnected
@@ -732,6 +829,8 @@ final class ShareMonitor: ObservableObject {
             eventLog.record(.disconnected, for: share, detail: "Automatic mounting paused.")
         case let .waitingForAllowedNetwork(requirement) where previous == .connected:
             eventLog.record(.blockedByRule, for: share, detail: requirement)
+        case let .waitingForVPN(name) where previous == .connected:
+            eventLog.record(.blockedByRule, for: share, detail: "VPN required: \(name)")
         case .reconnecting where previous == .connected,
              .waitingForNetwork where previous == .connected:
             eventLog.record(.connectionLost, for: share)

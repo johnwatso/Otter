@@ -268,6 +268,14 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
                 title: "\(share.displayName) paused by rule",
                 body: "Connect to \(requirement) to mount this share."
             )
+        case let .waitingForVPN(name):
+            guard settings.preferences.notifyProblems else { return nil }
+            return ShareNotificationMessage(
+                shareID: share.id,
+                kind: .waitingForVPN,
+                title: "VPN required for \(share.displayName)",
+                body: "Connect to “\(name)” to access this server."
+            )
         case let .failed(message):
             guard settings.preferences.notifyProblems else { return nil }
             return ShareNotificationMessage(
@@ -297,7 +305,7 @@ struct ProblemNotificationTracker {
         switch status {
         case .connected, .disconnected, .paused, .waitingForAllowedNetwork:
             notifiedShareIDs.remove(shareID)
-        case .waitingForNetwork, .wakePacketSent, .reconnecting, .failed:
+        case .waitingForNetwork, .waitingForVPN, .wakePacketSent, .reconnecting, .failed:
             break
         }
     }
@@ -315,11 +323,12 @@ private enum ShareNotificationKind: String {
     case disconnected
     case waitingForNetwork
     case waitingForAllowedNetwork
+    case waitingForVPN
     case failed
 
     var isProblem: Bool {
         switch self {
-        case .waitingForNetwork, .failed:
+        case .waitingForNetwork, .waitingForVPN, .failed:
             true
         case .connected, .disconnected, .waitingForAllowedNetwork:
             false

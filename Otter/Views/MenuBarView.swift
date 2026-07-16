@@ -13,12 +13,20 @@ struct MenuBarView: View {
         appModel.screenshotDemoShares ?? settings.shares
     }
 
+    private var shareGroups: [NetworkShareServerGroup] {
+        NetworkShareServerGroup.make(from: shares)
+    }
+
     var body: some View {
         if shares.isEmpty {
             Text("No shares configured")
         } else {
-            ForEach(shares) { share in
-                ShareMenu(share: share)
+            ForEach(shareGroups) { group in
+                if group.isGrouped {
+                    ServerShareMenu(group: group)
+                } else if let share = group.shares.first {
+                    ShareMenu(share: share)
+                }
             }
         }
 
@@ -116,9 +124,58 @@ struct MenuBarView: View {
     }
 }
 
+private struct ServerShareMenu: View {
+    @EnvironmentObject private var monitor: ShareMonitor
+    let group: NetworkShareServerGroup
+
+    var body: some View {
+        Menu {
+            Button {
+                Task {
+                    for share in group.shares {
+                        await monitor.mount(share)
+                    }
+                }
+            } label: {
+                Label("Mount All Shares", systemImage: "arrow.triangle.2.circlepath")
+            }
+
+            ShareGroupPauseMenu(shares: group.shares)
+
+            Button {
+                Task {
+                    for share in group.shares {
+                        await monitor.pause(
+                            share,
+                            until: nil,
+                            disconnect: monitor.status(for: share) == .connected
+                        )
+                    }
+                }
+            } label: {
+                Label("Disconnect & Pause All", systemImage: "eject")
+            }
+            .disabled(!group.shares.contains { monitor.status(for: $0) == .connected })
+
+            Divider()
+
+            ForEach(group.shares) { share in
+                ShareMenu(share: share)
+            }
+        } label: {
+            Label {
+                Text("\(group.serverName) - \(group.shares.count) shares")
+            } icon: {
+                Image(systemName: "server.rack")
+            }
+        }
+    }
+}
+
 private struct ShareMenu: View {
     @Environment(\.openWindow) private var openWindow
     @EnvironmentObject private var appModel: AppModel
+    @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var monitor: ShareMonitor
     let share: NetworkShare
 
@@ -157,6 +214,7 @@ private struct ShareMenu: View {
             } label: {
                 Label("Edit", systemImage: "pencil")
             }
+            .disabled(settings.isManagedShare(id: share.id))
 
             if case .connected = monitor.status(for: share) {
                 Button {
@@ -234,6 +292,46 @@ struct SharePauseMenu: View {
                 }
             } label: {
                 Label("Pause Automatic Mounting", systemImage: "pause.fill")
+            }
+        }
+    }
+}
+
+struct ShareGroupPauseMenu: View {
+    @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var monitor: ShareMonitor
+    let shares: [NetworkShare]
+
+    private var currentShares: [NetworkShare] {
+        shares.map { settings.share(id: $0.id) ?? $0 }
+    }
+
+    private var areAllSharesPaused: Bool {
+        !currentShares.isEmpty && currentShares.allSatisfy { $0.pauseState.isActive() }
+    }
+
+    var body: some View {
+        if areAllSharesPaused {
+            Button {
+                Task {
+                    for share in currentShares {
+                        await monitor.resume(share)
+                    }
+                }
+            } label: {
+                Label("Resume Automatic Mounting for All", systemImage: "play.fill")
+            }
+        } else {
+            Menu {
+                pauseButtons { resumeAt in
+                    Task {
+                        for share in currentShares {
+                            await monitor.pause(share, until: resumeAt)
+                        }
+                    }
+                }
+            } label: {
+                Label("Pause Automatic Mounting for All", systemImage: "pause.fill")
             }
         }
     }

@@ -12,6 +12,7 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
     @Published private(set) var currentIPv4Subnets: [String] = []
     @Published private(set) var activeVPNNames: [String] = []
     @Published private(set) var knownVPNNames: [String] = []
+    @Published private(set) var controllableVPNNames: [String] = []
     @Published private(set) var hasUnidentifiedTunnel = false
     @Published private(set) var locationAuthorizationStatus: CLAuthorizationStatus = .notDetermined
 
@@ -29,6 +30,12 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
 
     var isVPNNameUnavailable: Bool {
         hasUnidentifiedTunnel
+    }
+
+    func canControlVPN(named name: String) -> Bool {
+        controllableVPNNames.contains {
+            $0.localizedCaseInsensitiveCompare(name) == .orderedSame
+        }
     }
 
     // macOS only exposes the Wi-Fi network name to apps with Location Services access.
@@ -166,6 +173,7 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
             currentIPv4Subnets = snapshot.currentIPv4Subnets
             activeVPNNames = snapshot.activeVPNNames
             knownVPNNames = snapshot.knownVPNNames
+            controllableVPNNames = snapshot.controllableVPNNames
             isVPNConnected = snapshot.isVPNConnected
             hasUnidentifiedTunnel = snapshot.hasUnidentifiedTunnel
         }
@@ -180,6 +188,7 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
         var currentIPv4Subnets: [String]
         var activeVPNNames: [String]
         var knownVPNNames: [String]
+        var controllableVPNNames: [String]
         var isVPNConnected: Bool
         var hasUnidentifiedTunnel: Bool
     }
@@ -209,7 +218,8 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
             currentWiFiNetworkName: currentWiFiNetworkName,
             currentIPv4Subnets: readCurrentIPv4Subnets(),
             activeVPNNames: identity.activeNames,
-            knownVPNNames: VPNServiceDiscovery.readKnownVPNNames(including: identity.activeNames),
+            knownVPNNames: VPNServiceDiscovery.readKnownVPNNames(),
+            controllableVPNNames: VPNServiceDiscovery.readControllableVPNNames(),
             isVPNConnected: identity.isConnected,
             hasUnidentifiedTunnel: identity.hasUnidentifiedTunnel
         )
@@ -224,6 +234,7 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
         let hadUnidentifiedTunnel = hasUnidentifiedTunnel
         let previousVPNNames = activeVPNNames
         let previousKnownVPNNames = knownVPNNames
+        let previousControllableVPNNames = controllableVPNNames
         isOnline = newOnlineState
         await refreshNetworkDetailsNow()
 
@@ -233,6 +244,7 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
             || hadUnidentifiedTunnel != hasUnidentifiedTunnel
             || previousVPNNames != activeVPNNames
             || previousKnownVPNNames != knownVPNNames
+            || previousControllableVPNNames != controllableVPNNames
         let shouldNotify = changed || wifiNetworkChanged || subnetsChanged || vpnChanged || !hasReceivedPathUpdate
         hasReceivedPathUpdate = true
 

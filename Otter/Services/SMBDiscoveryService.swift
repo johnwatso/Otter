@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import NetFS
 
 struct DiscoveredSMBServer: Identifiable, Hashable, Sendable {
     let name: String
@@ -92,5 +93,50 @@ final class SMBDiscoveryService: ObservableObject {
         browser?.cancel()
         browser = nil
         state = .idle
+    }
+}
+
+actor SMBShareBrowserService {
+    private let mountQueue = DispatchQueue(label: "Otter.SMBShareBrowser", qos: .userInitiated)
+
+    func browse(_ server: DiscoveredSMBServer) async throws -> [MountedShareSuggestion] {
+        guard let serverURL = server.finderURL else {
+            throw MountServiceError.invalidURL
+        }
+
+        let result: (status: Int32, mountPaths: [String]) = await withCheckedContinuation { continuation in
+            mountQueue.async {
+                var mountPoints: Unmanaged<CFArray>?
+                let status = NetFSMountURLSync(
+                    serverURL as CFURL,
+                    nil,
+                    nil,
+                    nil,
+                    nil,
+                    nil,
+                    &mountPoints
+                )
+                let mountPaths = mountPoints?.takeRetainedValue() as? [String] ?? []
+                continuation.resume(returning: (status, mountPaths))
+            }
+        }
+
+        if result.status == ECANCELED {
+            return []
+        }
+        guard result.status == noErr || result.status == EEXIST else {
+            throw MountServiceError.failure(status: result.status)
+        }
+
+        let selectedShares = result.mountPaths.compactMap {
+            try? MountedShareSuggestion.make(from: URL(fileURLWithPath: $0, isDirectory: true))
+        }
+        if !selectedShares.isEmpty {
+            return selectedShares.sorted {
+                $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+            }
+        }
+
+        return MountedShareSuggestion.discover().filter { $0.matches(server: server) }
     }
 }

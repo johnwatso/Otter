@@ -5,7 +5,7 @@
 # 🦦 Otter
 
 <p align="center">
-  <a href="https://github.com/johnwatso/Otter/actions/workflows/ci.yml"><img src="https://github.com/johnwatso/Otter/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
+  <a href="https://github.com/maxhewett/ShipHook"><img src="https://img.shields.io/badge/publishing-ShipHook-5E5CE6" alt="Published with ShipHook"></a>
   <img src="https://img.shields.io/badge/platform-macOS%2015+-blue" alt="Platform: macOS 15+">
   <img src="https://img.shields.io/badge/swift-5.0-orange" alt="Swift 5.0">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
@@ -19,11 +19,7 @@ Otter automatically reconnects SMB shares after sleep, network changes, VPN reco
 Built entirely in Swift, Otter is designed to feel at home on macOS: fast, efficient, and unobtrusive.
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="website/assets/otter-app-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="website/assets/otter-app-light.png">
-    <img src="website/assets/otter-app-light.png" width="640" alt="Otter Manage Shares window showing share status and network conditions">
-  </picture>
+  <img src="website/assets/otter-app-light.png" width="640" alt="Otter Manage Shares window showing share status and network conditions">
 </p>
 
 ## Why "Otter"?
@@ -38,7 +34,9 @@ Otters are small, quick, and famously good at not letting important things drift
 - 🌙 Recovers after sleep and wake
 - 🌐 Responds to network and VPN changes
 - 📶 Per-share Wi-Fi and VPN rules
-- 🧭 Guided first-run setup with mounted-share import and nearby SMB server discovery
+- 🔒 Named-VPN verification, automatic connection for macOS-controllable VPNs, and clear guidance for app-managed VPNs such as WireGuard
+- 🧭 Guided first-run setup with mounted-share import, nearby SMB server discovery, and the native macOS share picker
+- ✅ Connection Readiness test for network, VPN, credentials, SMB reachability, and mounting
 - 🛰️ Optional "connect when reachable" mode — mounts whenever the server answers
 - 🧭 Hostname-first connections with a learned LAN IP fallback and address-change warnings
 - 🔌 Optional Wake-on-LAN — wakes a sleeping server before retrying a mount
@@ -47,6 +45,8 @@ Otters are small, quick, and famously good at not letting important things drift
 - ⚡ Lightweight with minimal resource usage
 - 🔐 Keeps credentials in macOS Keychain — Otter never stores passwords in its settings or files
 - 📦 Versioned configuration export and import without credentials or runtime state
+- 🧰 One-click redacted support packages that omit server, share, network, VPN, account, and password identifiers
+- 🏢 Managed deployment of shares and monitoring settings through MDM ([configuration reference](docs/managed-deployment.md))
 - 🚀 Launch at login
 - 🪟 Choose whether Otter appears only in the menu bar, temporarily in the Dock, or always in both places
 - 🔄 Automatic updates via Sparkle
@@ -63,7 +63,7 @@ Just an otter that never lets go.
 
 Otter watches for the moments shares tend to drop—wake from sleep, network path changes, volumes mounting or unmounting—and checks that each configured share is still where it should be. If one is missing, it remounts it using the native macOS NetFS APIs, with retry backoff when the server isn't reachable yet. Shares with Wake-on-LAN enabled send a magic packet before retrying an unreachable server. A low-frequency fallback check catches anything the system events miss.
 
-The first-run assistant can import shares already mounted in Finder, show nearby SMB servers, or take you to manual setup. The same options remain available later when adding another share.
+The first-run assistant can import shares already mounted in Finder, show nearby SMB servers, or take you to manual setup. Browsing a nearby server uses macOS's native authentication and share-selection UI, so credentials continue to be handled by the system and Keychain. The same options remain available later when adding another share.
 
 ## Using Otter
 
@@ -72,7 +72,7 @@ The first-run assistant can import shares already mounted in Finder, show nearby
 3. Review the share and save it.
 4. Optional: add a network condition, Wake-on-LAN details, or "connect when reachable" behavior.
 
-Conditions are per share. When the network condition is on, Otter registers the network the share was configured on (its IPv4 subnet, plus the Wi-Fi name when available) and only connects while your Mac is back on that registered network — over Wi-Fi or Ethernet — or while a VPN is active. On any other network, Otter disconnects the share.
+Conditions are per share. When the network condition is on, Otter registers the network the share was configured on (its IPv4 subnet, plus the Wi-Fi name when available) and only connects while your Mac is back on that registered network — over Wi-Fi or Ethernet — or while the specifically selected VPN is active. An arbitrary or unidentified VPN never satisfies a named VPN rule. On any other network, Otter disconnects the share.
 
 For hostname-based shares, Otter resolves ordinary hostnames and Bonjour SMB service identities to learn the server's local IP address while you are on the local network. The hostname always remains the primary address; the IP is a fallback for situations such as a VPN that cannot resolve Bonjour or `.local` names. Otter keeps a small private history of address changes and warns after repeated changes within 30 days, which can indicate that a DHCP reservation would make fallback connections more reliable. To let macOS authenticate the IP-based fallback, Otter may create a scoped alias of the Finder-saved credential in macOS Keychain. Otter removes its alias when the cached IP changes or the share is deleted. Learned addresses and their history are excluded from exported configurations and redacted diagnostic reports.
 

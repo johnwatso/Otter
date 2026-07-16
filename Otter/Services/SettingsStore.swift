@@ -13,13 +13,20 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    @Published private(set) var managedShareIDs: Set<NetworkShare.ID>
+    @Published private(set) var hasManagedMonitoringSettings: Bool
+
     private enum Keys {
         static let shares = "configuredShares"
         static let preferences = "preferences"
+        static let managedShareIDs = "managedShareIDs"
     }
 
     private let defaults: UserDefaults
     private let credentialStore: any CredentialStoring
+    private let managedShareTemplates: [NetworkShare.ID: NetworkShare]
+    private let managedMonitoring: PortableMonitoringConfiguration?
+    private var unmanagedMonitoring: PortableMonitoringConfiguration
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
@@ -30,16 +37,51 @@ final class SettingsStore: ObservableObject {
         self.defaults = defaults
         self.credentialStore = credentialStore
         let loadedShares = Self.load([NetworkShare].self, from: defaults, key: Keys.shares) ?? []
-        self.shares = loadedShares
+        let previouslyManagedShareIDs = Set(
+            (defaults.stringArray(forKey: Keys.managedShareIDs) ?? []).compactMap(UUID.init(uuidString:))
+        )
+        let managedConfiguration = ManagedConfigurationService.load(from: defaults)
+        let configuredManagedShares = managedConfiguration?.shares.map { $0.makeNetworkShare() } ?? []
+        let managedTemplates = Dictionary(uniqueKeysWithValues: configuredManagedShares.map { ($0.id, $0) })
+        self.managedShareTemplates = managedTemplates
+        self.managedShareIDs = Set(managedTemplates.keys)
+        self.managedMonitoring = managedConfiguration?.monitoring
+        self.hasManagedMonitoringSettings = managedConfiguration?.monitoring != nil
+
+        let managedShares = configuredManagedShares.map { managedShare in
+            guard let storedRuntime = loadedShares.first(where: { $0.id == managedShare.id }) else {
+                return managedShare
+            }
+            return Self.enforceManagedConfiguration(managedShare, preservingRuntimeFrom: storedRuntime)
+        }
+        let managedAddresses = Set(configuredManagedShares.map {
+            Self.normalizedShareAddress($0.urlString)
+        })
+        var combinedShares = loadedShares.filter {
+            managedTemplates[$0.id] == nil
+                && !previouslyManagedShareIDs.contains($0.id)
+                && !managedAddresses.contains(Self.normalizedShareAddress($0.urlString))
+        }
+        combinedShares.append(contentsOf: managedShares)
+        self.shares = combinedShares
 
         var loadedPreferences = Self.load(AppPreferences.self, from: defaults, key: Keys.preferences) ?? AppPreferences()
+        self.unmanagedMonitoring = PortableMonitoringConfiguration(
+            fallbackCheckInterval: loadedPreferences.fallbackCheckInterval,
+            recoverUnresponsiveMounts: loadedPreferences.recoverUnresponsiveMounts
+        )
+        if let managedMonitoring = managedConfiguration?.monitoring {
+            loadedPreferences.fallbackCheckInterval = managedMonitoring.fallbackCheckInterval
+            loadedPreferences.recoverUnresponsiveMounts = managedMonitoring.recoverUnresponsiveMounts
+        }
         loadedPreferences.normalize()
-        if !loadedShares.isEmpty {
+        if !combinedShares.isEmpty {
             // Existing installations should not be sent through the first-run
             // assistant when this preference is introduced.
             loadedPreferences.hasCompletedOnboarding = true
         }
         self.preferences = loadedPreferences
+        defaults.set(managedShareIDs.map(\.uuidString), forKey: Keys.managedShareIDs)
     }
 
     func share(id: NetworkShare.ID) -> NetworkShare? {
@@ -48,6 +90,10 @@ final class SettingsStore: ObservableObject {
 
     func hasCredentials(for host: String) -> Bool {
         credentialStore.hasCredentials(for: host)
+    }
+
+    func isManagedShare(id: NetworkShare.ID) -> Bool {
+        managedShareIDs.contains(id)
     }
 
     @discardableResult
@@ -101,10 +147,12 @@ final class SettingsStore: ObservableObject {
     }
 
     func addShare(_ share: NetworkShare) {
+        guard !isManagedShare(id: share.id) else { return }
         shares.append(share)
     }
 
     func updateShare(_ share: NetworkShare) {
+        guard !isManagedShare(id: share.id) else { return }
         guard let index = shares.firstIndex(where: { $0.id == share.id }) else {
             addShare(share)
             return
@@ -132,11 +180,15 @@ final class SettingsStore: ObservableObject {
             share.ipAddressChangeObservations = []
         }
         share.updatedAt = Date()
+        if let managedTemplate = managedShareTemplates[id] {
+            share = Self.enforceManagedConfiguration(managedTemplate, preservingRuntimeFrom: share)
+        }
         shares[index] = share
         removeFallbackCredentialIfUnused(previousCachedIPAddress, replacingWith: share.cachedIPAddress)
     }
 
     func removeShare(id: NetworkShare.ID) {
+        guard !isManagedShare(id: id) else { return }
         let cachedIPAddress = shares.first(where: { $0.id == id })?.cachedIPAddress
         shares.removeAll { $0.id == id }
         removeFallbackCredentialIfUnused(cachedIPAddress, replacingWith: nil)
@@ -169,6 +221,7 @@ final class SettingsStore: ObservableObject {
 
     func setAllKeepMounted(_ enabled: Bool) {
         shares = shares.map { share in
+            guard !isManagedShare(id: share.id) else { return share }
             var updated = share
             updated.keepMounted = enabled
             updated.updatedAt = Date()
@@ -275,19 +328,28 @@ final class SettingsStore: ObservableObject {
         let result: ConfigurationImportResult
         switch strategy {
         case .replace:
-            let previousCount = shares.count
-            let previousFallbackHosts = Set(shares.compactMap(\.cachedIPAddress))
+            let retainedManagedShares = shares.filter { isManagedShare(id: $0.id) }
+            let userShares = shares.filter { !isManagedShare(id: $0.id) }
+            let previousCount = userShares.count
+            let previousFallbackHosts = Set(userShares.compactMap(\.cachedIPAddress))
             for host in previousFallbackHosts {
                 credentialStore.removeFallbackCredentials(for: host)
             }
 
             var usedIDs = Set<UUID>()
-            shares = incoming.map { configuration in
-                let id = usedIDs.insert(configuration.id).inserted ? configuration.id : UUID()
+            let importedShares = incoming.compactMap { configuration -> NetworkShare? in
+                let matchesManagedAddress = retainedManagedShares.contains {
+                    Self.normalizedShareAddress($0.urlString) == Self.normalizedShareAddress(configuration.urlString)
+                }
+                guard !matchesManagedAddress else { return nil }
+
+                let requestedID = managedShareIDs.contains(configuration.id) ? UUID() : configuration.id
+                let id = usedIDs.insert(requestedID).inserted ? requestedID : UUID()
                 return configuration.makeNetworkShare(id: id)
             }
+            shares = retainedManagedShares + importedShares
             result = ConfigurationImportResult(
-                added: shares.count,
+                added: importedShares.count,
                 updated: 0,
                 removed: previousCount
             )
@@ -302,6 +364,7 @@ final class SettingsStore: ObservableObject {
                     Self.normalizedShareAddress($0.urlString) == Self.normalizedShareAddress(configuration.urlString)
                 }) {
                     let existing = mergedShares[existingIndex]
+                    guard !isManagedShare(id: existing.id) else { continue }
                     var replacement = configuration.makeNetworkShare(id: existing.id)
                     replacement.cachedIPAddress = existing.cachedIPAddress
                     replacement.ipAddressChangeObservations = existing.ipAddressChangeObservations
@@ -311,7 +374,10 @@ final class SettingsStore: ObservableObject {
                     mergedShares[existingIndex] = replacement
                     updated += 1
                 } else {
-                    let id = mergedShares.contains(where: { $0.id == configuration.id }) ? UUID() : configuration.id
+                    let id = mergedShares.contains(where: { $0.id == configuration.id })
+                        || managedShareIDs.contains(configuration.id)
+                        ? UUID()
+                        : configuration.id
                     mergedShares.append(configuration.makeNetworkShare(id: id))
                     added += 1
                 }
@@ -331,12 +397,35 @@ final class SettingsStore: ObservableObject {
     func updatePreferences(_ update: (inout AppPreferences) -> Void) {
         var updated = preferences
         update(&updated)
+        if let managedMonitoring {
+            updated.fallbackCheckInterval = managedMonitoring.fallbackCheckInterval
+            updated.recoverUnresponsiveMounts = managedMonitoring.recoverUnresponsiveMounts
+        } else {
+            unmanagedMonitoring = PortableMonitoringConfiguration(
+                fallbackCheckInterval: updated.fallbackCheckInterval,
+                recoverUnresponsiveMounts: updated.recoverUnresponsiveMounts
+            )
+        }
         updated.normalize()
         preferences = updated
     }
 
+    private static func enforceManagedConfiguration(
+        _ managed: NetworkShare,
+        preservingRuntimeFrom runtime: NetworkShare
+    ) -> NetworkShare {
+        var result = managed
+        result.pauseState = runtime.pauseState
+        result.cachedIPAddress = runtime.cachedIPAddress
+        result.ipAddressChangeObservations = runtime.ipAddressChangeObservations
+        result.createdAt = runtime.createdAt
+        result.updatedAt = runtime.updatedAt
+        return result
+    }
+
     private func saveShares() {
         save(shares, key: Keys.shares)
+        defaults.set(managedShareIDs.map(\.uuidString), forKey: Keys.managedShareIDs)
     }
 
     private static func normalizedShareAddress(_ value: String) -> String {
@@ -359,7 +448,12 @@ final class SettingsStore: ObservableObject {
     }
 
     private func savePreferences() {
-        save(preferences, key: Keys.preferences)
+        var persistedPreferences = preferences
+        if managedMonitoring != nil {
+            persistedPreferences.fallbackCheckInterval = unmanagedMonitoring.fallbackCheckInterval
+            persistedPreferences.recoverUnresponsiveMounts = unmanagedMonitoring.recoverUnresponsiveMounts
+        }
+        save(persistedPreferences, key: Keys.preferences)
     }
 
     private func removeFallbackCredentialIfUnused(_ previousHost: String?, replacingWith newHost: String?) {

@@ -5,6 +5,7 @@ enum ShareStatus: Equatable {
     case disconnected
     case waitingForNetwork
     case waitingForAllowedNetwork(String)
+    case waitingForVPN(String)
     case paused(Date?)
     case wakePacketSent
     case reconnecting
@@ -20,6 +21,8 @@ enum ShareStatus: Equatable {
             "Waiting for network"
         case .waitingForAllowedNetwork:
             "Waiting for network rule"
+        case .waitingForVPN:
+            "VPN required"
         case .paused:
             "Paused"
         case .wakePacketSent:
@@ -35,6 +38,8 @@ enum ShareStatus: Equatable {
         switch self {
         case let .waitingForAllowedNetwork(requirement):
             return "Connect to \(requirement) to mount this share."
+        case let .waitingForVPN(name):
+            return "Connect to “\(name)” to access this server."
         case let .paused(resumeAt):
             if let resumeAt {
                 return "Automatic mounting resumes \(resumeAt.formatted(date: .abbreviated, time: .shortened))."
@@ -53,7 +58,7 @@ enum ShareStatus: Equatable {
         switch self {
         case .failed:
             "Last error"
-        case .connected, .disconnected, .waitingForNetwork, .waitingForAllowedNetwork, .paused, .wakePacketSent, .reconnecting:
+        case .connected, .disconnected, .waitingForNetwork, .waitingForAllowedNetwork, .waitingForVPN, .paused, .wakePacketSent, .reconnecting:
             "Details"
         }
     }
@@ -68,6 +73,8 @@ enum ShareStatus: Equatable {
             "externaldrive.badge.questionmark"
         case .waitingForAllowedNetwork:
             "externaldrive.badge.minus"
+        case .waitingForVPN:
+            "lock.shield.fill"
         case .paused:
             "pause.circle.fill"
         case .wakePacketSent:
@@ -90,6 +97,8 @@ enum ShareStatus: Equatable {
             "questionmark.circle.fill"
         case .waitingForAllowedNetwork:
             "pause.circle.fill"
+        case .waitingForVPN:
+            "exclamationmark.circle.fill"
         case .paused:
             "pause.circle.fill"
         case .wakePacketSent:
@@ -111,6 +120,8 @@ enum ShareStatus: Equatable {
             .orange
         case .waitingForAllowedNetwork:
             .secondary
+        case .waitingForVPN:
+            .orange
         case .paused:
             .indigo
         case .wakePacketSent:
@@ -124,7 +135,7 @@ enum ShareStatus: Equatable {
 
     var needsAttention: Bool {
         switch self {
-        case .failed, .waitingForNetwork:
+        case .failed, .waitingForNetwork, .waitingForVPN:
             true
         case .connected, .disconnected, .waitingForAllowedNetwork, .paused, .wakePacketSent, .reconnecting:
             false

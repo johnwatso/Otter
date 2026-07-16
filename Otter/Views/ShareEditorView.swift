@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ShareEditorView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appModel: AppModel
     @EnvironmentObject private var networkService: NetworkReachabilityService
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var discovery: SMBDiscoveryService
@@ -11,7 +12,13 @@ struct ShareEditorView: View {
     @State private var mountedShareSuggestions: [MountedShareSuggestion] = []
     @State private var isShowingFinderImportHelp = false
     @State private var isShowingAdvanced = false
-    @State private var usesCustomVPNName = false
+    @State private var readinessReport: ConnectionDiagnosticReport?
+    @State private var isTestingSetup = false
+    @State private var isVerifyingVPN = false
+    @State private var vpnVerification: VPNVerificationResult?
+    @State private var provisionalShareID = UUID()
+    @State private var browsingServerID: DiscoveredSMBServer.ID?
+    @State private var shareBrowserMessage: String?
 
     private let sourceShare: NetworkShare?
     let onSave: (NetworkShare) -> Void
@@ -100,23 +107,33 @@ struct ShareEditorView: View {
                             } else {
                                 ForEach(discovery.servers) { server in
                                     Button {
-                                        if let url = server.finderURL {
-                                            NSWorkspace.shared.open(url)
-                                        }
+                                        browseShares(on: server)
                                     } label: {
                                         HStack {
                                             Label(server.name, systemImage: "server.rack")
                                             Spacer()
-                                            Text("Open in Finder")
-                                                .foregroundStyle(.secondary)
+                                            if browsingServerID == server.id {
+                                                ProgressView()
+                                                    .controlSize(.small)
+                                            } else {
+                                                Text("Browse Shares\u{2026}")
+                                                    .foregroundStyle(.secondary)
+                                            }
                                         }
                                     }
+                                    .disabled(browsingServerID != nil)
                                 }
                             }
 
-                            Text("Connect once in Finder, save the password to Keychain, then return and refresh the mounted-share list.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
+                            if let shareBrowserMessage {
+                                Text(shareBrowserMessage)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("macOS will show the server's shares and handle sign-in. Save the password to Keychain when prompted.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -178,16 +195,13 @@ struct ShareEditorView: View {
                             } else {
                                 draft.registeredSubnets = []
                                 draft.wifiNetworkName = ""
-                                draft.vpnName = ""
-                                draft.matchesAnyVPN = true
-                                usesCustomVPNName = false
                             }
                         }
                     ))
 
                     if draft.limitsToRegisteredNetwork {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Otter registers the network this share was set up on. It connects when your Mac is back on that network — Wi-Fi or Ethernet — or while your VPN is active, and disconnects the share everywhere else.")
+                            Text("Otter registers the network this share was set up on and only connects when your Mac is back on that network — Wi-Fi or Ethernet.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
 
@@ -230,29 +244,86 @@ struct ShareEditorView: View {
                             if draft.registeredSubnets.isEmpty && draft.wifiNetworkName.isEmpty && networkService.wifiNameRequiresLocationPermission {
                                 locationPermissionNotice
                             }
+                        }
+                        .padding(.leading, 20)
+                    }
+
+                    Toggle("Connect through a VPN", isOn: Binding(
+                        get: { draft.usesVPNRule },
+                        set: { isOn in
+                            draft.usesVPNRule = isOn
+                            if !isOn {
+                                draft.vpnName = ""
+                            }
+                        }
+                    ))
+
+                    if draft.usesVPNRule {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Choose the specific VPN required to access this server. Otter connects it automatically when macOS allows it.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
 
                             Picker("VPN", selection: vpnSelection) {
-                                Text("Any VPN").tag(VPNNameSelection.any)
+                                Text("Choose a VPN…").tag(VPNNameSelection.unconfigured)
 
                                 ForEach(networkService.knownVPNNames, id: \.self) { vpnName in
-                                    Text(vpnName).tag(VPNNameSelection.known(vpnName))
+                                    Text(networkService.canControlVPN(named: vpnName)
+                                        ? vpnName
+                                        : "\(vpnName) — Connect Manually")
+                                        .tag(VPNNameSelection.known(vpnName))
                                 }
 
-                                Text("Other...").tag(VPNNameSelection.custom)
+                                if !draft.vpnName.isEmpty,
+                                   configuredSystemVPN(named: draft.vpnName) == nil {
+                                    Text("\(draft.vpnName) (not in System Settings)")
+                                        .tag(VPNNameSelection.custom)
+                                }
                             }
                             .pickerStyle(.menu)
                             .padding(.top, 4)
 
                             if vpnSelection.wrappedValue == .custom {
-                                TextField("VPN name", text: $draft.vpnName, prompt: Text("Office VPN"))
-                                    .textFieldStyle(.roundedBorder)
-                                    .padding(.leading, 12)
-                            }
-
-                            if vpnSelection.wrappedValue != .any {
-                                Text("Only this VPN will connect the share; other VPNs count as unregistered networks.")
+                                Text("This saved VPN is no longer available. Choose another VPN from System Settings.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.orange)
+                            } else if vpnSelection.wrappedValue == .unconfigured {
+                                Text("Select a VPN to enable this condition.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.orange)
+                            } else {
+                                Text(vpnRuleDescription)
                                     .font(.footnote)
                                     .foregroundStyle(.tertiary)
+                            }
+
+                            if !draft.vpnName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                HStack(spacing: 8) {
+                                    Button {
+                                        verifyVPN()
+                                    } label: {
+                                        if isVerifyingVPN {
+                                            ProgressView()
+                                                .controlSize(.small)
+                                        } else {
+                                            Label("Verify Connection", systemImage: "checkmark.shield")
+                                        }
+                                    }
+                                    .tahoeCompactActionButton()
+                                    .disabled(isVerifyingVPN)
+
+                                    if let vpnVerification {
+                                        Label(
+                                            vpnVerification.message,
+                                            systemImage: vpnVerification.isVerified
+                                                ? "checkmark.circle.fill"
+                                                : "exclamationmark.triangle.fill"
+                                        )
+                                        .font(.footnote)
+                                        .foregroundStyle(vpnVerification.isVerified ? .green : .orange)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
                             }
                         }
                         .padding(.leading, 20)
@@ -275,6 +346,47 @@ struct ShareEditorView: View {
                     }
                 }
 
+                Section("Connection Readiness") {
+                    Button {
+                        testSetup()
+                    } label: {
+                        if isTestingSetup {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Testing Setup\u{2026}")
+                            }
+                        } else {
+                            Label("Test Setup", systemImage: "checkmark.circle.badge.questionmark")
+                        }
+                    }
+                    .tahoeSecondaryActionButton()
+                    .disabled(isTestingSetup)
+
+                    Text("Checks the network, named VPN, credentials, SMB service, and mount. macOS may ask you to sign in or choose a share.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    if let readinessReport {
+                        ForEach(readinessReport.steps) { step in
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: readinessSymbol(for: step.status))
+                                    .foregroundStyle(readinessColor(for: step.status))
+                                    .frame(width: 16)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(step.title)
+                                        .font(.subheadline.weight(.medium))
+                                    Text(step.detail)
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+
                 // Advanced Section
                 if let fallbackURL = fallbackURLString {
                     Section("Advanced") {
@@ -294,38 +406,40 @@ struct ShareEditorView: View {
                     }
                 }
 
-                if let validationMessage {
-                    Section {
-                        Text(validationMessage)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-                }
             }
             .formStyle(.grouped)
             .padding(20)
 
             Divider()
 
-            HStack {
-                Button {
-                    onCancel()
-                    dismiss()
-                } label: {
-                    Label("Cancel", systemImage: "xmark")
+            VStack(alignment: .leading, spacing: 10) {
+                if let validationMessage {
+                    Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .tahoeSecondaryActionButton()
-                .keyboardShortcut(.cancelAction)
 
-                Spacer()
+                HStack {
+                    Button {
+                        onCancel()
+                        dismiss()
+                    } label: {
+                        Label("Cancel", systemImage: "xmark")
+                    }
+                    .tahoeSecondaryActionButton()
+                    .keyboardShortcut(.cancelAction)
 
-                Button {
-                    save()
-                } label: {
-                    Label("Done", systemImage: "checkmark")
+                    Spacer()
+
+                    Button {
+                        save()
+                    } label: {
+                        Label("Done", systemImage: "checkmark")
+                    }
+                    .tahoePrimaryActionButton()
+                    .keyboardShortcut(.defaultAction)
                 }
-                .tahoePrimaryActionButton()
-                .keyboardShortcut(.defaultAction)
             }
             .padding(20)
         }
@@ -415,40 +529,51 @@ struct ShareEditorView: View {
     private func resetDraftIfNeeded() {
         guard draft.id != sourceShare?.id else { return }
         draft = DraftShare(share: sourceShare)
-        usesCustomVPNName = !draft.vpnName.isEmpty && !networkService.knownVPNNames.contains(draft.vpnName)
         validationMessage = nil
+        readinessReport = nil
+        vpnVerification = nil
     }
 
     private var vpnSelection: Binding<VPNNameSelection> {
         Binding {
-            if draft.matchesAnyVPN {
-                return .any
+            if draft.vpnName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return .unconfigured
             }
 
-            if usesCustomVPNName {
-                return .custom
-            }
-
-            if networkService.knownVPNNames.contains(draft.vpnName) {
-                return .known(draft.vpnName)
+            if let configuredName = configuredSystemVPN(named: draft.vpnName) {
+                return .known(configuredName)
             }
 
             return .custom
         } set: { selection in
+            vpnVerification = nil
+            readinessReport = nil
             switch selection {
-            case .any:
-                draft.matchesAnyVPN = true
+            case .unconfigured:
                 draft.vpnName = ""
-                usesCustomVPNName = false
             case let .known(vpnName):
-                draft.matchesAnyVPN = false
                 draft.vpnName = vpnName
-                usesCustomVPNName = false
             case .custom:
-                draft.matchesAnyVPN = false
-                usesCustomVPNName = true
+                break
             }
         }
+    }
+
+    private func configuredSystemVPN(named name: String) -> String? {
+        networkService.knownVPNNames.first {
+            $0.localizedCaseInsensitiveCompare(name) == .orderedSame
+        }
+    }
+
+    private var vpnRuleDescription: String {
+        let vpnName = draft.vpnName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !vpnName.isEmpty, !networkService.canControlVPN(named: vpnName) {
+            return "Connect to this VPN when Otter asks. The share mounts automatically when the VPN becomes active."
+        }
+
+        return draft.limitsToRegisteredNetwork
+            ? "When the registered network is unavailable, Otter connects this VPN before mounting. No other VPN satisfies this rule."
+            : "Otter connects this VPN before mounting. No other VPN satisfies this rule."
     }
 
     private var locationPermissionNotice: some View {
@@ -518,6 +643,33 @@ struct ShareEditorView: View {
         validationMessage = nil
     }
 
+    private func browseShares(on server: DiscoveredSMBServer) {
+        guard browsingServerID == nil else { return }
+        browsingServerID = server.id
+        shareBrowserMessage = nil
+
+        Task {
+            do {
+                let suggestions = try await appModel.shareBrowserService.browse(server)
+                if suggestions.isEmpty {
+                    shareBrowserMessage = "No share was selected."
+                } else {
+                    let merged = Set(mountedShareSuggestions).union(suggestions)
+                    mountedShareSuggestions = merged.sorted {
+                        $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+                    }
+                    if suggestions.count == 1, let suggestion = suggestions.first {
+                        apply(suggestion)
+                    }
+                    shareBrowserMessage = "Selected \(suggestions.count) share\(suggestions.count == 1 ? "" : "s")."
+                }
+            } catch {
+                shareBrowserMessage = "Couldn't browse this server: \(error.localizedDescription)"
+            }
+            browsingServerID = nil
+        }
+    }
+
     private func registerCurrentNetwork() {
         draft.registeredSubnets = networkService.currentIPv4Subnets
         if let currentSSID = networkService.currentWiFiNetworkName {
@@ -556,22 +708,25 @@ struct ShareEditorView: View {
 
     private func save() {
         validationMessage = validate()
-        guard validationMessage == nil,
-              let normalizedURLString = normalizedSMBURLString(from: draft.urlString)
-        else { return }
+        guard validationMessage == nil, let share = makeShareFromDraft() else { return }
 
+        onSave(share)
+        dismiss()
+    }
+
+    private func makeShareFromDraft() -> NetworkShare? {
+        guard let normalizedURLString = normalizedSMBURLString(from: draft.urlString) else { return nil }
         let now = Date()
         let displayName = resolvedDisplayName(for: normalizedURLString)
-        let mountPath = NetworkShare.normalizedMountPath(
-            draft.mountPath,
-            displayName: displayName,
-            urlString: normalizedURLString
-        )
-        let share = NetworkShare(
-            id: draft.id ?? UUID(),
+        return NetworkShare(
+            id: draft.id ?? provisionalShareID,
             displayName: displayName,
             urlString: normalizedURLString,
-            mountPath: mountPath,
+            mountPath: NetworkShare.normalizedMountPath(
+                draft.mountPath,
+                displayName: displayName,
+                urlString: normalizedURLString
+            ),
             keepMounted: draft.keepMounted,
             mountAtLaunch: draft.mountAtLaunch,
             autoConnectWhenReachable: draft.autoConnectWhenReachable,
@@ -583,9 +738,63 @@ struct ShareEditorView: View {
             createdAt: draft.createdAt ?? now,
             updatedAt: now
         )
+    }
 
-        onSave(share)
-        dismiss()
+    private func verifyVPN() {
+        let requiredName = draft.vpnName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !requiredName.isEmpty else { return }
+
+        isVerifyingVPN = true
+        Task {
+            await networkService.refreshNetworkDetailsNow()
+            let exactName = networkService.activeVPNNames.first {
+                $0.localizedCaseInsensitiveCompare(requiredName) == .orderedSame
+            }
+
+            if let exactName {
+                vpnVerification = .connected(exactName)
+            } else if !networkService.activeVPNNames.isEmpty {
+                vpnVerification = .differentVPN(
+                    required: requiredName,
+                    active: networkService.activeVPNNames
+                )
+            } else if networkService.hasUnidentifiedTunnel {
+                vpnVerification = .unidentifiedTunnel(requiredName)
+            } else {
+                vpnVerification = .disconnected(requiredName)
+            }
+            isVerifyingVPN = false
+        }
+    }
+
+    private func testSetup() {
+        validationMessage = validate()
+        guard validationMessage == nil, let share = makeShareFromDraft() else { return }
+
+        isTestingSetup = true
+        readinessReport = nil
+        Task {
+            readinessReport = await appModel.connectionDoctor.run(for: share, attemptMount: true)
+            isTestingSetup = false
+        }
+    }
+
+    private func readinessSymbol(for status: DiagnosticStepStatus) -> String {
+        switch status {
+        case .passed: "checkmark.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        case .failed: "xmark.circle.fill"
+        case .information: "info.circle.fill"
+        }
+    }
+
+    private func readinessColor(for status: DiagnosticStepStatus) -> Color {
+        switch status {
+        case .passed: .green
+        case .warning: .orange
+        case .failed: .red
+        case .information: .blue
+        }
     }
 
     private func validate() -> String? {
@@ -607,8 +816,14 @@ struct ShareEditorView: View {
             return "Register the network while connected to it, or turn off the network condition."
         }
 
-        if draft.limitsToRegisteredNetwork && !draft.matchesAnyVPN && draft.vpnName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Enter the VPN name, or choose Any VPN."
+        if draft.usesVPNRule {
+            let vpnName = draft.vpnName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if vpnName.isEmpty {
+                return "Choose a VPN from System Settings, or turn off the VPN condition."
+            }
+            if configuredSystemVPN(named: vpnName) == nil {
+                return "Choose a VPN that is available in System Settings."
+            }
         }
 
         if draft.wakeOnLANEnabled {

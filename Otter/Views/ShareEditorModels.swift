@@ -112,9 +112,34 @@ struct MountedShareSuggestion: Identifiable, Hashable, Sendable {
 }
 
 enum VPNNameSelection: Hashable {
-    case any
+    case unconfigured
     case known(String)
     case custom
+}
+
+enum VPNVerificationResult: Equatable {
+    case connected(String)
+    case differentVPN(required: String, active: [String])
+    case unidentifiedTunnel(String)
+    case disconnected(String)
+
+    var message: String {
+        switch self {
+        case let .connected(name):
+            "Connected to \u{201c}\(name)\u{201d}."
+        case let .differentVPN(required, active):
+            "Otter detected \u{201c}\(active.joined(separator: ", "))\u{201d}, not \u{201c}\(required)\u{201d}."
+        case let .unidentifiedTunnel(name):
+            "A VPN tunnel is active, but macOS did not identify it as \u{201c}\(name)\u{201d}."
+        case let .disconnected(name):
+            "Connect to \u{201c}\(name)\u{201d}, then verify again."
+        }
+    }
+
+    var isVerified: Bool {
+        if case .connected = self { return true }
+        return false
+    }
 }
 
 private enum MountedShareSuggestionError: LocalizedError {
@@ -149,7 +174,7 @@ struct DraftShare {
     var limitsToRegisteredNetwork: Bool
     var wifiNetworkName: String
     var registeredSubnets: [String]
-    var matchesAnyVPN: Bool
+    var usesVPNRule: Bool
     var vpnName: String
     var createdAt: Date?
 
@@ -168,12 +193,13 @@ struct DraftShare {
         wakeOnLANMACAddress = share?.wakeOnLAN.macAddress ?? ""
         wakeOnLANBroadcastAddress = share?.wakeOnLAN.broadcastAddress ?? WakeOnLANConfiguration.defaultBroadcastAddress
         wakeOnLANPort = share?.wakeOnLAN.port ?? WakeOnLANConfiguration.defaultPort
-        // A share may carry a network rule, a VPN rule, or both; the editor
-        // presents them as a single "registered network" condition.
-        limitsToRegisteredNetwork = (share?.rules.hasNetworkRule ?? false) || (share?.rules.hasVPNRule ?? false)
+        limitsToRegisteredNetwork = share?.rules.hasNetworkRule ?? false
         wifiNetworkName = share?.rules.wifiNetworkName ?? ""
         registeredSubnets = share?.rules.registeredSubnets ?? []
-        matchesAnyVPN = share?.rules.requiredVPNName == nil
+        // An enabled rule with no name is the retired "arbitrary VPN" format.
+        // Present it as off so editing and saving an older share removes that
+        // rule instead of trapping the user behind an unselectable validation.
+        usesVPNRule = share?.rules.requiredVPNName != nil
         vpnName = share?.rules.vpnName ?? ""
         createdAt = share?.createdAt
     }
@@ -182,8 +208,8 @@ struct DraftShare {
         ShareRules(
             wifiNetworkName: limitsToRegisteredNetwork ? wifiNetworkName : "",
             registeredSubnets: limitsToRegisteredNetwork ? registeredSubnets : [],
-            vpnRuleEnabled: limitsToRegisteredNetwork,
-            vpnName: limitsToRegisteredNetwork && !matchesAnyVPN ? vpnName : ""
+            vpnRuleEnabled: usesVPNRule,
+            vpnName: usesVPNRule ? vpnName : ""
         )
     }
 
