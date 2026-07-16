@@ -28,32 +28,14 @@ Otters are small, quick, and famously good at not letting important things drift
 
 ## Features
 
-- 🦦 Native Swift & SwiftUI
-- 📁 Automatic SMB share reconnection
-- ⏸️ Pause one share or all automatic mounting for an hour, until tomorrow, or until resumed
-- 🌙 Recovers after sleep and wake
-- 🌐 Responds to network and VPN changes
-- 📶 Per-share Wi-Fi and VPN rules
-- 🔒 Named-VPN verification, automatic connection for macOS-controllable VPNs, and clear guidance for app-managed VPNs such as WireGuard
-- 🧭 Guided first-run setup with mounted-share import, nearby SMB server discovery, and the native macOS share picker
-- ✅ Connection Readiness test for network, VPN, credentials, SMB reachability, and mounting
-- 🛰️ Optional "connect when reachable" mode — mounts whenever the server answers
-- 🧭 Hostname-first connections with a learned LAN IP fallback and address-change warnings
-- 🔌 Optional Wake-on-LAN — wakes a sleeping server before retrying a mount
-- 🩺 Connection Doctor with redacted diagnostics and conservative one-click repair
-- 🛟 Optional conservative recovery for unresponsive mounts — Otter never force-unmounts them
-- ⚡ Lightweight with minimal resource usage
-- 🔐 Keeps credentials in macOS Keychain — Otter never stores passwords in its settings or files
-- 📦 Versioned configuration export and import without credentials or runtime state
-- 🧰 One-click redacted support packages that omit server, share, network, VPN, account, and password identifiers
-- 🏢 Managed deployment of shares and monitoring settings through MDM ([configuration reference](docs/managed-deployment.md))
-- 🚀 Launch at login
-- 🪟 Choose whether Otter appears only in the menu bar, temporarily in the Dock, or always in both places
-- 🔄 Automatic updates via Sparkle
-- 🔔 Actionable notifications for retrying, opening, or pausing a share
-- ⚙️ Shortcuts actions for mounting, pausing, resuming, and checking share status
-- 📊 Simple menu bar status
-- 🍎 Tahoe-native glass styling with a native Sequoia fallback
+- 📁 Keeps SMB shares mounted through sleep, wake, network changes, and unexpected disconnects
+- 🔒 Applies per-share Wi-Fi and named-VPN rules, with automatic connection for supported VPNs and clear guidance for app-managed providers such as WireGuard
+- 🧭 Guides setup with mounted-share import, SMB discovery, the native macOS share picker, and a Connection Readiness test
+- 🔌 Handles slow or sleeping servers with reachability monitoring, Wake-on-LAN, hostname fallback, and safe recovery tools
+- 🔐 Stores credentials in Keychain and keeps passwords and private identifiers out of exports, diagnostics, and support packages
+- ⏸️ Provides flexible pause controls, actionable notifications, and Shortcuts actions for everyday management
+- 🏢 Supports versioned configuration transfer and managed deployment through MDM ([configuration reference](docs/managed-deployment.md))
+- 🍎 Runs as a lightweight native menu bar app with launch-at-login and automatic updates
 
 No scripts. No daemons. No fuss.
 
