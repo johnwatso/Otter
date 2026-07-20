@@ -273,8 +273,18 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
             return ShareNotificationMessage(
                 shareID: share.id,
                 kind: .waitingForVPN,
-                title: "VPN required for \(share.displayName)",
+                title: "\(share.displayName) is waiting for VPN",
                 body: "Connect to “\(name)” to access this server."
+            )
+        case .waitingForAccess:
+            return nil
+        case .waitingForServerOnVPN:
+            guard settings.preferences.notifyProblems else { return nil }
+            return ShareNotificationMessage(
+                shareID: share.id,
+                kind: .waitingForServerOnVPN,
+                title: "\(share.displayName) is unavailable over VPN",
+                body: "A VPN is connected, but the server isn’t responding. Check that the correct VPN is active."
             )
         case let .failed(message):
             guard settings.preferences.notifyProblems else { return nil }
@@ -303,9 +313,9 @@ struct ProblemNotificationTracker {
 
     mutating func resolveIfNeeded(shareID: NetworkShare.ID, status: ShareStatus) {
         switch status {
-        case .connected, .disconnected, .paused, .waitingForAllowedNetwork:
+        case .connected, .disconnected, .paused, .waitingForAllowedNetwork, .waitingForAccess:
             notifiedShareIDs.remove(shareID)
-        case .waitingForNetwork, .waitingForVPN, .wakePacketSent, .reconnecting, .failed:
+        case .waitingForNetwork, .waitingForVPN, .waitingForServerOnVPN, .wakePacketSent, .reconnecting, .failed:
             break
         }
     }
@@ -324,11 +334,12 @@ private enum ShareNotificationKind: String {
     case waitingForNetwork
     case waitingForAllowedNetwork
     case waitingForVPN
+    case waitingForServerOnVPN
     case failed
 
     var isProblem: Bool {
         switch self {
-        case .waitingForNetwork, .waitingForVPN, .failed:
+        case .waitingForNetwork, .waitingForVPN, .waitingForServerOnVPN, .failed:
             true
         case .connected, .disconnected, .waitingForAllowedNetwork:
             false

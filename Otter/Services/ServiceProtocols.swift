@@ -38,6 +38,7 @@ protocol NetworkReachabilityProviding: AnyObject {
     var isVPNConnected: Bool { get }
     var currentIPv4Subnets: [String] { get }
     var activeVPNNames: [String] { get }
+    var hasUnidentifiedTunnel: Bool { get }
     var onPathChange: (() -> Void)? { get set }
 
     func canReachServer(for url: URL, timeout: TimeInterval) async -> Bool

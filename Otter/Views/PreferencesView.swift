@@ -53,6 +53,7 @@ struct ShareManagementView: View {
     @State private var isShowingActivityLog = false
     @State private var isShowingConnectionDoctor = false
     @State private var isShowingOnboarding = false
+    @State private var editingServerShareIDs: [NetworkShare.ID] = []
     @Namespace private var selectionHighlightNamespace
     @State private var rowFrames: [NetworkShare.ID: CGRect] = [:]
 
@@ -130,6 +131,14 @@ struct ShareManagementView: View {
                     }
                     .disabled(settings.isManagedShare(id: selectedShare.id))
                     .help("Share Settings")
+                } else if let selectedServerGroup {
+                    Button {
+                        editAllShares(in: selectedServerGroup)
+                    } label: {
+                        Label("Edit All Shares…", systemImage: "gearshape.2")
+                    }
+                    .disabled(editableShares(in: selectedServerGroup).isEmpty)
+                    .help("Edit every share on this server")
                 }
 
                 Button {
@@ -171,16 +180,25 @@ struct ShareManagementView: View {
         .sheet(item: $appModel.editorRequest) { request in
             let editingShare = share(for: request)
 
-            ShareEditorView(share: editingShare) { savedShare in
+            ShareEditorView(
+                share: editingShare,
+                appliesToShareCount: editingServerShareIDs.isEmpty ? nil : editingServerShareIDs.count
+            ) { savedShare in
+                let isServerEdit = !editingServerShareIDs.isEmpty
                 if settings.share(id: savedShare.id) == nil {
                     settings.addShare(savedShare)
                 } else {
                     settings.updateShare(savedShare)
                 }
 
-                selection = .share(savedShare.id)
+                applyServerSettings(from: savedShare)
+
+                if !isServerEdit {
+                    selection = .share(savedShare.id)
+                }
                 appModel.editorRequest = nil
             } onCancel: {
+                editingServerShareIDs.removeAll()
                 appModel.editorRequest = nil
             }
             .id(request.id)
@@ -411,9 +429,40 @@ struct ShareManagementView: View {
     }
 
     private func selectShare(for request: ShareEditorRequest) {
+        guard editingServerShareIDs.isEmpty else { return }
         if case let .edit(id) = request.mode {
             selection = .share(id)
         }
+    }
+
+    private func editableShares(in group: NetworkShareServerGroup) -> [NetworkShare] {
+        group.shares.filter { share in
+            settings.share(id: share.id) != nil && !settings.isManagedShare(id: share.id)
+        }
+    }
+
+    private func editAllShares(in group: NetworkShareServerGroup) {
+        let editableShares = editableShares(in: group)
+        guard let sourceShare = editableShares.first else { return }
+
+        editingServerShareIDs = editableShares.map(\.id)
+        appModel.editorRequest = ShareEditorRequest(mode: .edit(sourceShare.id))
+    }
+
+    private func applyServerSettings(from source: NetworkShare) {
+        guard !editingServerShareIDs.isEmpty else { return }
+
+        for shareID in editingServerShareIDs where shareID != source.id {
+            settings.updateShare(id: shareID) { share in
+                share.keepMounted = source.keepMounted
+                share.mountAtLaunch = source.mountAtLaunch
+                share.autoConnectWhenReachable = source.autoConnectWhenReachable
+                share.wakeOnLAN = source.wakeOnLAN
+                share.rules = source.rules
+            }
+        }
+
+        editingServerShareIDs.removeAll()
     }
 
     private var defaultSelection: ShareManagementSelection? {

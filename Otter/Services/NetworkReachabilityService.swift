@@ -22,7 +22,7 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
         }
 
         if hasUnidentifiedTunnel {
-            return "Tunnel detected (not used for share rules)"
+            return "VPN tunnel (profile name unavailable)"
         }
 
         return "None"
@@ -199,19 +199,22 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
         let connectedServiceNames = VPNServiceDiscovery.connectedVPNServiceNames()
         let hasActiveTunnel = !activeVPNInterfaceNames.isEmpty
 
-        var names = Set(VPNServiceDiscovery.vpnServiceNames(for: activeVPNInterfaceNames))
-        names.formUnion(connectedServiceNames)
+        var profileNames = Set(VPNServiceDiscovery.vpnServiceNames(for: activeVPNInterfaceNames))
+        profileNames.formUnion(connectedServiceNames)
+        let hasIdentifiedProfile = !profileNames.isEmpty
+        var displayNames = profileNames
 
         // Network Extension VPNs (Tailscale, WireGuard, ...) don't appear as
         // SystemConfiguration services, so fall back to naming them by the VPN
         // apps that are currently running while a tunnel interface is active.
-        if hasActiveTunnel && names.isEmpty {
-            names.formUnion(VPNServiceDiscovery.runningVPNAppNames())
+        if hasActiveTunnel && displayNames.isEmpty {
+            displayNames.formUnion(VPNServiceDiscovery.runningVPNAppNames())
         }
 
         let identity = VPNConnectionIdentity(
             hasActiveTunnel: hasActiveTunnel,
-            identifiedNames: names
+            identifiedNames: displayNames,
+            hasIdentifiedProfile: hasIdentifiedProfile
         )
 
         return NetworkDetailsSnapshot(

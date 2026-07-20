@@ -256,7 +256,7 @@ final class NetworkShareTests: XCTestCase {
         XCTAssertEqual(DraftShare(share: share).pauseState, .paused(until: resumeAt))
     }
 
-    func testEditorDraftKeepsNetworkAndNamedVPNConditionsIndependent() {
+    func testEditorDraftKeepsNetworkAndVPNConnectionPathsIndependent() {
         let networkOnlyShare = NetworkShare(
             displayName: "Media",
             urlString: "smb://server.local/Media",
@@ -448,7 +448,7 @@ final class ShareRulesEvaluationTests: XCTestCase {
         XCTAssertFalse(foreignEthernet.allowsConnection)
     }
 
-    func testNamedVPNRuleOnlyMatchesThatVPN() {
+    func testConfiguredVPNPathAcceptsIdentifiedAndUnidentifiedTunnels() {
         let rules = ShareRules(vpnRuleEnabled: true, vpnName: "VPN A")
 
         let onVPNA = rules.evaluate(currentWiFiNetworkName: nil, isVPNConnected: true, activeVPNNames: ["VPN A"])
@@ -456,12 +456,16 @@ final class ShareRulesEvaluationTests: XCTestCase {
         XCTAssertTrue(onVPNA.shouldAttemptMount)
 
         let onVPNB = rules.evaluate(currentWiFiNetworkName: nil, isVPNConnected: true, activeVPNNames: ["VPN B"])
-        XCTAssertFalse(onVPNB.allowsConnection)
+        XCTAssertTrue(onVPNB.allowsConnection)
 
-        // Regression: an active but unnamed VPN must not satisfy a named rule,
-        // or rules for different VPNs become indistinguishable.
+        // App-managed Network Extensions such as WireGuard can expose a live
+        // tunnel without exposing their profile name to Otter.
         let onUnnamedVPN = rules.evaluate(currentWiFiNetworkName: nil, isVPNConnected: true, activeVPNNames: [])
-        XCTAssertFalse(onUnnamedVPN.allowsConnection)
+        XCTAssertTrue(onUnnamedVPN.allowsConnection)
+
+        let disconnected = rules.evaluate(currentWiFiNetworkName: nil, isVPNConnected: false, activeVPNNames: [])
+        XCTAssertFalse(disconnected.allowsConnection)
+        XCTAssertEqual(disconnected.blockedStatus, .waitingForVPN("VPN A"))
     }
 
     func testUnnamedVPNRuleNeverMatchesAnArbitraryTunnel() {
@@ -472,14 +476,14 @@ final class ShareRulesEvaluationTests: XCTestCase {
         XCTAssertFalse(connected.shouldAttemptMount)
         XCTAssertEqual(
             connected.blockedStatus,
-            .waitingForAllowedNetwork("a named VPN selected in this share’s settings")
+            .waitingForAllowedNetwork("a VPN selected in this share’s settings")
         )
 
         let disconnected = rules.evaluate(currentWiFiNetworkName: nil, isVPNConnected: false, activeVPNNames: [])
         XCTAssertFalse(disconnected.allowsConnection)
         XCTAssertEqual(
             disconnected.blockedStatus,
-            .waitingForAllowedNetwork("a named VPN selected in this share’s settings")
+            .waitingForAllowedNetwork("a VPN selected in this share’s settings")
         )
     }
 
@@ -500,23 +504,24 @@ final class ShareRulesEvaluationTests: XCTestCase {
         // Unregistered Wi-Fi, no VPN -> blocked
         let foreignWifiNoVPN = rules.evaluate(currentWiFiNetworkName: "Coffee Shop", isVPNConnected: false, activeVPNNames: [])
         XCTAssertFalse(foreignWifiNoVPN.allowsConnection)
-        XCTAssertEqual(foreignWifiNoVPN.blockedStatus, .waitingForAllowedNetwork("the registered network or VPN Work VPN"))
+        XCTAssertEqual(foreignWifiNoVPN.blockedStatus, .waitingForAllowedNetwork("the registered network or VPN “Work VPN”"))
 
         // Unregistered Wi-Fi, correct VPN -> succeeds
         let foreignWifiWithVPN = rules.evaluate(currentWiFiNetworkName: "Coffee Shop", isVPNConnected: true, activeVPNNames: ["Work VPN"])
         XCTAssertTrue(foreignWifiWithVPN.allowsConnection)
 
-        // Unregistered Wi-Fi, wrong VPN -> blocked
+        // Otter cannot identify another app's profile reliably. A live tunnel
+        // triggers the server check; an unusable VPN fails at reachability.
         let foreignWifiWithWrongVPN = rules.evaluate(currentWiFiNetworkName: "Coffee Shop", isVPNConnected: true, activeVPNNames: ["Other VPN"])
-        XCTAssertFalse(foreignWifiWithWrongVPN.allowsConnection)
+        XCTAssertTrue(foreignWifiWithWrongVPN.allowsConnection)
     }
 }
 
 final class VPNConnectionIdentityTests: XCTestCase {
-    func testVPNRequiredStatusUsesDirectRecoveryWording() {
+    func testWaitingForVPNStatusUsesDirectRecoveryWording() {
         let status = ShareStatus.waitingForVPN("Tunnel to Work")
 
-        XCTAssertEqual(status.label, "VPN required")
+        XCTAssertEqual(status.label, "Waiting for VPN")
         XCTAssertEqual(status.detail, "Connect to “Tunnel to Work” to access this server.")
         XCTAssertTrue(status.needsAttention)
     }
@@ -529,10 +534,10 @@ final class VPNConnectionIdentityTests: XCTestCase {
         XCTAssertTrue(message.contains("Connect it manually"))
     }
 
-    func testUnidentifiedTunnelDoesNotCountAsVPN() {
+    func testUnidentifiedTunnelCountsAsConnectedWithoutInventingAName() {
         let identity = VPNConnectionIdentity(hasActiveTunnel: true, identifiedNames: [])
 
-        XCTAssertFalse(identity.isConnected)
+        XCTAssertTrue(identity.isConnected)
         XCTAssertTrue(identity.hasUnidentifiedTunnel)
         XCTAssertTrue(identity.activeNames.isEmpty)
     }
@@ -548,7 +553,30 @@ final class VPNConnectionIdentityTests: XCTestCase {
         XCTAssertEqual(identity.activeNames, ["Personal VPN", "Work VPN"])
     }
 
-    func testVPNVerificationRequiresTheSelectedName() {
+    func testProviderNameDoesNotPretendToIdentifyTheActiveProfile() {
+        let identity = VPNConnectionIdentity(
+            hasActiveTunnel: true,
+            identifiedNames: ["WireGuard"],
+            hasIdentifiedProfile: false
+        )
+
+        XCTAssertTrue(identity.isConnected)
+        XCTAssertTrue(identity.hasUnidentifiedTunnel)
+        XCTAssertEqual(identity.activeNames, ["WireGuard"])
+    }
+
+    func testSystemReportedVPNNameCountsAsConnectedDuringInterfaceRefresh() {
+        let identity = VPNConnectionIdentity(
+            hasActiveTunnel: false,
+            identifiedNames: ["Work VPN"]
+        )
+
+        XCTAssertTrue(identity.isConnected)
+        XCTAssertFalse(identity.hasUnidentifiedTunnel)
+        XCTAssertEqual(identity.activeNames, ["Work VPN"])
+    }
+
+    func testVPNVerificationAcceptsAnActiveTunnelBeforeServerCheck() {
         let connected = VPNVerificationResult.connected("Tunnel to Work")
         let different = VPNVerificationResult.differentVPN(
             required: "Tunnel to Work",
@@ -557,11 +585,11 @@ final class VPNConnectionIdentityTests: XCTestCase {
         let unidentified = VPNVerificationResult.unidentifiedTunnel("Tunnel to Work")
 
         XCTAssertTrue(connected.isVerified)
-        XCTAssertFalse(different.isVerified)
-        XCTAssertFalse(unidentified.isVerified)
-        XCTAssertEqual(connected.message, "Connected to “Tunnel to Work”.")
-        XCTAssertTrue(different.message.contains("not “Tunnel to Work”"))
-        XCTAssertTrue(unidentified.message.contains("did not identify"))
+        XCTAssertTrue(different.isVerified)
+        XCTAssertTrue(unidentified.isVerified)
+        XCTAssertTrue(connected.message.contains("will check the server"))
+        XCTAssertTrue(different.message.contains("will check the server"))
+        XCTAssertTrue(unidentified.message.contains("will check the server"))
     }
 }
 
@@ -816,6 +844,174 @@ final class ShareMonitorRetryTests: XCTestCase {
     }
 
     @MainActor
+    func testActiveUnidentifiedTunnelTriggersServerCheckAndMount() async {
+        let suiteName = "OtterTests.ShareMonitorRetryTests.UnidentifiedVPN"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            rules: ShareRules(vpnRuleEnabled: true, vpnName: "Tunnel to Work")
+        )
+        settings.addShare(share)
+        let network = StubNetworkReachability(
+            isOnline: true,
+            isReachable: true,
+            isVPNConnected: true,
+            activeVPNNames: []
+        )
+        let vpnConnectionService = StubVPNConnectionService()
+        let mountService = StubMountService(
+            mountResult: URL(fileURLWithPath: "/Volumes/Media", isDirectory: true)
+        )
+        let monitor = ShareMonitor(
+            settings: settings,
+            mountService: mountService,
+            wakeOnLANService: StubWakeOnLANService(),
+            vpnConnectionService: vpnConnectionService,
+            networkService: network,
+            notificationService: RecordingNotificationService(),
+            eventLog: ShareEventLog(defaults: defaults),
+            defaults: defaults
+        )
+
+        await monitor.evaluate(share, reason: .timer)
+
+        let vpnConnectionNames = await vpnConnectionService.connectionNames
+        let mountCallCount = await mountService.mountCallCount
+        XCTAssertTrue(vpnConnectionNames.isEmpty)
+        XCTAssertEqual(network.canReachCallCount, 1)
+        XCTAssertEqual(mountCallCount, 1)
+        XCTAssertEqual(monitor.status(for: share), .connected)
+    }
+
+    @MainActor
+    func testUnreachableServerOverDifferentVPNWaitsQuietly() async {
+        let suiteName = "OtterTests.ShareMonitorRetryTests.WrongVPN"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            rules: ShareRules(vpnRuleEnabled: true, vpnName: "Tunnel to Work")
+        )
+        settings.addShare(share)
+        let network = StubNetworkReachability(
+            isOnline: true,
+            isReachable: false,
+            isVPNConnected: true,
+            activeVPNNames: ["Other VPN"]
+        )
+        let vpnConnectionService = StubVPNConnectionService()
+        let mountService = StubMountService(
+            mountResult: URL(fileURLWithPath: "/Volumes/Media", isDirectory: true)
+        )
+        let monitor = ShareMonitor(
+            settings: settings,
+            mountService: mountService,
+            wakeOnLANService: StubWakeOnLANService(),
+            vpnConnectionService: vpnConnectionService,
+            networkService: network,
+            notificationService: RecordingNotificationService(),
+            eventLog: ShareEventLog(defaults: defaults),
+            defaults: defaults
+        )
+
+        await monitor.evaluate(share, reason: .timer)
+
+        let vpnConnectionNames = await vpnConnectionService.connectionNames
+        let mountCallCount = await mountService.mountCallCount
+        XCTAssertTrue(vpnConnectionNames.isEmpty)
+        XCTAssertEqual(mountCallCount, 0)
+        XCTAssertEqual(monitor.status(for: share), .waitingForAccess)
+        XCTAssertFalse(monitor.status(for: share).needsAttention)
+        XCTAssertEqual(monitor.runtimeState(for: share).failureCount, 0)
+        XCTAssertNil(monitor.runtimeState(for: share).nextRetryDate)
+
+        await monitor.evaluate(share, reason: .timer)
+
+        XCTAssertEqual(network.canReachCallCount, 2)
+        XCTAssertEqual(monitor.runtimeState(for: share).failureCount, 0)
+        XCTAssertEqual(monitor.status(for: share), .waitingForAccess)
+    }
+
+    @MainActor
+    func testUnreachableServerOverConfirmedVPNRemainsAProblem() async {
+        let suiteName = "OtterTests.ShareMonitorRetryTests.ConfirmedVPNUnavailable"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            rules: ShareRules(vpnRuleEnabled: true, vpnName: "Tunnel to Work")
+        )
+        settings.addShare(share)
+        let network = StubNetworkReachability(
+            isOnline: true,
+            isReachable: false,
+            isVPNConnected: true,
+            activeVPNNames: ["Tunnel to Work"]
+        )
+        let monitor = ShareMonitor(
+            settings: settings,
+            mountService: StubMountService(),
+            wakeOnLANService: StubWakeOnLANService(),
+            networkService: network,
+            notificationService: RecordingNotificationService(),
+            eventLog: ShareEventLog(defaults: defaults),
+            defaults: defaults
+        )
+
+        await monitor.evaluate(share, reason: .timer)
+
+        XCTAssertEqual(monitor.status(for: share), .waitingForServerOnVPN)
+        XCTAssertTrue(monitor.status(for: share).needsAttention)
+        XCTAssertEqual(monitor.runtimeState(for: share).failureCount, 1)
+        XCTAssertNotNil(monitor.runtimeState(for: share).nextRetryDate)
+    }
+
+    @MainActor
+    func testManualAttemptOverDifferentVPNReportsTheFailure() async {
+        let suiteName = "OtterTests.ShareMonitorRetryTests.ManualWrongVPN"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            rules: ShareRules(vpnRuleEnabled: true, vpnName: "Tunnel to Work")
+        )
+        settings.addShare(share)
+        let network = StubNetworkReachability(
+            isOnline: true,
+            isReachable: false,
+            isVPNConnected: true,
+            activeVPNNames: ["Other VPN"]
+        )
+        let monitor = ShareMonitor(
+            settings: settings,
+            mountService: StubMountService(),
+            wakeOnLANService: StubWakeOnLANService(),
+            networkService: network,
+            notificationService: RecordingNotificationService(),
+            eventLog: ShareEventLog(defaults: defaults),
+            defaults: defaults
+        )
+
+        await monitor.evaluate(share, reason: .manual, force: true)
+
+        XCTAssertEqual(monitor.status(for: share), .waitingForServerOnVPN)
+        XCTAssertTrue(monitor.status(for: share).needsAttention)
+    }
+
+    @MainActor
     func testUnnamedVPNRuleDoesNotConnectOrMount() async {
         let suiteName = "OtterTests.ShareMonitorRetryTests.UnnamedVPN"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -849,7 +1045,7 @@ final class ShareMonitorRetryTests: XCTestCase {
         XCTAssertEqual(mountCallCount, 0)
         XCTAssertEqual(
             monitor.status(for: share),
-            .waitingForAllowedNetwork("a named VPN selected in this share’s settings")
+            .waitingForAllowedNetwork("a VPN selected in this share’s settings")
         )
     }
 
@@ -1003,6 +1199,50 @@ final class ConnectionDoctorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(mountCallCount, 1)
         XCTAssertEqual(mountStep?.status, .passed)
         XCTAssertFalse(report.hasFailures)
+    }
+
+    @MainActor
+    func testUnidentifiedVPNTunnelPassesConditionsBeforeServerCheck() async {
+        let suiteName = "OtterTests.ConnectionDoctorTests.UnidentifiedVPN"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://192.0.2.10/Media",
+            mountPath: "/Volumes/Media",
+            rules: ShareRules(vpnRuleEnabled: true, vpnName: "Tunnel to Work")
+        )
+        settings.addShare(share)
+        let mountService = StubMountService()
+        let network = StubNetworkReachability(
+            isOnline: true,
+            isReachable: true,
+            isVPNConnected: true,
+            activeVPNNames: []
+        )
+        let monitor = makeMonitor(
+            settings: settings,
+            mountService: mountService,
+            network: network,
+            defaults: defaults
+        )
+        let doctor = ConnectionDoctor(
+            settings: settings,
+            mountService: mountService,
+            mountHealthService: StubMountHealthService(),
+            networkService: network,
+            monitor: monitor,
+            hostResolver: StubHostResolver(result: nil)
+        )
+
+        let report = await doctor.run(for: share, attemptMount: false)
+        let conditions = report.steps.first { $0.title == "Connection conditions" }
+        let reachability = report.steps.first { $0.title == "SMB reachability" }
+
+        XCTAssertEqual(conditions?.status, .passed)
+        XCTAssertTrue(conditions?.detail.contains("did not expose its profile name") == true)
+        XCTAssertEqual(reachability?.status, .passed)
     }
 
     @MainActor
@@ -2046,6 +2286,7 @@ private final class StubNetworkReachability: NetworkReachabilityProviding {
     private(set) var isVPNConnected: Bool
     let currentIPv4Subnets: [String]
     private(set) var activeVPNNames: [String]
+    private(set) var hasUnidentifiedTunnel: Bool
     var onPathChange: (() -> Void)?
     let isReachable: Bool
     private(set) var canReachCallCount = 0
@@ -2058,6 +2299,7 @@ private final class StubNetworkReachability: NetworkReachabilityProviding {
         isVPNConnected: Bool = false,
         currentIPv4Subnets: [String] = [],
         activeVPNNames: [String] = [],
+        hasUnidentifiedTunnel: Bool? = nil,
         vpnNameToActivateOnRefresh: String? = nil
     ) {
         self.isOnline = isOnline
@@ -2066,6 +2308,8 @@ private final class StubNetworkReachability: NetworkReachabilityProviding {
         self.isVPNConnected = isVPNConnected
         self.currentIPv4Subnets = currentIPv4Subnets
         self.activeVPNNames = activeVPNNames
+        self.hasUnidentifiedTunnel = hasUnidentifiedTunnel
+            ?? (isVPNConnected && activeVPNNames.isEmpty)
         self.vpnNameToActivateOnRefresh = vpnNameToActivateOnRefresh
     }
 
@@ -2080,6 +2324,7 @@ private final class StubNetworkReachability: NetworkReachabilityProviding {
         guard let vpnNameToActivateOnRefresh else { return }
         isVPNConnected = true
         activeVPNNames = [vpnNameToActivateOnRefresh]
+        hasUnidentifiedTunnel = false
     }
 }
 

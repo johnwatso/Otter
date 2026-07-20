@@ -323,6 +323,11 @@
           setManualLink(releasesUrl, "View Otter releases on GitHub.", "_blank");
         }
 
+        function setReleaseCheckFailed() {
+          statusText.textContent = "Couldn’t check the latest release automatically.";
+          setManualLink(releasesUrl, "Open Otter releases on GitHub to download.", "_blank");
+        }
+
         function startDownload(url) {
           statusText.textContent = "Your download is starting automatically.";
           setManualLink(url, "Click here to download Otter manually.", "download-target");
@@ -330,12 +335,28 @@
         }
 
         fetch(apiUrl, {
-          headers: { "Accept": "application/vnd.github+json" }
+          headers: {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28"
+          }
         })
           .then(function (response) {
-            return response.ok ? response.json() : Promise.reject();
+            if (response.ok) {
+              return response.json();
+            }
+
+            if (response.status === 404) {
+              return null;
+            }
+
+            throw new Error("GitHub release check failed with status " + response.status);
           })
           .then(function (release) {
+            if (!release) {
+              setNoRelease();
+              return;
+            }
+
             var assets = release.assets || [];
             var download = assets.find(function (asset) {
               return /^Otter-.*\.(zip|dmg)$/i.test(asset.name || "");
@@ -352,7 +373,7 @@
             setManualLink(release.html_url || releasesUrl, "Open the latest Otter release.", "_blank");
           })
           .catch(function () {
-            setNoRelease();
+            setReleaseCheckFailed();
           });
       })();
     </script>

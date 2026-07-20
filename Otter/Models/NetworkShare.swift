@@ -577,17 +577,17 @@ extension ShareRules {
             // compare against, so any wired connection keeps counting as a match.
             let isLegacyEthernet = registeredSubnets.isEmpty && currentNetworkName == nil && !isVPNConnected
 
-            let isVPNActive = vpnRuleEnabled && (requiredVPNName.map { requiredName in
-                activeVPNNames.contains { activeVPNName in
-                    activeVPNName.localizedCaseInsensitiveCompare(requiredName) == .orderedSame
-                }
-            } ?? false)
+            // macOS does not expose the profile name of a tunnel created by
+            // another app. A configured VPN therefore acts as an alternative
+            // connection path: a live tunnel triggers the server check, while
+            // vpnName remains the service Otter starts or asks the user to open.
+            let isVPNActive = vpnRuleEnabled && requiredVPNName != nil && isVPNConnected
 
             let matches = matchesWiFiName || matchesRegisteredSubnet || isLegacyEthernet || isVPNActive
 
             if !matches {
                 let requirement = requiredVPNName.map {
-                    "the registered network or VPN \($0)"
+                    "the registered network or VPN “\($0)”"
                 } ?? "the registered network"
                 return ShareRuleEvaluation(
                     allowsConnection: false,
@@ -609,20 +609,18 @@ extension ShareRules {
             guard let requiredVPNName else {
                 return ShareRuleEvaluation(
                     allowsConnection: false,
-                    blockedStatus: .waitingForAllowedNetwork("a named VPN selected in this share’s settings"),
+                    blockedStatus: .waitingForAllowedNetwork("a VPN selected in this share’s settings"),
                     shouldDisconnectMountedShare: true,
                     shouldAttemptMount: false
                 )
             }
 
-            let matches = activeVPNNames.contains { activeVPNName in
-                activeVPNName.localizedCaseInsensitiveCompare(requiredVPNName) == .orderedSame
-            }
+            let matches = isVPNConnected
 
             if !matches {
                 return ShareRuleEvaluation(
                     allowsConnection: false,
-                    blockedStatus: .waitingForAllowedNetwork("VPN \(requiredVPNName)"),
+                    blockedStatus: .waitingForVPN(requiredVPNName),
                     shouldDisconnectMountedShare: true,
                     shouldAttemptMount: false
                 )

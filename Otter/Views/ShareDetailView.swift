@@ -56,7 +56,7 @@ struct ShareDetailView: View {
                     .foregroundStyle(.secondary)
                     .padding(.leading, 14)
 
-                    if case .waitingForVPN = status {
+                    if status.offersVPNSettingsAction {
                         Button {
                             openVPNSettings()
                         } label: {
@@ -147,7 +147,7 @@ struct ShareDetailView: View {
                                 DetailRow(label: "Wi-Fi", value: ssid)
                             }
                             if currentShare.rules.hasVPNRule {
-                                DetailRow(label: "VPN", value: currentShare.rules.requiredVPNName ?? "Selection required")
+                                DetailRow(label: "VPN to connect", value: currentShare.rules.requiredVPNName ?? "Selection required")
                             }
                         } else {
                             DetailRow(label: "Connect on", value: "Any network")
@@ -167,11 +167,11 @@ struct ShareDetailView: View {
     private var connectionConditionLabel: String {
         switch (currentShare.rules.hasNetworkRule, currentShare.rules.hasVPNRule) {
         case (true, true):
-            return "Registered network or named VPN"
+            return "Registered network or VPN"
         case (true, false):
             return "Registered network"
         case (false, true):
-            return "Named VPN"
+            return "VPN connection"
         case (false, false):
             return "Any network"
         }

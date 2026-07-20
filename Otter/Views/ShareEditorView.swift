@@ -21,15 +21,18 @@ struct ShareEditorView: View {
     @State private var shareBrowserMessage: String?
 
     private let sourceShare: NetworkShare?
+    private let appliesToShareCount: Int?
     let onSave: (NetworkShare) -> Void
     let onCancel: () -> Void
 
     init(
         share: NetworkShare?,
+        appliesToShareCount: Int? = nil,
         onSave: @escaping (NetworkShare) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.sourceShare = share
+        self.appliesToShareCount = appliesToShareCount
         _draft = State(initialValue: DraftShare(share: share))
         self.onSave = onSave
         self.onCancel = onCancel
@@ -38,10 +41,10 @@ struct ShareEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(isEditing ? "Settings" : "New Share")
+                Text(editorTitle)
                     .font(.title2)
                     .fontWeight(.bold)
-                if isEditing {
+                if isEditing && appliesToShareCount == nil {
                     Text("— \(draft.displayName)")
                         .font(.title2)
                         .foregroundStyle(.secondary)
@@ -138,21 +141,23 @@ struct ShareEditorView: View {
                     }
                 }
 
-                // General Section
-                Section("General") {
-                    TextField("Share name", text: $draft.displayName, prompt: Text(inferredDisplayName ?? "Dawn"))
-                    TextField("Server address", text: $draft.urlString, prompt: Text("smb://server.local/Dawn"))
-                    TextField("Share path", text: $draft.mountPath, prompt: Text(inferredMountPath))
-                    LabeledContent("Protocol", value: "SMB")
-                    
-                    if isEditing {
-                        Button {
-                            chooseMountedShare()
-                        } label: {
-                            Label("Auto-fill details from Finder...", systemImage: "arrow.down.doc.fill")
+                if appliesToShareCount == nil {
+                    // General Section
+                    Section("General") {
+                        TextField("Share name", text: $draft.displayName, prompt: Text(inferredDisplayName ?? "Dawn"))
+                        TextField("Server address", text: $draft.urlString, prompt: Text("smb://server.local/Dawn"))
+                        TextField("Share path", text: $draft.mountPath, prompt: Text(inferredMountPath))
+                        LabeledContent("Protocol", value: "SMB")
+
+                        if isEditing {
+                            Button {
+                                chooseMountedShare()
+                            } label: {
+                                Label("Auto-fill details from Finder...", systemImage: "arrow.down.doc.fill")
+                            }
+                            .tahoeCompactActionButton()
+                            .padding(.vertical, 2)
                         }
-                        .tahoeCompactActionButton()
-                        .padding(.vertical, 2)
                     }
                 }
 
@@ -184,9 +189,9 @@ struct ShareEditorView: View {
                     }
                 }
 
-                // Conditions Section
-                Section("Conditions") {
-                    Toggle("Only connect on the registered network", isOn: Binding(
+                // Connection Paths Section
+                Section("Connect when") {
+                    Toggle("On the registered network", isOn: Binding(
                         get: { draft.limitsToRegisteredNetwork },
                         set: { isOn in
                             draft.limitsToRegisteredNetwork = isOn
@@ -201,7 +206,7 @@ struct ShareEditorView: View {
 
                     if draft.limitsToRegisteredNetwork {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Otter registers the network this share was set up on and only connects when your Mac is back on that network — Wi-Fi or Ethernet.")
+                            Text("Otter registers the network this share was set up on and connects when your Mac is back on that network — Wi-Fi or Ethernet.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
 
@@ -248,7 +253,7 @@ struct ShareEditorView: View {
                         .padding(.leading, 20)
                     }
 
-                    Toggle("Connect through a VPN", isOn: Binding(
+                    Toggle("A VPN is connected", isOn: Binding(
                         get: { draft.usesVPNRule },
                         set: { isOn in
                             draft.usesVPNRule = isOn
@@ -260,11 +265,11 @@ struct ShareEditorView: View {
 
                     if draft.usesVPNRule {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Choose the specific VPN required to access this server. Otter connects it automatically when macOS allows it.")
+                            Text("Choose the VPN Otter should connect or ask for when this server isn’t available directly.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
 
-                            Picker("VPN", selection: vpnSelection) {
+                            Picker("VPN to connect", selection: vpnSelection) {
                                 Text("Choose a VPN…").tag(VPNNameSelection.unconfigured)
 
                                 ForEach(networkService.knownVPNNames, id: \.self) { vpnName in
@@ -328,80 +333,88 @@ struct ShareEditorView: View {
                         }
                         .padding(.leading, 20)
                     }
-                }
 
-                // Credentials Section
-                Section("Credentials") {
-                    HStack(spacing: 8) {
-                        Image(systemName: hasKeychainCredentials ? "checkmark.circle.fill" : "minus.circle")
-                            .foregroundStyle(hasKeychainCredentials ? .green : .secondary)
-                        Text(hasKeychainCredentials ? "Credentials found in macOS Keychain." : "No credentials found in macOS Keychain.")
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                    }
-                    if !hasKeychainCredentials {
-                        Text("To mount this share, connect once in Finder and select \"Remember this password in my keychain\".")
+                    if draft.limitsToRegisteredNetwork && draft.usesVPNRule {
+                        Text("Otter connects when either option is available.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
                 }
 
-                Section("Connection Readiness") {
-                    Button {
-                        testSetup()
-                    } label: {
-                        if isTestingSetup {
-                            HStack(spacing: 8) {
-                                ProgressView()
-                                    .controlSize(.small)
-                                Text("Testing Setup\u{2026}")
-                            }
-                        } else {
-                            Label("Test Setup", systemImage: "checkmark.circle.badge.questionmark")
+                // Credentials and diagnostics are specific to one share.
+                if appliesToShareCount == nil {
+                    Section("Credentials") {
+                        HStack(spacing: 8) {
+                            Image(systemName: hasKeychainCredentials ? "checkmark.circle.fill" : "minus.circle")
+                                .foregroundStyle(hasKeychainCredentials ? .green : .secondary)
+                            Text(hasKeychainCredentials ? "Credentials found in macOS Keychain." : "No credentials found in macOS Keychain.")
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                        }
+                        if !hasKeychainCredentials {
+                            Text("To mount this share, connect once in Finder and select \"Remember this password in my keychain\".")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
                         }
                     }
-                    .tahoeSecondaryActionButton()
-                    .disabled(isTestingSetup)
 
-                    Text("Checks the network, named VPN, credentials, SMB service, and mount. macOS may ask you to sign in or choose a share.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    Section("Connection Readiness") {
+                        Button {
+                            testSetup()
+                        } label: {
+                            if isTestingSetup {
+                                HStack(spacing: 8) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                    Text("Testing Setup\u{2026}")
+                                }
+                            } else {
+                                Label("Test Setup", systemImage: "checkmark.circle.badge.questionmark")
+                            }
+                        }
+                        .tahoeSecondaryActionButton()
+                        .disabled(isTestingSetup)
 
-                    if let readinessReport {
-                        ForEach(readinessReport.steps) { step in
-                            HStack(alignment: .top, spacing: 8) {
-                                Image(systemName: readinessSymbol(for: step.status))
-                                    .foregroundStyle(readinessColor(for: step.status))
-                                    .frame(width: 16)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(step.title)
-                                        .font(.subheadline.weight(.medium))
-                                    Text(step.detail)
+                        Text("Checks the network, VPN connection, credentials, SMB service, and mount. macOS may ask you to sign in or choose a share.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        if let readinessReport {
+                            ForEach(readinessReport.steps) { step in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Image(systemName: readinessSymbol(for: step.status))
+                                        .foregroundStyle(readinessColor(for: step.status))
+                                        .frame(width: 16)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(step.title)
+                                            .font(.subheadline.weight(.medium))
+                                        Text(step.detail)
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }
+
+                    // Advanced Section
+                    if let fallbackURL = fallbackURLString {
+                        Section("Advanced") {
+                            LabeledContent("Fallback IP", value: fallbackURL)
+
+                            if let host = hostFromURL, !NetworkShare.isIPAddress(host) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Label("VPN IP Fallback", systemImage: "info.circle")
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                    Text("Otter will resolve and cache this server's local IP address when connected locally. If you connect to your VPN later, Otter will use the cached IP address to bypass mDNS limits. Ensure your server has a static IP address, or this fallback may fail if the IP changes.")
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
-                                        .fixedSize(horizontal: false, vertical: true)
                                 }
+                                .padding(.top, 4)
                             }
-                            .padding(.vertical, 2)
-                        }
-                    }
-                }
-
-                // Advanced Section
-                if let fallbackURL = fallbackURLString {
-                    Section("Advanced") {
-                        LabeledContent("Fallback IP", value: fallbackURL)
-                        
-                        if let host = hostFromURL, !NetworkShare.isIPAddress(host) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Label("VPN IP Fallback", systemImage: "info.circle")
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                Text("Otter will resolve and cache this server's local IP address when connected locally. If you connect to your VPN later, Otter will use the cached IP address to bypass mDNS limits. Ensure your server has a static IP address, or this fallback may fail if the IP changes.")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.top, 4)
                         }
                     }
                 }
@@ -463,6 +476,13 @@ struct ShareEditorView: View {
                 discovery.stop()
             }
         }
+    }
+
+    private var editorTitle: String {
+        if let appliesToShareCount {
+            return "Settings for \(appliesToShareCount) Shares"
+        }
+        return isEditing ? "Settings" : "New Share"
     }
 
     private var finderSectionHeader: some View {
@@ -568,12 +588,14 @@ struct ShareEditorView: View {
     private var vpnRuleDescription: String {
         let vpnName = draft.vpnName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !vpnName.isEmpty, !networkService.canControlVPN(named: vpnName) {
-            return "Connect to this VPN when Otter asks. The share mounts automatically when the VPN becomes active."
+            return draft.limitsToRegisteredNetwork
+                ? "Away from the registered network, connect this VPN when Otter asks. Otter checks the server when a VPN connection becomes active."
+                : "Connect this VPN when Otter asks. Otter checks the server when a VPN connection becomes active."
         }
 
         return draft.limitsToRegisteredNetwork
-            ? "When the registered network is unavailable, Otter connects this VPN before mounting. No other VPN satisfies this rule."
-            : "Otter connects this VPN before mounting. No other VPN satisfies this rule."
+            ? "Away from the registered network, Otter connects this VPN and checks the server."
+            : "Otter connects this VPN and checks the server."
     }
 
     private var locationPermissionNotice: some View {

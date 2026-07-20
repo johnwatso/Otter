@@ -6,6 +6,8 @@ enum ShareStatus: Equatable {
     case waitingForNetwork
     case waitingForAllowedNetwork(String)
     case waitingForVPN(String)
+    case waitingForAccess
+    case waitingForServerOnVPN
     case paused(Date?)
     case wakePacketSent
     case reconnecting
@@ -20,9 +22,13 @@ enum ShareStatus: Equatable {
         case .waitingForNetwork:
             "Waiting for network"
         case .waitingForAllowedNetwork:
-            "Waiting for network rule"
+            "Waiting for connection"
         case .waitingForVPN:
-            "VPN required"
+            "Waiting for VPN"
+        case .waitingForAccess:
+            "Waiting for access"
+        case .waitingForServerOnVPN:
+            "Server unavailable"
         case .paused:
             "Paused"
         case .wakePacketSent:
@@ -40,6 +46,10 @@ enum ShareStatus: Equatable {
             return "Connect to \(requirement) to mount this share."
         case let .waitingForVPN(name):
             return "Connect to “\(name)” to access this server."
+        case .waitingForAccess:
+            return "This server isn’t available on the current network or VPN. Otter will keep checking quietly."
+        case .waitingForServerOnVPN:
+            return "A VPN is connected, but the server isn’t responding. Check that the correct VPN is active."
         case let .paused(resumeAt):
             if let resumeAt {
                 return "Automatic mounting resumes \(resumeAt.formatted(date: .abbreviated, time: .shortened))."
@@ -58,7 +68,7 @@ enum ShareStatus: Equatable {
         switch self {
         case .failed:
             "Last error"
-        case .connected, .disconnected, .waitingForNetwork, .waitingForAllowedNetwork, .waitingForVPN, .paused, .wakePacketSent, .reconnecting:
+        case .connected, .disconnected, .waitingForNetwork, .waitingForAllowedNetwork, .waitingForVPN, .waitingForAccess, .waitingForServerOnVPN, .paused, .wakePacketSent, .reconnecting:
             "Details"
         }
     }
@@ -74,6 +84,10 @@ enum ShareStatus: Equatable {
         case .waitingForAllowedNetwork:
             "externaldrive.badge.minus"
         case .waitingForVPN:
+            "lock.shield.fill"
+        case .waitingForAccess:
+            "externaldrive.badge.minus"
+        case .waitingForServerOnVPN:
             "lock.shield.fill"
         case .paused:
             "pause.circle.fill"
@@ -99,6 +113,10 @@ enum ShareStatus: Equatable {
             "pause.circle.fill"
         case .waitingForVPN:
             "exclamationmark.circle.fill"
+        case .waitingForAccess:
+            "pause.circle.fill"
+        case .waitingForServerOnVPN:
+            "exclamationmark.circle.fill"
         case .paused:
             "pause.circle.fill"
         case .wakePacketSent:
@@ -122,6 +140,10 @@ enum ShareStatus: Equatable {
             .secondary
         case .waitingForVPN:
             .orange
+        case .waitingForAccess:
+            .secondary
+        case .waitingForServerOnVPN:
+            .orange
         case .paused:
             .indigo
         case .wakePacketSent:
@@ -135,9 +157,18 @@ enum ShareStatus: Equatable {
 
     var needsAttention: Bool {
         switch self {
-        case .failed, .waitingForNetwork, .waitingForVPN:
+        case .failed, .waitingForNetwork, .waitingForVPN, .waitingForServerOnVPN:
             true
-        case .connected, .disconnected, .waitingForAllowedNetwork, .paused, .wakePacketSent, .reconnecting:
+        case .connected, .disconnected, .waitingForAllowedNetwork, .waitingForAccess, .paused, .wakePacketSent, .reconnecting:
+            false
+        }
+    }
+
+    var offersVPNSettingsAction: Bool {
+        switch self {
+        case .waitingForVPN, .waitingForAccess, .waitingForServerOnVPN:
+            true
+        default:
             false
         }
     }

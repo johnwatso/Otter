@@ -126,19 +126,23 @@ enum VPNVerificationResult: Equatable {
     var message: String {
         switch self {
         case let .connected(name):
-            "Connected to \u{201c}\(name)\u{201d}."
-        case let .differentVPN(required, active):
-            "Otter detected \u{201c}\(active.joined(separator: ", "))\u{201d}, not \u{201c}\(required)\u{201d}."
-        case let .unidentifiedTunnel(name):
-            "A VPN tunnel is active, but macOS did not identify it as \u{201c}\(name)\u{201d}."
+            "A VPN connection is active (\u{201c}\(name)\u{201d}). Otter will check the server."
+        case let .differentVPN(_, active):
+            "A VPN connection is active (\u{201c}\(active.joined(separator: ", "))\u{201d}). Otter will check the server."
+        case .unidentifiedTunnel:
+            "A VPN tunnel is active. Otter will check the server."
         case let .disconnected(name):
             "Connect to \u{201c}\(name)\u{201d}, then verify again."
         }
     }
 
     var isVerified: Bool {
-        if case .connected = self { return true }
-        return false
+        switch self {
+        case .connected, .differentVPN, .unidentifiedTunnel:
+            true
+        case .disconnected:
+            false
+        }
     }
 }
 

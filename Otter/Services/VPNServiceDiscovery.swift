@@ -12,12 +12,20 @@ struct VPNConnectionIdentity: Equatable, Sendable {
     let isConnected: Bool
     let hasUnidentifiedTunnel: Bool
 
-    init(hasActiveTunnel: Bool, identifiedNames: Set<String>) {
+    init(
+        hasActiveTunnel: Bool,
+        identifiedNames: Set<String>,
+        hasIdentifiedProfile: Bool? = nil
+    ) {
         activeNames = identifiedNames.sorted {
             $0.localizedStandardCompare($1) == .orderedAscending
         }
-        isConnected = !activeNames.isEmpty
-        hasUnidentifiedTunnel = hasActiveTunnel && activeNames.isEmpty
+        // A third-party Network Extension can expose a live tunnel interface
+        // without exposing its profile name to Otter. The tunnel still counts
+        // as connected; its name is descriptive rather than authoritative.
+        isConnected = hasActiveTunnel || !activeNames.isEmpty
+        let profileIsIdentified = hasIdentifiedProfile ?? !activeNames.isEmpty
+        hasUnidentifiedTunnel = hasActiveTunnel && !profileIsIdentified
     }
 }
 

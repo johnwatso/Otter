@@ -256,7 +256,7 @@
             <img class="download-app-icon theme-icon-dark" src="assets/otter-icon-dark.png" width="1024" height="1024" loading="lazy" decoding="async" alt="">
             <h2>Ready to keep your <span class="text-gradient">shares close.</span></h2>
             <p>
-              Free, open source, and built for the Macs that rely on home storage, office shares, and home lab servers. Download the latest release when it is available.
+              Free, open source, and built for the Macs that rely on home storage, office shares, and home lab servers. Download the latest release.
             </p>
 
             <a class="button button-primary" href="./download/index.html">
@@ -265,7 +265,7 @@
               </svg>
               Get Otter
             </a>
-            <p class="download-meta">Free · macOS 15+ · Apple silicon and Intel · No release published yet</p>
+            <p class="download-meta">Free · macOS 15+ · Apple silicon and Intel · <span id="release-availability">Checking latest release…</span></p>
           </div>
         </div>
       </section>
@@ -280,6 +280,7 @@
         var storageKey = "otter-theme";
         var toggle = document.querySelector(".theme-toggle");
         var themeColor = document.querySelector("#theme-color");
+        var releaseAvailability = document.querySelector("#release-availability");
 
         function setTheme(theme, persist) {
           document.documentElement.dataset.theme = theme;
@@ -316,6 +317,32 @@
             setTheme(event.matches ? "dark" : "light", false);
           });
         }
+
+        fetch("https://api.github.com/repos/johnwatso/Otter/releases/latest", {
+          headers: {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28"
+          }
+        })
+          .then(function (response) {
+            if (response.ok) {
+              return response.json();
+            }
+
+            if (response.status === 404) {
+              return null;
+            }
+
+            throw new Error("GitHub release check failed with status " + response.status);
+          })
+          .then(function (release) {
+            releaseAvailability.textContent = release
+              ? (release.tag_name ? release.tag_name + " available" : "Latest release available")
+              : "No release published yet";
+          })
+          .catch(function () {
+            releaseAvailability.textContent = "View the latest release on GitHub";
+          });
       })();
     </script>
   </body>

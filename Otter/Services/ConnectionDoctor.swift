@@ -145,8 +145,32 @@ final class ConnectionDoctor {
                 currentIPv4Subnets: networkService.currentIPv4Subnets
             )
         }
+        let directNetworkEvaluation = share.rules.evaluate(
+            currentWiFiNetworkName: networkService.currentWiFiNetworkName,
+            isVPNConnected: false,
+            activeVPNNames: [],
+            currentIPv4Subnets: networkService.currentIPv4Subnets
+        )
         let connectionConditionsDetail: String
-        if ruleEvaluation.allowsConnection {
+        if ruleEvaluation.allowsConnection,
+           share.rules.hasVPNRule,
+           networkService.isVPNConnected,
+           !directNetworkEvaluation.allowsConnection {
+            let selectedName = share.rules.requiredVPNName
+            let selectedVPNIsIdentified = !networkService.hasUnidentifiedTunnel && (selectedName.map { requiredName in
+                networkService.activeVPNNames.contains {
+                    $0.localizedCaseInsensitiveCompare(requiredName) == .orderedSame
+                }
+            } ?? false)
+
+            if selectedVPNIsIdentified {
+                connectionConditionsDetail = "The selected VPN is connected. Otter will verify access by checking the server."
+            } else if networkService.hasUnidentifiedTunnel {
+                connectionConditionsDetail = "A VPN tunnel is active, but macOS did not expose its profile name to Otter. Otter will verify access by checking the server."
+            } else {
+                connectionConditionsDetail = "A different VPN is connected. Otter’s background monitor checks this server without treating an unavailable server as a connection error."
+            }
+        } else if ruleEvaluation.allowsConnection {
             connectionConditionsDetail = "The current network satisfies this share's conditions."
         } else if case let .waitingForVPN(name) = monitor.status(for: share) {
             connectionConditionsDetail = "Connect to “\(name)” to satisfy this share's VPN condition."
@@ -330,9 +354,9 @@ final class ConnectionDoctor {
             if !attemptMount {
                 let statusSuggestsConnectionShouldExist: Bool
                 switch monitor.status(for: share) {
-                case .connected, .waitingForNetwork, .wakePacketSent, .reconnecting, .failed:
+                case .connected, .waitingForNetwork, .waitingForServerOnVPN, .wakePacketSent, .reconnecting, .failed:
                     statusSuggestsConnectionShouldExist = true
-                case .disconnected, .waitingForAllowedNetwork, .waitingForVPN, .paused:
+                case .disconnected, .waitingForAllowedNetwork, .waitingForVPN, .waitingForAccess, .paused:
                     statusSuggestsConnectionShouldExist = false
                 }
                 let shareExpectsConnection = share.keepMounted
@@ -475,6 +499,18 @@ final class ConnectionDoctor {
                 title: "Repair attempt",
                 detail: "Otter reset the retry state and restarted automatic reconnect attempts.",
                 status: .information
+            )
+        case .waitingForServerOnVPN:
+            return .init(
+                title: "Repair attempt",
+                detail: "A VPN is connected, but the server isn’t responding. Check that the correct VPN is active.",
+                status: .warning
+            )
+        case .waitingForAccess:
+            return .init(
+                title: "Repair attempt",
+                detail: "This server isn’t available on the current network or VPN.",
+                status: .warning
             )
         case .disconnected:
             return .init(
