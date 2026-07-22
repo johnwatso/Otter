@@ -8,7 +8,7 @@
             <sparkle:version>1</sparkle:version>
             <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/johnwatso/Otter/releases/download/v0.1.0/Otter-0.1.0.zip" length="8834195" type="application/octet-stream"/>
+            <enclosure url="https://github.com/johnwatso/Otter/releases/download/v0.1.0/Otter-0.1.0.zip" length="8834195" type="application/octet-stream" sparkle:edSignature="uffcHVWQhNFhZqDDwByoxIkahJsZj10ZBl0vs5JXZnxXZS9FNAeGAYqbTj0w65Wm7OvETBvjMJaUXZvU4IEaAQ=="/>
         </item>
     </channel>
 </rss>

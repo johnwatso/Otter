@@ -31,7 +31,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Otter reads the current Wi-Fi network name to apply Wi-Fi based share rules. Your location is never stored or shared.</string>
 	<key>SUFeedURL</key>
-	<string>https://github.com/johnwatso/Otter/releases/latest/download/appcast.xml</string>
+	<string>https://www.get-otter.com/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>GBAjwr9V2I0gl3t5oFXPrxNqXbIDs72J1gsKEZiseZ0=</string>
 	<key>SUEnableAutomaticChecks</key>

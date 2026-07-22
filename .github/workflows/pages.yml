@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - "website/**"
+      - "docs/appcast.xml"
+      - "docs/release-notes/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -31,10 +33,20 @@ jobs:
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v6
 
+      # Sparkle's appcast and release notes are generated into docs/ by
+      # shiphook, but the site itself lives in website/. Stage both so the
+      # update feed is served from the same origin as the website.
+      - name: Stage site
+        run: |
+          mkdir -p _site
+          cp -R website/. _site/
+          cp docs/appcast.xml _site/appcast.xml
+          cp -R docs/release-notes _site/release-notes
+
       - name: Upload website
         uses: actions/upload-pages-artifact@v5
         with:
-          path: website
+          path: _site
 
       - name: Deploy to GitHub Pages
         id: deployment
