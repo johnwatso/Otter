@@ -32,7 +32,8 @@ The payload format is version 1:
         "wifiNetworkName": "",
         "registeredSubnets": [],
         "vpnRuleEnabled": true,
-        "vpnName": "Company VPN"
+        "vpnName": "Company VPN",
+        "connectVPNAutomatically": true
       }
     }
   ],
@@ -45,7 +46,7 @@ The payload format is version 1:
 
 Use a stable, unique UUID for every share. A managed share replaces locally stored runtime data with the same UUID while preserving that runtime data. `monitoring` is optional; omit it to leave those preferences under user control.
 
-`urlString` must be an SMB URL with a server and share path. Usernames and passwords in the URL cause the managed configuration to be rejected. A VPN connection path is valid only when `vpnRuleEnabled` is `true` and `vpnName` names the VPN Otter should connect or ask the user to open. For app-managed VPNs, a live tunnel triggers a reachability check because macOS does not expose the exact profile name to other apps. If the selected profile cannot be confirmed and the server is unavailable, Otter waits quietly so a different active VPN does not create a false connection error.
+`urlString` must be an SMB URL with a server and share path. Usernames and passwords in the URL cause the managed configuration to be rejected. A VPN connection path is valid only when `vpnRuleEnabled` is `true` and `vpnName` names the VPN. Set `connectVPNAutomatically` to `true` to let Otter start the VPN when needed, or `false` to make Otter wait for the user or another app to connect it. Existing payloads that omit this key retain the earlier automatic behavior. For app-managed VPNs, a live tunnel triggers a reachability check because macOS does not expose the exact profile name to other apps. If the selected profile cannot be confirmed and the server is unavailable, Otter waits quietly so a different active VPN does not create a false connection error.
 
 ## Configuration profile example
 
@@ -95,6 +96,7 @@ The relevant `mcx_preference_settings` portion of a `com.apple.ManagedClient.pre
                   <key>registeredSubnets</key><array/>
                   <key>vpnRuleEnabled</key><true/>
                   <key>vpnName</key><string>Company VPN</string>
+                  <key>connectVPNAutomatically</key><true/>
                 </dict>
               </dict>
             </array>

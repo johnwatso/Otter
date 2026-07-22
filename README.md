@@ -29,7 +29,7 @@ Otters are small, quick, and famously good at not letting important things drift
 ## Features
 
 - 📁 Keeps SMB shares mounted through sleep, wake, network changes, and unexpected disconnects
-- 🔒 Connects on a registered network or over VPN, with automatic connection for supported VPNs and server checks for app-managed providers such as WireGuard
+- 🔒 Connects on a registered network or over VPN, with optional automatic VPN connection and server checks for providers such as WireGuard
 - 🧭 Guides setup with mounted-share import, SMB discovery, the native macOS share picker, and a Connection Readiness test
 - 🔌 Handles slow or sleeping servers with reachability monitoring, Wake-on-LAN, hostname fallback, and safe recovery tools
 - 🔐 Stores credentials in Keychain and keeps passwords and private identifiers out of exports, diagnostics, and support packages
@@ -54,7 +54,7 @@ The first-run assistant can import shares already mounted in Finder, show nearby
 3. Review the share and save it.
 4. Optional: add a network condition, Wake-on-LAN details, or "connect when reachable" behavior.
 
-Connection paths are configured per share. Otter can register the network where a share was set up (its IPv4 subnet, plus the Wi-Fi name when available) and connect whenever the Mac is back on that network — over Wi-Fi or Ethernet. A VPN can be enabled as an alternative path for use away from that network. Otter connects the selected VPN automatically when macOS allows it; for app-managed VPNs such as WireGuard, a live tunnel triggers a server reachability check because macOS does not expose the exact profile name to other apps. If Otter cannot confirm that the selected VPN is active and the server does not answer, the share waits quietly instead of reporting an error. A confirmed VPN, a manual connection attempt, or a previously connected share can still surface a genuine connection problem.
+Connection paths are configured per share. Otter can register the network where a share was set up (its IPv4 subnet, plus the Wi-Fi name when available) and connect whenever the Mac is back on that network — over Wi-Fi or Ethernet. A VPN can be enabled as an alternative path for use away from that network. Otter can wait for you to connect the selected VPN, or connect it automatically when macOS allows it. For VPNs such as WireGuard, a live tunnel triggers a server reachability check even when macOS does not expose the exact profile name to other apps. If Otter cannot confirm that the selected VPN is active and the server does not answer, the share waits quietly instead of reporting an error. A confirmed VPN, a manual connection attempt, or a previously connected share can still surface a genuine connection problem.
 
 For hostname-based shares, Otter resolves ordinary hostnames and Bonjour SMB service identities to learn the server's local IP address while you are on the local network. The hostname always remains the primary address; the IP is a fallback for situations such as a VPN that cannot resolve Bonjour or `.local` names. Otter keeps a small private history of address changes and warns after repeated changes within 30 days, which can indicate that a DHCP reservation would make fallback connections more reliable. To let macOS authenticate the IP-based fallback, Otter may create a scoped alias of the Finder-saved credential in macOS Keychain. Otter removes its alias when the cached IP changes or the share is deleted. Learned addresses and their history are excluded from exported configurations and redacted diagnostic reports.
 

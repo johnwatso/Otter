@@ -224,6 +224,7 @@ struct SupportShare: Codable, Equatable {
     let connectsWhenReachable: Bool
     let usesRegisteredNetworkRule: Bool
     let usesNamedVPNRule: Bool
+    let startsVPNAutomatically: Bool
     let vpnCanBeStartedByOtter: Bool
     let wakeOnLANEnabled: Bool
 }
@@ -266,6 +267,7 @@ enum SupportPackageService {
                 connectsWhenReachable: share.autoConnectWhenReachable,
                 usesRegisteredNetworkRule: share.rules.hasNetworkRule,
                 usesNamedVPNRule: requiredVPNName != nil,
+                startsVPNAutomatically: share.rules.shouldConnectVPNAutomatically,
                 vpnCanBeStartedByOtter: requiredVPNName.map(networkService.canControlVPN(named:)) ?? false,
                 wakeOnLANEnabled: share.wakeOnLAN.isEnabled
             )

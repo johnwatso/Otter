@@ -180,6 +180,7 @@ struct DraftShare {
     var registeredSubnets: [String]
     var usesVPNRule: Bool
     var vpnName: String
+    var connectVPNAutomatically: Bool
     var createdAt: Date?
 
     init(share: NetworkShare?) {
@@ -205,6 +206,7 @@ struct DraftShare {
         // rule instead of trapping the user behind an unselectable validation.
         usesVPNRule = share?.rules.requiredVPNName != nil
         vpnName = share?.rules.vpnName ?? ""
+        connectVPNAutomatically = share?.rules.connectVPNAutomatically ?? true
         createdAt = share?.createdAt
     }
 
@@ -213,7 +215,8 @@ struct DraftShare {
             wifiNetworkName: limitsToRegisteredNetwork ? wifiNetworkName : "",
             registeredSubnets: limitsToRegisteredNetwork ? registeredSubnets : [],
             vpnRuleEnabled: usesVPNRule,
-            vpnName: usesVPNRule ? vpnName : ""
+            vpnName: usesVPNRule ? vpnName : "",
+            connectVPNAutomatically: usesVPNRule && connectVPNAutomatically
         )
     }
 

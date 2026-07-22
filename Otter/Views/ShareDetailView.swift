@@ -147,7 +147,11 @@ struct ShareDetailView: View {
                                 DetailRow(label: "Wi-Fi", value: ssid)
                             }
                             if currentShare.rules.hasVPNRule {
-                                DetailRow(label: "VPN to connect", value: currentShare.rules.requiredVPNName ?? "Selection required")
+                                DetailRow(label: "VPN", value: currentShare.rules.requiredVPNName ?? "Selection required")
+                                DetailRow(
+                                    label: "VPN startup",
+                                    value: currentShare.rules.shouldConnectVPNAutomatically ? "Automatic" : "Manual"
+                                )
                             }
                         } else {
                             DetailRow(label: "Connect on", value: "Any network")

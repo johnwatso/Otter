@@ -242,6 +242,23 @@ final class NetworkShareTests: XCTestCase {
         XCTAssertEqual(rules.requiredWiFiNetworkName, "Home")
         XCTAssertEqual(rules.registeredSubnets, ["192.168.1.0/24"])
         XCTAssertEqual(rules.requiredVPNName, "Work VPN")
+        XCTAssertTrue(rules.connectVPNAutomatically)
+    }
+
+    func testVPNRuleDecodesManualConnectionPreference() throws {
+        let json = """
+        {
+            "vpnRuleEnabled": true,
+            "vpnName": "Work VPN",
+            "connectVPNAutomatically": false
+        }
+        """
+
+        let rules = try JSONDecoder().decode(ShareRules.self, from: Data(json.utf8))
+
+        XCTAssertTrue(rules.hasVPNRule)
+        XCTAssertFalse(rules.connectVPNAutomatically)
+        XCTAssertFalse(rules.shouldConnectVPNAutomatically)
     }
 
     func testEditorDraftPreservesPauseState() {
@@ -274,13 +291,19 @@ final class NetworkShareTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://server.local/Media",
             mountPath: "/Volumes/Media",
-            rules: ShareRules(vpnRuleEnabled: true, vpnName: "Work VPN")
+            rules: ShareRules(
+                vpnRuleEnabled: true,
+                vpnName: "Work VPN",
+                connectVPNAutomatically: false
+            )
         )
         let vpnDraft = DraftShare(share: vpnOnlyShare)
 
         XCTAssertFalse(vpnDraft.limitsToRegisteredNetwork)
         XCTAssertTrue(vpnDraft.usesVPNRule)
+        XCTAssertFalse(vpnDraft.connectVPNAutomatically)
         XCTAssertEqual(vpnDraft.rules.requiredVPNName, "Work VPN")
+        XCTAssertFalse(vpnDraft.rules.shouldConnectVPNAutomatically)
     }
 
     func testEditorDraftRetiresLegacyUnnamedVPNRule() {
@@ -812,7 +835,11 @@ final class ShareMonitorRetryTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://server.local/Media",
             mountPath: "/Volumes/Media",
-            rules: ShareRules(vpnRuleEnabled: true, vpnName: "Work VPN")
+            rules: ShareRules(
+                vpnRuleEnabled: true,
+                vpnName: "Work VPN",
+                connectVPNAutomatically: true
+            )
         )
         settings.addShare(share)
         let network = StubNetworkReachability(
@@ -853,7 +880,11 @@ final class ShareMonitorRetryTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://server.local/Media",
             mountPath: "/Volumes/Media",
-            rules: ShareRules(vpnRuleEnabled: true, vpnName: "Tunnel to Work")
+            rules: ShareRules(
+                vpnRuleEnabled: true,
+                vpnName: "Tunnel to Work",
+                connectVPNAutomatically: false
+            )
         )
         settings.addShare(share)
         let network = StubNetworkReachability(
@@ -885,6 +916,47 @@ final class ShareMonitorRetryTests: XCTestCase {
         XCTAssertEqual(network.canReachCallCount, 1)
         XCTAssertEqual(mountCallCount, 1)
         XCTAssertEqual(monitor.status(for: share), .connected)
+    }
+
+    @MainActor
+    func testManualVPNModeWaitsWithoutStartingVPN() async {
+        let suiteName = "OtterTests.ShareMonitorRetryTests.ManualVPNMode"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            rules: ShareRules(
+                vpnRuleEnabled: true,
+                vpnName: "Tunnel to Work",
+                connectVPNAutomatically: false
+            )
+        )
+        settings.addShare(share)
+        let vpnConnectionService = StubVPNConnectionService()
+        let mountService = StubMountService(
+            mountResult: URL(fileURLWithPath: "/Volumes/Media", isDirectory: true)
+        )
+        let monitor = ShareMonitor(
+            settings: settings,
+            mountService: mountService,
+            wakeOnLANService: StubWakeOnLANService(),
+            vpnConnectionService: vpnConnectionService,
+            networkService: StubNetworkReachability(isOnline: true, isReachable: true),
+            notificationService: RecordingNotificationService(),
+            eventLog: ShareEventLog(defaults: defaults),
+            defaults: defaults
+        )
+
+        await monitor.evaluate(share, reason: .timer)
+
+        let vpnConnectionNames = await vpnConnectionService.connectionNames
+        let mountCallCount = await mountService.mountCallCount
+        XCTAssertTrue(vpnConnectionNames.isEmpty)
+        XCTAssertEqual(mountCallCount, 0)
+        XCTAssertEqual(monitor.status(for: share), .waitingForVPN("Tunnel to Work"))
     }
 
     @MainActor
@@ -2107,6 +2179,7 @@ final class SupportPackageTests: XCTestCase {
         XCTAssertEqual(package.shares.map(\.reference), ["Share 1"])
         XCTAssertEqual(package.events.map(\.shareReference), ["Share 1"])
         XCTAssertTrue(package.shares[0].usesNamedVPNRule)
+        XCTAssertTrue(package.shares[0].startsVPNAutomatically)
         XCTAssertTrue(package.shares[0].usesRegisteredNetworkRule)
         XCTAssertFalse(json.contains("AcmeVault"))
         XCTAssertFalse(json.contains("AcmeFiles"))

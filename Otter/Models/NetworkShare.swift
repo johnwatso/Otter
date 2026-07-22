@@ -475,17 +475,20 @@ struct ShareRules: Codable, Hashable {
     var registeredSubnets: [String]
     var vpnRuleEnabled: Bool
     var vpnName: String
+    var connectVPNAutomatically: Bool
 
     init(
         wifiNetworkName: String = "",
         registeredSubnets: [String] = [],
         vpnRuleEnabled: Bool = false,
-        vpnName: String = ""
+        vpnName: String = "",
+        connectVPNAutomatically: Bool = true
     ) {
         self.wifiNetworkName = wifiNetworkName
         self.registeredSubnets = registeredSubnets
         self.vpnRuleEnabled = vpnRuleEnabled
         self.vpnName = vpnName
+        self.connectVPNAutomatically = connectVPNAutomatically
         normalize()
     }
 
@@ -494,6 +497,7 @@ struct ShareRules: Codable, Hashable {
         case registeredSubnets
         case vpnRuleEnabled
         case vpnName
+        case connectVPNAutomatically
     }
 
     init(from decoder: Decoder) throws {
@@ -502,6 +506,12 @@ struct ShareRules: Codable, Hashable {
         registeredSubnets = try container.decodeIfPresent([String].self, forKey: .registeredSubnets) ?? []
         vpnRuleEnabled = try container.decodeIfPresent(Bool.self, forKey: .vpnRuleEnabled) ?? false
         vpnName = try container.decodeIfPresent(String.self, forKey: .vpnName) ?? ""
+        // VPN rules created before this option existed always tried to start
+        // the selected VPN. Preserve that behavior during migration.
+        connectVPNAutomatically = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .connectVPNAutomatically
+        ) ?? vpnRuleEnabled
         normalize()
     }
 
@@ -511,6 +521,7 @@ struct ShareRules: Codable, Hashable {
         try container.encode(registeredSubnets, forKey: .registeredSubnets)
         try container.encode(vpnRuleEnabled, forKey: .vpnRuleEnabled)
         try container.encode(vpnName, forKey: .vpnName)
+        try container.encode(connectVPNAutomatically, forKey: .connectVPNAutomatically)
     }
 
     var hasWiFiNetworkRule: Bool {
@@ -533,6 +544,10 @@ struct ShareRules: Codable, Hashable {
     var requiredVPNName: String? {
         let trimmedName = vpnName.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmedName.isEmpty ? nil : trimmedName
+    }
+
+    var shouldConnectVPNAutomatically: Bool {
+        hasVPNRule && requiredVPNName != nil && connectVPNAutomatically
     }
 
     mutating func normalize() {

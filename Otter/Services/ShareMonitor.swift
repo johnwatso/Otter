@@ -448,12 +448,14 @@ final class ShareMonitor: ObservableObject {
             currentIPv4Subnets: networkService.currentIPv4Subnets
         )
 
-        // The saved VPN name tells Otter which service to start or which name
-        // to show in its recovery guidance. Once any live tunnel is visible,
-        // the rule allows a server reachability check because app-managed VPNs
-        // don't expose their exact profile name to other apps.
+        // The saved VPN name identifies the required connection path. Otter
+        // starts it only when automatic VPN connection is enabled; otherwise
+        // the rule remains blocked until a live tunnel appears. Any live tunnel
+        // allows a server check because app-managed VPNs don't always expose
+        // their exact profile name to other apps.
         if !ruleEvaluation.allowsConnection,
            share.rules.hasVPNRule,
+           share.rules.shouldConnectVPNAutomatically,
            let requiredVPNName = share.rules.requiredVPNName,
            networkService.isOnline {
             if !force, !RetryBackoff.shouldRetry(afterFailures: state.failureCount) {

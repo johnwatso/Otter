@@ -253,7 +253,7 @@ struct ShareEditorView: View {
                         .padding(.leading, 20)
                     }
 
-                    Toggle("A VPN is connected", isOn: Binding(
+                    Toggle("Connect when VPN is active", isOn: Binding(
                         get: { draft.usesVPNRule },
                         set: { isOn in
                             draft.usesVPNRule = isOn
@@ -265,11 +265,11 @@ struct ShareEditorView: View {
 
                     if draft.usesVPNRule {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Choose the VPN Otter should connect or ask for when this server isn’t available directly.")
+                            Text("Connect this share when the selected VPN is active.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
 
-                            Picker("VPN to connect", selection: vpnSelection) {
+                            Picker("VPN", selection: vpnSelection) {
                                 Text("Choose a VPN…").tag(VPNNameSelection.unconfigured)
 
                                 ForEach(networkService.knownVPNNames, id: \.self) { vpnName in
@@ -300,6 +300,19 @@ struct ShareEditorView: View {
                                 Text(vpnRuleDescription)
                                     .font(.footnote)
                                     .foregroundStyle(.tertiary)
+                            }
+
+                            if vpnSelection.wrappedValue != .unconfigured,
+                               vpnSelection.wrappedValue != .custom {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Toggle("Connect VPN automatically", isOn: $draft.connectVPNAutomatically)
+
+                                    Text(automaticVPNDescription)
+                                        .font(.footnote)
+                                        .foregroundStyle(.tertiary)
+                                }
+                                .padding(.leading, 20)
+                                .padding(.top, 4)
                             }
 
                             if !draft.vpnName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -588,14 +601,20 @@ struct ShareEditorView: View {
     private var vpnRuleDescription: String {
         let vpnName = draft.vpnName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !vpnName.isEmpty, !networkService.canControlVPN(named: vpnName) {
-            return draft.limitsToRegisteredNetwork
-                ? "Away from the registered network, connect this VPN when Otter asks. Otter checks the server when a VPN connection becomes active."
-                : "Connect this VPN when Otter asks. Otter checks the server when a VPN connection becomes active."
+            return "macOS may require you to connect this VPN from its app."
         }
 
-        return draft.limitsToRegisteredNetwork
-            ? "Away from the registered network, Otter connects this VPN and checks the server."
-            : "Otter connects this VPN and checks the server."
+        return "Otter checks the server after this VPN connects."
+    }
+
+    private var automaticVPNDescription: String {
+        if draft.connectVPNAutomatically {
+            return draft.limitsToRegisteredNetwork
+                ? "Away from the registered network, Otter starts this VPN when needed to keep the share connected."
+                : "Otter starts this VPN when needed to keep the share connected."
+        }
+
+        return "Otter waits for this VPN, then connects the share."
     }
 
     private var locationPermissionNotice: some View {
