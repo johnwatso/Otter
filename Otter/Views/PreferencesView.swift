@@ -211,6 +211,7 @@ struct ShareManagementView: View {
             if !didRegisterWindowAppearance {
                 didRegisterWindowAppearance = true
                 appModel.preferencesWindowDidAppear()
+                appModel.sharesWindowDidAppear()
             }
 
             if selection == nil {
@@ -236,6 +237,7 @@ struct ShareManagementView: View {
             if didRegisterWindowAppearance {
                 didRegisterWindowAppearance = false
                 appModel.preferencesWindowDidDisappear()
+                appModel.sharesWindowDidDisappear()
             }
         }
     }

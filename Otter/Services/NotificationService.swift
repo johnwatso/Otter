@@ -252,7 +252,6 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
         content.threadIdentifier = ActionIdentifier.detectedCategory
         content.categoryIdentifier = ActionIdentifier.detectedCategory
         content.userInfo[ActionIdentifier.detectedMountPathKey] = suggestion.mountPath
-        content.interruptionLevel = .timeSensitive
 
         if settings.preferences.notificationSoundsEnabled {
             content.sound = .default

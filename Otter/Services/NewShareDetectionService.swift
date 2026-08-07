@@ -28,6 +28,7 @@ final class NewShareDetectionService: ObservableObject {
     private var observers: [NSObjectProtocol] = []
     private var cancellables = Set<AnyCancellable>()
     private var scanTask: Task<Void, Never>?
+    private var hasPendingAnnouncement = false
     private var knownAddresses = Set<String>()
     private var ignoredAddresses = Set<String>()
     private var hasStarted = false
@@ -163,8 +164,10 @@ final class NewShareDetectionService: ObservableObject {
             (NSWorkspace.didUnmountNotification, false)
         ]
 
+        // Delivered on the posting thread rather than through OperationQueue,
+        // since the handler only hops to the main actor to schedule the scan.
         observers = events.map { name, announcing in
-            workspaceNotificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+            workspaceNotificationCenter.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
                 Task { @MainActor in
                     self?.scheduleScan(announcing: announcing)
                 }
@@ -197,16 +200,26 @@ final class NewShareDetectionService: ObservableObject {
 
     private func scheduleScan(announcing: Bool, delay: TimeInterval? = nil) {
         // A single mount can produce several volume events, and NetFS needs a
-        // moment before the new volume reports its remount URL.
+        // moment before the new volume reports its remount URL. Coalescing
+        // keeps the announcement rather than taking the last event's: a mount
+        // followed closely by an unmount elsewhere still offers what appeared.
         scanTask?.cancel()
+        hasPendingAnnouncement = hasPendingAnnouncement || announcing
+
         let scanDelay = delay ?? self.scanDelay
         scanTask = Task { [weak self] in
             if scanDelay > 0 {
                 try? await Task.sleep(nanoseconds: UInt64(max(scanDelay, 0) * 1_000_000_000))
             }
             guard !Task.isCancelled else { return }
-            await self?.scan(announcing: announcing)
+            await self?.runScheduledScan()
         }
+    }
+
+    private func runScheduledScan() async {
+        let announcing = hasPendingAnnouncement
+        hasPendingAnnouncement = false
+        await scan(announcing: announcing)
     }
 
     private func pruneConfiguredOffers(in shares: [NetworkShare]) {

@@ -2662,6 +2662,52 @@ final class NewShareDetectionTests: XCTestCase {
         XCTAssertTrue(notifier.notified.isEmpty)
     }
 
+    // Volume events arrive in bursts and are coalesced into one scan. An
+    // unmount landing on top of a mount must not swallow the offer.
+    @MainActor
+    func testMountFollowedByAnUnmountStillOffersTheNewShare() async throws {
+        let (settings, defaults) = makeSettings("Coalesced")
+        let notifier = RecordingDetectedShareNotifier()
+        let source = SuggestionSource([])
+        let workspaceCenter = NotificationCenter()
+        let detector = NewShareDetectionService(
+            settings: settings,
+            notificationService: notifier,
+            defaults: defaults,
+            workspaceNotificationCenter: workspaceCenter,
+            scanDelay: 0.05,
+            discoverShares: { await source.current() }
+        )
+
+        detector.start()
+        await detector.scan(announcing: false)
+
+        // The scan start() schedules must have run before the share appears,
+        // otherwise it records the share as one that was mounted all along.
+        try await poll { await source.readCount >= 2 }
+
+        await source.set([suggestion()])
+        workspaceCenter.post(name: NSWorkspace.didMountNotification, object: nil)
+        workspaceCenter.post(name: NSWorkspace.didUnmountNotification, object: nil)
+        try await poll { !notifier.notified.isEmpty }
+
+        XCTAssertEqual(detector.pendingSuggestions.map(\.displayName), ["Media"])
+        XCTAssertEqual(notifier.notified.count, 1)
+    }
+
+    // Waits for a debounced scan to land without pinning the test to a fixed
+    // deadline. Returns early as soon as the condition holds.
+    private func poll(
+        timeout: TimeInterval = 5,
+        until isSatisfied: () async -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if await isSatisfied() { return }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+
     func testPreferencesDefaultDetectionOnForExistingInstallations() throws {
         let legacyPreferences = Data(#"{"fallbackCheckInterval":60}"#.utf8)
         let decoded = try JSONDecoder().decode(AppPreferences.self, from: legacyPreferences)
@@ -2678,6 +2724,7 @@ final class NewShareDetectionTests: XCTestCase {
 
 private actor SuggestionSource {
     private var suggestions: [MountedShareSuggestion]
+    private(set) var readCount = 0
 
     init(_ suggestions: [MountedShareSuggestion]) {
         self.suggestions = suggestions
@@ -2688,7 +2735,8 @@ private actor SuggestionSource {
     }
 
     func current() -> [MountedShareSuggestion] {
-        suggestions
+        readCount += 1
+        return suggestions
     }
 }
 

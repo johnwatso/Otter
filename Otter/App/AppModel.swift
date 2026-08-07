@@ -44,6 +44,9 @@ final class AppModel: ObservableObject {
     @Published var shouldOpenSharesWindow = false
     @Published private(set) var isMenuBarExtraInserted = true
 
+    private var isSharesWindowVisible = false
+    private var deferredEditorRequest: ShareEditorRequest?
+
 #if DEBUG
     @Published private(set) var isScreenshotDemoEnabled = false
 
@@ -215,12 +218,18 @@ final class AppModel: ObservableObject {
     // stays until the share is saved or ignored, so cancelling loses nothing.
     func reviewDetectedShare(_ suggestion: MountedShareSuggestion) {
         newShareDetector.acknowledgeNotification(for: suggestion)
-        triggerOpenSharesWindow()
 
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            editorRequest = ShareEditorRequest(mode: .addDetected(suggestion))
+        let request = ShareEditorRequest(mode: .addDetected(suggestion))
+        if isSharesWindowVisible {
+            editorRequest = request
+        } else {
+            // The editor is a sheet over the shares window, so it can't present
+            // until that window's content exists. The request waits for the
+            // window to report that it appeared.
+            deferredEditorRequest = request
         }
+
+        triggerOpenSharesWindow()
     }
 
     func requestNewShare() {
@@ -230,6 +239,24 @@ final class AppModel: ObservableObject {
     func requestEditShare(_ share: NetworkShare) {
         guard !settings.isManagedShare(id: share.id) else { return }
         editorRequest = ShareEditorRequest(mode: .edit(share.id))
+    }
+
+    func sharesWindowDidAppear() {
+        isSharesWindowVisible = true
+
+        guard let request = deferredEditorRequest else { return }
+        deferredEditorRequest = nil
+
+        // One turn of the main actor lets SwiftUI finish presenting the window
+        // before the sheet attaches to it.
+        Task { @MainActor in
+            await Task.yield()
+            editorRequest = request
+        }
+    }
+
+    func sharesWindowDidDisappear() {
+        isSharesWindowVisible = false
     }
 
     func preferencesWindowDidAppear() {
