@@ -182,6 +182,7 @@ struct ShareManagementView: View {
 
             ShareEditorView(
                 share: editingShare,
+                prefill: prefill(for: request),
                 appliesToShareCount: editingServerShareIDs.isEmpty ? nil : editingServerShareIDs.count
             ) { savedShare in
                 let isServerEdit = !editingServerShareIDs.isEmpty
@@ -428,6 +429,14 @@ struct ShareManagementView: View {
         return nil
     }
 
+    private func prefill(for request: ShareEditorRequest) -> MountedShareSuggestion? {
+        if case let .addDetected(suggestion) = request.mode {
+            return suggestion
+        }
+
+        return nil
+    }
+
     private func selectShare(for request: ShareEditorRequest) {
         guard editingServerShareIDs.isEmpty else { return }
         if case let .edit(id) = request.mode {
@@ -606,6 +615,7 @@ private struct GeneralPreferencesView: View {
     @EnvironmentObject private var networkService: NetworkReachabilityService
     @EnvironmentObject private var notificationService: NotificationService
     @EnvironmentObject private var loginItemService: LoginItemService
+    @EnvironmentObject private var newShareDetector: NewShareDetectionService
     @State private var configurationMessage: String?
     @State private var supportPackageMessage: String?
 
@@ -689,6 +699,25 @@ private struct GeneralPreferencesView: View {
                 }
             } header: {
                 Text("Monitoring")
+            }
+
+            Section {
+                Toggle("Offer to manage newly mounted shares", isOn: notificationPreferenceBinding(\.detectNewShares))
+                SettingsSecondaryText("When a share is mounted outside Otter while Otter is running, Otter offers to keep it connected. The offer waits in the menu bar until you answer it.")
+
+                if newShareDetector.ignoredShareCount > 0 {
+                    Button {
+                        newShareDetector.resetIgnoredShares()
+                    } label: {
+                        Label(
+                            "Offer Ignored Shares Again (\(newShareDetector.ignoredShareCount))",
+                            systemImage: "bell.badge"
+                        )
+                    }
+                    .tahoeSecondaryActionButton()
+                }
+            } header: {
+                Text("New Shares")
             }
 
             Section {

@@ -115,6 +115,7 @@ struct AppPreferences: Codable, Equatable {
     var notificationSoundsEnabled: Bool = false
     var pauseState: PauseState = .inactive
     var recoverUnresponsiveMounts: Bool = false
+    var detectNewShares: Bool = true
     var hasCompletedOnboarding: Bool = false
 
     init(
@@ -126,6 +127,7 @@ struct AppPreferences: Codable, Equatable {
         notificationSoundsEnabled: Bool = false,
         pauseState: PauseState = .inactive,
         recoverUnresponsiveMounts: Bool = false,
+        detectNewShares: Bool = true,
         hasCompletedOnboarding: Bool = false
     ) {
         self.fallbackCheckInterval = fallbackCheckInterval
@@ -136,6 +138,7 @@ struct AppPreferences: Codable, Equatable {
         self.notificationSoundsEnabled = notificationSoundsEnabled
         self.pauseState = pauseState
         self.recoverUnresponsiveMounts = recoverUnresponsiveMounts
+        self.detectNewShares = detectNewShares
         self.hasCompletedOnboarding = hasCompletedOnboarding
         normalize()
     }
@@ -149,6 +152,7 @@ struct AppPreferences: Codable, Equatable {
         case notificationSoundsEnabled
         case pauseState
         case recoverUnresponsiveMounts
+        case detectNewShares
         case hasCompletedOnboarding
         case showDockIconWhenPreferencesOpen
     }
@@ -168,6 +172,7 @@ struct AppPreferences: Codable, Equatable {
         notificationSoundsEnabled = try container.decodeIfPresent(Bool.self, forKey: .notificationSoundsEnabled) ?? false
         pauseState = try container.decodeIfPresent(PauseState.self, forKey: .pauseState) ?? .inactive
         recoverUnresponsiveMounts = try container.decodeIfPresent(Bool.self, forKey: .recoverUnresponsiveMounts) ?? false
+        detectNewShares = try container.decodeIfPresent(Bool.self, forKey: .detectNewShares) ?? true
         hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
         normalize()
     }
@@ -182,6 +187,7 @@ struct AppPreferences: Codable, Equatable {
         try container.encode(notificationSoundsEnabled, forKey: .notificationSoundsEnabled)
         try container.encode(pauseState, forKey: .pauseState)
         try container.encode(recoverUnresponsiveMounts, forKey: .recoverUnresponsiveMounts)
+        try container.encode(detectNewShares, forKey: .detectNewShares)
         try container.encode(hasCompletedOnboarding, forKey: .hasCompletedOnboarding)
     }
 

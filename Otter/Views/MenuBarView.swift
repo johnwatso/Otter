@@ -8,6 +8,7 @@ struct MenuBarView: View {
     @EnvironmentObject private var monitor: ShareMonitor
     @EnvironmentObject private var networkService: NetworkReachabilityService
     @EnvironmentObject private var updaterViewModel: UpdaterViewModel
+    @EnvironmentObject private var newShareDetector: NewShareDetectionService
 
     private var shares: [NetworkShare] {
         appModel.screenshotDemoShares ?? settings.shares
@@ -18,6 +19,14 @@ struct MenuBarView: View {
     }
 
     var body: some View {
+        if !newShareDetector.pendingSuggestions.isEmpty {
+            ForEach(newShareDetector.pendingSuggestions) { suggestion in
+                DetectedShareMenu(suggestion: suggestion)
+            }
+
+            Divider()
+        }
+
         if shares.isEmpty {
             Text("No shares configured")
         } else {
@@ -116,6 +125,58 @@ struct MenuBarView: View {
     private func showPreferences() {
         openWindow(id: AppModel.preferencesWindowID)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func showShares() {
+        openWindow(id: AppModel.sharesWindowID)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+// A share that appeared while Otter was running. The offer stays in the menu
+// until it's answered, whether or not the notification was seen.
+private struct DetectedShareMenu: View {
+    @Environment(\.openWindow) private var openWindow
+    @EnvironmentObject private var appModel: AppModel
+    @EnvironmentObject private var newShareDetector: NewShareDetectionService
+    let suggestion: MountedShareSuggestion
+
+    var body: some View {
+        Menu {
+            Button {
+                appModel.manageDetectedShare(suggestion)
+                showShares()
+            } label: {
+                Label("Keep This Mounted", systemImage: "externaldrive.badge.plus")
+            }
+
+            Button {
+                appModel.reviewDetectedShare(suggestion)
+                showShares()
+            } label: {
+                Label("Set Up…", systemImage: "gearshape")
+            }
+
+            Divider()
+
+            Button {
+                newShareDetector.dismiss(suggestion)
+            } label: {
+                Label("Not Now", systemImage: "xmark")
+            }
+
+            Button {
+                newShareDetector.ignore(suggestion)
+            } label: {
+                Label("Don't Ask Again", systemImage: "bell.slash")
+            }
+        } label: {
+            Label {
+                Text("New share: \(suggestion.displayName)")
+            } icon: {
+                Image(systemName: "externaldrive.badge.questionmark")
+            }
+        }
     }
 
     private func showShares() {

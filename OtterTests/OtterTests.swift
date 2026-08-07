@@ -2409,3 +2409,299 @@ private final class RecordingNotificationService: ShareNotificationProviding {
         transitions.append((previous, current))
     }
 }
+
+final class NewShareDetectionTests: XCTestCase {
+    @MainActor
+    private func makeSettings(_ name: String) -> (SettingsStore, UserDefaults) {
+        let suiteName = "OtterTests.NewShareDetection.\(name)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        settings.completeOnboarding()
+        return (settings, defaults)
+    }
+
+    private func suggestion(
+        _ name: String = "Media",
+        urlString: String = "smb://homenas.local/Media",
+        mountPath: String = "/Volumes/Media"
+    ) -> MountedShareSuggestion {
+        MountedShareSuggestion(displayName: name, urlString: urlString, mountPath: mountPath)
+    }
+
+    @MainActor
+    func testVolumesMountedBeforeOtterStartedAreNotOffered() async {
+        let (settings, defaults) = makeSettings("Baseline")
+        let notifier = RecordingDetectedShareNotifier()
+        let source = SuggestionSource([suggestion()])
+        let detector = NewShareDetectionService(
+            settings: settings,
+            notificationService: notifier,
+            defaults: defaults,
+            workspaceNotificationCenter: NotificationCenter(),
+            discoverShares: { await source.current() }
+        )
+
+        await detector.scan(announcing: false)
+        await detector.scan(announcing: true)
+
+        XCTAssertTrue(detector.pendingSuggestions.isEmpty)
+        XCTAssertTrue(notifier.notified.isEmpty)
+    }
+
+    @MainActor
+    func testShareMountedWhileRunningIsOfferedOnce() async {
+        let (settings, defaults) = makeSettings("Offer")
+        let notifier = RecordingDetectedShareNotifier()
+        let source = SuggestionSource([])
+        let detector = NewShareDetectionService(
+            settings: settings,
+            notificationService: notifier,
+            defaults: defaults,
+            workspaceNotificationCenter: NotificationCenter(),
+            discoverShares: { await source.current() }
+        )
+
+        await detector.scan(announcing: false)
+        await source.set([suggestion()])
+        await detector.scan(announcing: true)
+        await detector.scan(announcing: true)
+
+        XCTAssertEqual(detector.pendingSuggestions.map(\.displayName), ["Media"])
+        XCTAssertEqual(notifier.notified.count, 1)
+    }
+
+    @MainActor
+    func testConfiguredShareIsNotOffered() async {
+        let (settings, defaults) = makeSettings("Configured")
+        settings.addShare(NetworkShare(
+            displayName: "Media",
+            // The same share reached through a Bonjour identity and a deeper path.
+            urlString: "smb://HomeNAS.local/media/Movies",
+            mountPath: "/Volumes/Media"
+        ))
+        let notifier = RecordingDetectedShareNotifier()
+        let source = SuggestionSource([])
+        let detector = NewShareDetectionService(
+            settings: settings,
+            notificationService: notifier,
+            defaults: defaults,
+            workspaceNotificationCenter: NotificationCenter(),
+            discoverShares: { await source.current() }
+        )
+
+        await detector.scan(announcing: false)
+        await source.set([suggestion()])
+        await detector.scan(announcing: true)
+
+        XCTAssertTrue(detector.pendingSuggestions.isEmpty)
+        XCTAssertTrue(notifier.notified.isEmpty)
+    }
+
+    @MainActor
+    func testIgnoredShareIsNotOfferedAgainAfterRemounting() async {
+        let (settings, defaults) = makeSettings("Ignored")
+        let notifier = RecordingDetectedShareNotifier()
+        let source = SuggestionSource([])
+        let detector = NewShareDetectionService(
+            settings: settings,
+            notificationService: notifier,
+            defaults: defaults,
+            workspaceNotificationCenter: NotificationCenter(),
+            discoverShares: { await source.current() }
+        )
+
+        await detector.scan(announcing: false)
+        await source.set([suggestion()])
+        await detector.scan(announcing: true)
+        detector.ignore(suggestion())
+
+        // Unmount, then mount the same share again.
+        await source.set([])
+        await detector.scan(announcing: false)
+        await source.set([suggestion(mountPath: "/Volumes/Media-1")])
+        await detector.scan(announcing: true)
+
+        XCTAssertTrue(detector.pendingSuggestions.isEmpty)
+        XCTAssertEqual(notifier.notified.count, 1)
+        XCTAssertEqual(notifier.withdrawn.count, 1)
+        XCTAssertEqual(detector.ignoredShareCount, 1)
+
+        detector.resetIgnoredShares()
+        XCTAssertEqual(detector.ignoredShareCount, 0)
+    }
+
+    @MainActor
+    func testDismissedShareIsOfferedAgainAfterRemounting() async {
+        let (settings, defaults) = makeSettings("Dismissed")
+        let notifier = RecordingDetectedShareNotifier()
+        let source = SuggestionSource([])
+        let detector = NewShareDetectionService(
+            settings: settings,
+            notificationService: notifier,
+            defaults: defaults,
+            workspaceNotificationCenter: NotificationCenter(),
+            discoverShares: { await source.current() }
+        )
+
+        await detector.scan(announcing: false)
+        await source.set([suggestion()])
+        await detector.scan(announcing: true)
+        detector.dismiss(suggestion())
+
+        await source.set([])
+        await detector.scan(announcing: false)
+        await source.set([suggestion()])
+        await detector.scan(announcing: true)
+
+        XCTAssertEqual(detector.pendingSuggestions.count, 1)
+        XCTAssertEqual(notifier.notified.count, 2)
+    }
+
+    @MainActor
+    func testDisabledDetectionStaysQuietWithoutBuildingABacklog() async {
+        let (settings, defaults) = makeSettings("Disabled")
+        settings.updatePreferences { $0.detectNewShares = false }
+        let notifier = RecordingDetectedShareNotifier()
+        let source = SuggestionSource([])
+        let detector = NewShareDetectionService(
+            settings: settings,
+            notificationService: notifier,
+            defaults: defaults,
+            workspaceNotificationCenter: NotificationCenter(),
+            discoverShares: { await source.current() }
+        )
+
+        await detector.scan(announcing: false)
+        await source.set([suggestion()])
+        await detector.scan(announcing: true)
+
+        XCTAssertTrue(detector.pendingSuggestions.isEmpty)
+        XCTAssertTrue(notifier.notified.isEmpty)
+
+        // Re-enabling doesn't announce shares that were mounted while off.
+        settings.updatePreferences { $0.detectNewShares = true }
+        await detector.scan(announcing: true)
+
+        XCTAssertTrue(detector.pendingSuggestions.isEmpty)
+        XCTAssertTrue(notifier.notified.isEmpty)
+    }
+
+    @MainActor
+    func testDetectionWaitsUntilOnboardingIsComplete() async {
+        let suiteName = "OtterTests.NewShareDetection.Onboarding"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let notifier = RecordingDetectedShareNotifier()
+        let source = SuggestionSource([])
+        let detector = NewShareDetectionService(
+            settings: settings,
+            notificationService: notifier,
+            defaults: defaults,
+            workspaceNotificationCenter: NotificationCenter(),
+            discoverShares: { await source.current() }
+        )
+
+        await detector.scan(announcing: false)
+        await source.set([suggestion()])
+        await detector.scan(announcing: true)
+
+        XCTAssertTrue(notifier.notified.isEmpty)
+    }
+
+    @MainActor
+    func testManagingAnOfferAddsTheShareAndClearsTheOffer() async {
+        let (settings, defaults) = makeSettings("Manage")
+        let notifier = RecordingDetectedShareNotifier()
+        let source = SuggestionSource([])
+        let detector = NewShareDetectionService(
+            settings: settings,
+            notificationService: notifier,
+            defaults: defaults,
+            workspaceNotificationCenter: NotificationCenter(),
+            discoverShares: { await source.current() }
+        )
+
+        await detector.scan(announcing: false)
+        await source.set([suggestion()])
+        await detector.scan(announcing: true)
+
+        let added = detector.manage(suggestion())
+
+        XCTAssertNotNil(added)
+        XCTAssertEqual(settings.shares.map(\.urlString), ["smb://homenas.local/Media"])
+        XCTAssertTrue(settings.shares.first?.keepMounted == true)
+        XCTAssertTrue(detector.pendingSuggestions.isEmpty)
+        XCTAssertEqual(notifier.withdrawn.count, 1)
+    }
+
+    @MainActor
+    func testSuppressedScanRecordsMountsWithoutOffering() async {
+        let (settings, defaults) = makeSettings("Suppressed")
+        let notifier = RecordingDetectedShareNotifier()
+        let source = SuggestionSource([])
+        let detector = NewShareDetectionService(
+            settings: settings,
+            notificationService: notifier,
+            defaults: defaults,
+            workspaceNotificationCenter: NotificationCenter(),
+            discoverShares: { await source.current() }
+        )
+
+        await detector.scan(announcing: false)
+        detector.isSuppressed = true
+        await source.set([suggestion()])
+        await detector.scan(announcing: true)
+
+        XCTAssertTrue(notifier.notified.isEmpty)
+
+        detector.isSuppressed = false
+        await detector.scan(announcing: true)
+
+        XCTAssertTrue(notifier.notified.isEmpty)
+    }
+
+    func testPreferencesDefaultDetectionOnForExistingInstallations() throws {
+        let legacyPreferences = Data(#"{"fallbackCheckInterval":60}"#.utf8)
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: legacyPreferences)
+
+        XCTAssertTrue(decoded.detectNewShares)
+
+        let roundTripped = try JSONDecoder().decode(
+            AppPreferences.self,
+            from: try JSONEncoder().encode(AppPreferences(detectNewShares: false))
+        )
+        XCTAssertFalse(roundTripped.detectNewShares)
+    }
+}
+
+private actor SuggestionSource {
+    private var suggestions: [MountedShareSuggestion]
+
+    init(_ suggestions: [MountedShareSuggestion]) {
+        self.suggestions = suggestions
+    }
+
+    func set(_ suggestions: [MountedShareSuggestion]) {
+        self.suggestions = suggestions
+    }
+
+    func current() -> [MountedShareSuggestion] {
+        suggestions
+    }
+}
+
+@MainActor
+private final class RecordingDetectedShareNotifier: DetectedShareNotifying {
+    private(set) var notified: [MountedShareSuggestion] = []
+    private(set) var withdrawn: [MountedShareSuggestion] = []
+
+    func notifyDetectedShare(_ suggestion: MountedShareSuggestion) {
+        notified.append(suggestion)
+    }
+
+    func withdrawDetectedShareNotification(for suggestion: MountedShareSuggestion) {
+        withdrawn.append(suggestion)
+    }
+}

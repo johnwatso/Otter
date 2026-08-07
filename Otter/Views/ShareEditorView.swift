@@ -27,13 +27,22 @@ struct ShareEditorView: View {
 
     init(
         share: NetworkShare?,
+        prefill: MountedShareSuggestion? = nil,
         appliesToShareCount: Int? = nil,
         onSave: @escaping (NetworkShare) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.sourceShare = share
         self.appliesToShareCount = appliesToShareCount
-        _draft = State(initialValue: DraftShare(share: share))
+
+        var initialDraft = DraftShare(share: share)
+        if let prefill {
+            initialDraft.displayName = prefill.displayName
+            initialDraft.urlString = prefill.urlString
+            initialDraft.mountPath = prefill.mountPath
+        }
+        _draft = State(initialValue: initialDraft)
+
         self.onSave = onSave
         self.onCancel = onCancel
     }
@@ -253,7 +262,7 @@ struct ShareEditorView: View {
                         .padding(.leading, 20)
                     }
 
-                    Toggle("Connect when VPN is active", isOn: Binding(
+                    Toggle("Connect over VPN", isOn: Binding(
                         get: { draft.usesVPNRule },
                         set: { isOn in
                             draft.usesVPNRule = isOn
@@ -265,7 +274,7 @@ struct ShareEditorView: View {
 
                     if draft.usesVPNRule {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Connect this share when the selected VPN is active.")
+                            Text("Connect this share while the selected VPN is connected.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
 

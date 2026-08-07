@@ -34,6 +34,7 @@ Otters are small, quick, and famously good at not letting important things drift
 - 🔌 Handles slow or sleeping servers with reachability monitoring, Wake-on-LAN, hostname fallback, and safe recovery tools
 - 🔐 Stores credentials in Keychain and keeps passwords and private identifiers out of exports, diagnostics, and support packages
 - ⏸️ Provides flexible pause controls, actionable notifications, and Shortcuts actions for everyday management
+- 👀 Notices shares mounted outside Otter and offers to manage them, with an offer that waits in the menu bar until you answer it
 - 🏢 Supports versioned configuration transfer and managed deployment through MDM ([configuration reference](docs/managed-deployment.md))
 - 🍎 Runs as a lightweight native menu bar app with launch-at-login and automatic updates
 

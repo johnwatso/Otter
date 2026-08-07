@@ -5,6 +5,7 @@ import Foundation
 struct ShareEditorRequest: Identifiable, Equatable {
     enum Mode: Equatable {
         case add
+        case addDetected(MountedShareSuggestion)
         case edit(NetworkShare.ID)
     }
 
@@ -37,6 +38,7 @@ final class AppModel: ObservableObject {
     let eventLog: ShareEventLog
     let monitor: ShareMonitor
     let connectionDoctor: ConnectionDoctor
+    let newShareDetector: NewShareDetectionService
 
     @Published var editorRequest: ShareEditorRequest?
     @Published var shouldOpenSharesWindow = false
@@ -145,6 +147,11 @@ final class AppModel: ObservableObject {
             networkService: networkService,
             monitor: monitor
         )
+        self.newShareDetector = NewShareDetectionService(
+            settings: settings,
+            notificationService: notificationService,
+            defaults: defaults
+        )
     }
 
     func start() {
@@ -153,11 +160,15 @@ final class AppModel: ObservableObject {
         notificationService.actionHandler = { [weak self] action, shareID in
             self?.handleNotificationAction(action, shareID: shareID)
         }
+        notificationService.detectedShareActionHandler = { [weak self] action, mountPath in
+            self?.handleDetectedShareAction(action, mountPath: mountPath)
+        }
         OtterIntentBridge.configure(with: self)
         loginItemService.refresh()
         notificationService.start()
         networkService.start()
         monitor.start()
+        newShareDetector.start()
         observePreferences()
         refreshDockIconVisibility()
     }
@@ -181,6 +192,37 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func handleDetectedShareAction(_ action: DetectedShareNotificationAction, mountPath: String) {
+        guard let suggestion = newShareDetector.pendingSuggestion(withMountPath: mountPath) else { return }
+
+        switch action {
+        case .manage:
+            manageDetectedShare(suggestion)
+        case .review:
+            reviewDetectedShare(suggestion)
+        case .ignore:
+            newShareDetector.ignore(suggestion)
+        }
+    }
+
+    // Accepts the offer: Otter adds the share and keeps it mounted from now on.
+    func manageDetectedShare(_ suggestion: MountedShareSuggestion) {
+        guard newShareDetector.manage(suggestion) != nil else { return }
+        triggerOpenSharesWindow()
+    }
+
+    // Opens the new-share editor prefilled from the detected volume. The offer
+    // stays until the share is saved or ignored, so cancelling loses nothing.
+    func reviewDetectedShare(_ suggestion: MountedShareSuggestion) {
+        newShareDetector.acknowledgeNotification(for: suggestion)
+        triggerOpenSharesWindow()
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            editorRequest = ShareEditorRequest(mode: .addDetected(suggestion))
+        }
+    }
+
     func requestNewShare() {
         editorRequest = ShareEditorRequest(mode: .add)
     }
@@ -200,11 +242,13 @@ final class AppModel: ObservableObject {
 
     func onboardingDidBegin() {
         isOnboardingPresented = true
+        newShareDetector.isSuppressed = true
         refreshDockIconVisibility(activateIfShowing: true)
     }
 
     func onboardingDidEnd() {
         isOnboardingPresented = false
+        newShareDetector.isSuppressed = editorRequest != nil
         refreshDockIconVisibility()
     }
 
@@ -229,6 +273,15 @@ final class AppModel: ObservableObject {
     }
 
     private func observePreferences() {
+        // The editor's Finder picker mounts the very share being added, so
+        // detection stays quiet while an editor or onboarding is on screen.
+        $editorRequest
+            .sink { [weak self] request in
+                guard let self else { return }
+                self.newShareDetector.isSuppressed = request != nil || self.isOnboardingPresented
+            }
+            .store(in: &cancellables)
+
         settings.$preferences
             .map(\.appPresenceMode)
             .removeDuplicates()

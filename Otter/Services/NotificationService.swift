@@ -8,6 +8,12 @@ enum ShareNotificationAction: Sendable {
     case showShare
 }
 
+enum DetectedShareNotificationAction: Sendable {
+    case manage
+    case review
+    case ignore
+}
+
 @MainActor
 final class NotificationService: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     @Published private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
@@ -20,6 +26,7 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
     // every retry would fire another notification.
     private var problemNotificationTracker = ProblemNotificationTracker()
     var actionHandler: ((ShareNotificationAction, NetworkShare.ID) -> Void)?
+    var detectedShareActionHandler: ((DetectedShareNotificationAction, String) -> Void)?
 
     private enum ActionIdentifier {
         static let retry = "share.retry"
@@ -27,6 +34,11 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
         static let pause = "share.pause"
         static let category = "share-status"
         static let shareIDKey = "shareID"
+
+        static let manageDetected = "detected.manage"
+        static let ignoreDetected = "detected.ignore"
+        static let detectedCategory = "detected-share"
+        static let detectedMountPathKey = "detectedMountPath"
     }
 
     init(settings: SettingsStore) {
@@ -116,6 +128,25 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
         }
     }
 
+    // Offers the user a newly mounted share that Otter isn't managing yet. The
+    // notification carries no expiry: it waits in Notification Center until it
+    // is answered, dismissed, or withdrawn once the offer is resolved.
+    func notifyDetectedShare(_ suggestion: MountedShareSuggestion) {
+        guard settings.preferences.notificationsEnabled,
+              settings.preferences.detectNewShares
+        else { return }
+
+        Task {
+            await deliverDetectedShare(suggestion)
+        }
+    }
+
+    func withdrawDetectedShareNotification(for suggestion: MountedShareSuggestion) {
+        let identifier = Self.detectedShareIdentifier(for: suggestion)
+        center.removePendingNotificationRequests(withIdentifiers: [identifier])
+        center.removeDeliveredNotifications(withIdentifiers: [identifier])
+    }
+
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
@@ -124,7 +155,9 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
             self.settings.preferences.notificationSoundsEnabled
         }
 
-        var options: UNNotificationPresentationOptions = [.banner]
+        // .list keeps the notification in Notification Center when it arrives
+        // while Otter is frontmost, so it can still be answered later.
+        var options: UNNotificationPresentationOptions = [.banner, .list]
         if shouldPlaySound {
             options.insert(.sound)
         }
@@ -135,7 +168,28 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        guard let shareIDString = response.notification.request.content.userInfo[ActionIdentifier.shareIDKey] as? String,
+        let userInfo = response.notification.request.content.userInfo
+
+        if let mountPath = userInfo[ActionIdentifier.detectedMountPathKey] as? String {
+            let detectedAction: DetectedShareNotificationAction
+            switch response.actionIdentifier {
+            case ActionIdentifier.manageDetected:
+                detectedAction = .manage
+            case ActionIdentifier.ignoreDetected:
+                detectedAction = .ignore
+            case UNNotificationDefaultActionIdentifier:
+                detectedAction = .review
+            default:
+                return
+            }
+
+            await MainActor.run {
+                self.detectedShareActionHandler?(detectedAction, mountPath)
+            }
+            return
+        }
+
+        guard let shareIDString = userInfo[ActionIdentifier.shareIDKey] as? String,
               let shareID = UUID(uuidString: shareIDString)
         else { return }
 
@@ -186,6 +240,37 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
         }
     }
 
+    private func deliverDetectedShare(_ suggestion: MountedShareSuggestion) async {
+        guard await hasPermissionToNotify() else { return }
+
+        let serverName = URL(string: suggestion.urlString)?.host(percentEncoded: false)
+
+        let content = UNMutableNotificationContent()
+        content.title = "New share mounted"
+        content.body = serverName.map { "“\(suggestion.displayName)” on \($0) isn't managed by Otter yet." }
+            ?? "“\(suggestion.displayName)” isn't managed by Otter yet."
+        content.threadIdentifier = ActionIdentifier.detectedCategory
+        content.categoryIdentifier = ActionIdentifier.detectedCategory
+        content.userInfo[ActionIdentifier.detectedMountPathKey] = suggestion.mountPath
+        content.interruptionLevel = .timeSensitive
+
+        if settings.preferences.notificationSoundsEnabled {
+            content.sound = .default
+        }
+
+        let request = UNNotificationRequest(
+            identifier: Self.detectedShareIdentifier(for: suggestion),
+            content: content,
+            trigger: nil
+        )
+
+        try? await center.add(request)
+    }
+
+    private static func detectedShareIdentifier(for suggestion: MountedShareSuggestion) -> String {
+        "\(ActionIdentifier.detectedCategory).\(suggestion.mountPath)"
+    }
+
     private func registerNotificationActions() {
         let retry = UNNotificationAction(
             identifier: ActionIdentifier.retry,
@@ -208,7 +293,25 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
             intentIdentifiers: [],
             options: []
         )
-        center.setNotificationCategories([category])
+
+        let manageDetected = UNNotificationAction(
+            identifier: ActionIdentifier.manageDetected,
+            title: "Keep This Mounted",
+            options: [.foreground]
+        )
+        let ignoreDetected = UNNotificationAction(
+            identifier: ActionIdentifier.ignoreDetected,
+            title: "Don't Ask Again",
+            options: []
+        )
+        let detectedCategory = UNNotificationCategory(
+            identifier: ActionIdentifier.detectedCategory,
+            actions: [manageDetected, ignoreDetected],
+            intentIdentifiers: [],
+            options: []
+        )
+
+        center.setNotificationCategories([category, detectedCategory])
     }
 
     private func hasPermissionToNotify() async -> Bool {

@@ -61,8 +61,15 @@ protocol ShareNotificationProviding: AnyObject {
     func notifyStatusChange(for share: NetworkShare, previous: ShareStatus, current: ShareStatus)
 }
 
+@MainActor
+protocol DetectedShareNotifying: AnyObject {
+    func notifyDetectedShare(_ suggestion: MountedShareSuggestion)
+    func withdrawDetectedShareNotification(for suggestion: MountedShareSuggestion)
+}
+
 extension MountService: MountServicing {}
 extension WakeOnLANService: WakeOnLANServicing {}
 extension MountHealthService: MountHealthChecking {}
 extension NetworkReachabilityService: NetworkReachabilityProviding {}
 extension NotificationService: ShareNotificationProviding {}
+extension NotificationService: DetectedShareNotifying {}
