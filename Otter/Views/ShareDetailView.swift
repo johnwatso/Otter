@@ -84,8 +84,17 @@ struct ShareDetailView: View {
                         }
                         DetailRow(label: "Share", value: NetworkShare.inferredShareName(from: currentShare.urlString) ?? currentShare.displayName)
                         DetailRow(label: "Mount location", value: currentShare.mountPath)
-                        DetailRow(label: "Protocol", value: "SMB")
+                        DetailRow(label: "Protocol", value: currentShare.connectionProtocol?.title ?? "Unknown")
                         DetailRow(label: "Keychain credentials", value: hasKeychainCredentials ? "✓ Saved" : "✕ Not found")
+
+                        if runtimeState.needsCredentials {
+                            Button {
+                                refreshCredentials()
+                            } label: {
+                                Label("Refresh Credentials in Finder", systemImage: "key.fill")
+                            }
+                            .tahoeSecondaryActionButton()
+                        }
 
                         if currentShare.hasUnstableIPAddress() {
                             HStack(alignment: .top, spacing: 7) {
@@ -128,6 +137,27 @@ struct ShareDetailView: View {
                     }
                 }
                 
+                Divider()
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Reliability")
+                        .font(.subheadline)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.secondary)
+                    let summary = eventLog.reliabilitySummary(for: currentShare.id)
+                    DetailRow(label: "Last 7 days", value: summary.isStable
+                        ? "No recorded problems"
+                        : "\(summary.connectionDrops) drops · \(summary.failures) failures · \(summary.healthFailures) health warnings")
+                    if let lastProblemAt = summary.lastProblemAt {
+                        DetailRow(label: "Last problem", value: lastProblemAt.formatted(date: .abbreviated, time: .shortened))
+                    }
+                    if currentShare.healthCheck.isEnabled {
+                        DetailRow(label: "Health checks", value: healthCheckDescription)
+                    } else {
+                        DetailRow(label: "Health checks", value: "Off")
+                    }
+                }
+
                 Divider()
                 
                 // Conditions Section (Read-Only)
@@ -202,6 +232,18 @@ struct ShareDetailView: View {
     private func openVPNSettings() {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.Network-Settings.extension?VPN") else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    private func refreshCredentials() {
+        guard let url = currentShare.url else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private var healthCheckDescription: String {
+        var parts = ["Responsive"]
+        if currentShare.healthCheck.requiresWritableVolume { parts.append("Writable") }
+        if !currentShare.healthCheck.sentinelRelativePath.isEmpty { parts.append("Checks \(currentShare.healthCheck.sentinelRelativePath)") }
+        return parts.joined(separator: " · ")
     }
 
     private var hasKeychainCredentials: Bool {

@@ -8,11 +8,11 @@ Credentials must not be included in the payload or SMB URL. During setup, use Ot
 
 ## Payload schema
 
-The payload format is version 1:
+The payload format is version 2. Otter continues to accept version 1 payloads.
 
 ```json
 {
-  "formatVersion": 1,
+  "formatVersion": 2,
   "shares": [
     {
       "id": "92C3AA5A-B63D-4CEE-9689-C378B913631A",
@@ -34,6 +34,11 @@ The payload format is version 1:
         "vpnRuleEnabled": true,
         "vpnName": "Company VPN",
         "connectVPNAutomatically": true
+      },
+      "healthCheck": {
+        "isEnabled": true,
+        "requiresWritableVolume": false,
+        "sentinelRelativePath": ""
       }
     }
   ],
@@ -46,7 +51,7 @@ The payload format is version 1:
 
 Use a stable, unique UUID for every share. A managed share replaces locally stored runtime data with the same UUID while preserving that runtime data. `monitoring` is optional; omit it to leave those preferences under user control.
 
-`urlString` must be an SMB URL with a server and share path. Usernames and passwords in the URL cause the managed configuration to be rejected. A VPN connection path is valid only when `vpnRuleEnabled` is `true` and `vpnName` names the VPN. Set `connectVPNAutomatically` to `true` to let Otter start the VPN when needed, or `false` to make Otter wait for the user or another app to connect it. Existing payloads that omit this key retain the earlier automatic behavior. For app-managed VPNs, a live tunnel triggers a reachability check because macOS does not expose the exact profile name to other apps. If the selected profile cannot be confirmed and the server is unavailable, Otter waits quietly so a different active VPN does not create a false connection error.
+`urlString` must be an SMB, NFS, or WebDAV URL with a server and share path. Usernames and passwords in the URL cause the managed configuration to be rejected. `healthCheck` may require a writable volume or an expected file within the mounted volume. A VPN connection path is valid only when `vpnRuleEnabled` is `true` and `vpnName` names the VPN. Set `connectVPNAutomatically` to `true` to let Otter start the VPN when needed, or `false` to make Otter wait for the user or another app to connect it. Existing payloads that omit new keys receive safe defaults.
 
 ## Configuration profile example
 
@@ -65,7 +70,7 @@ The relevant `mcx_preference_settings` portion of a `com.apple.ManagedClient.pre
           <key>ManagedConfiguration</key>
           <dict>
             <key>formatVersion</key>
-            <integer>1</integer>
+            <integer>2</integer>
             <key>shares</key>
             <array>
               <dict>

@@ -192,6 +192,10 @@ private extension ShareEventKind {
             "Mounted volume stopped responding"
         case .recoveryAttempted:
             "Recovery started"
+        case .healthCheckFailed:
+            "Health check failed"
+        case .credentialsRequired:
+            "Credentials need attention"
         }
     }
 
@@ -213,6 +217,10 @@ private extension ShareEventKind {
             "externaldrive.badge.exclamationmark"
         case .recoveryAttempted:
             "wrench.and.screwdriver.fill"
+        case .healthCheckFailed:
+            "heart.text.square.fill"
+        case .credentialsRequired:
+            "key.fill"
         }
     }
 
@@ -234,6 +242,10 @@ private extension ShareEventKind {
             .red
         case .recoveryAttempted:
             .blue
+        case .healthCheckFailed:
+            .orange
+        case .credentialsRequired:
+            .orange
         }
     }
 }

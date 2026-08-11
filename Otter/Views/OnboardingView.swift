@@ -5,6 +5,7 @@ struct OnboardingView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appModel: AppModel
     @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var networkService: NetworkReachabilityService
     @EnvironmentObject private var discovery: SMBDiscoveryService
     @EnvironmentObject private var loginItemService: LoginItemService
     @EnvironmentObject private var notificationService: NotificationService
@@ -14,9 +15,12 @@ struct OnboardingView: View {
     @State private var step = 0
     @State private var mountedShares: [MountedShareSuggestion] = []
     @State private var isRefreshingMountedShares = false
+    @State private var savedSMBShares: [SavedSMBShare] = []
+    @State private var isRefreshingSavedSMBShares = false
     @State private var importedPaths = Set<String>()
     @State private var shareBrowserMessage: String?
     @State private var browsingServerID: DiscoveredSMBServer.ID?
+    @State private var browsingSavedShareID: SavedSMBShare.ID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -146,7 +150,8 @@ struct OnboardingView: View {
     }
 
     private var findSharesPage: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Add your shares")
                     .font(.title2.bold())
@@ -204,6 +209,57 @@ struct OnboardingView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+            GroupBox("Saved SMB connections") {
+                VStack(spacing: 8) {
+                    if isRefreshingSavedSMBShares {
+                        ProgressView("Checking Keychain…")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if savedSMBShares.isEmpty {
+                        Text("No saved SMB connections found in Keychain.")
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        ForEach(savedSMBShares) { savedShare in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Label(savedShare.displayName, systemImage: "key.fill")
+                                    Text(savedShare.detail)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button {
+                                    browseShares(using: savedShare)
+                                } label: {
+                                    if browsingSavedShareID == savedShare.id {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    } else {
+                                        Text(savedShare.hasSharePath ? "Mount" : "Browse Shares…")
+                                    }
+                                }
+                                .disabled(browsingServerID != nil || browsingSavedShareID != nil)
+                            }
+                        }
+                    }
+
+                    Button {
+                        refreshSavedSMBShares()
+                    } label: {
+                        Label("Refresh Saved Connections", systemImage: "key.viewfinder")
+                    }
+                    .tahoeCompactActionButton()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Text("Otter reads only saved server and share addresses. It checks reachability only after you choose one; passwords and usernames stay in Keychain.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(6)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             GroupBox("Nearby SMB servers") {
                 VStack(spacing: 8) {
                     if discovery.servers.isEmpty {
@@ -233,7 +289,7 @@ struct OnboardingView: View {
                                         Text("Browse Shares\u{2026}")
                                     }
                                 }
-                                .disabled(browsingServerID != nil)
+                                .disabled(browsingServerID != nil || browsingSavedShareID != nil)
                             }
                         }
                     }
@@ -253,6 +309,7 @@ struct OnboardingView: View {
                 .padding(6)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(24)
     }
@@ -326,6 +383,7 @@ struct OnboardingView: View {
     private func beginDiscovery() {
         discovery.start()
         refreshMountedShares()
+        refreshSavedSMBShares()
     }
 
     private func refreshMountedShares(
@@ -346,8 +404,20 @@ struct OnboardingView: View {
         }
     }
 
+    private func refreshSavedSMBShares() {
+        guard !isRefreshingSavedSMBShares else { return }
+        isRefreshingSavedSMBShares = true
+        let keychainDiscovery = appModel.keychainShareDiscoveryService
+        Task {
+            savedSMBShares = await Task.detached(priority: .userInitiated) {
+                keychainDiscovery.savedShares()
+            }.value
+            isRefreshingSavedSMBShares = false
+        }
+    }
+
     private func browseShares(on server: DiscoveredSMBServer) {
-        guard browsingServerID == nil else { return }
+        guard browsingServerID == nil, browsingSavedShareID == nil else { return }
         browsingServerID = server.id
         shareBrowserMessage = nil
 
@@ -374,6 +444,47 @@ struct OnboardingView: View {
                 shareBrowserMessage = "Couldn't browse this server: \(error.localizedDescription)"
             }
             browsingServerID = nil
+        }
+    }
+
+    private func browseShares(using savedShare: SavedSMBShare) {
+        guard browsingServerID == nil, browsingSavedShareID == nil else { return }
+        browsingSavedShareID = savedShare.id
+        shareBrowserMessage = nil
+
+        Task {
+            do {
+                guard let url = savedShare.connectionURL else {
+                    shareBrowserMessage = "This saved connection has an invalid network address."
+                    browsingSavedShareID = nil
+                    return
+                }
+                guard await networkService.canReachServer(for: url, timeout: 2) else {
+                    shareBrowserMessage = "\(savedShare.displayName) is not reachable on the current network, so Otter didn't try to mount it."
+                    browsingSavedShareID = nil
+                    return
+                }
+                let suggestions = try await appModel.shareBrowserService.browse(savedShare)
+                guard !suggestions.isEmpty else {
+                    shareBrowserMessage = "No share was selected."
+                    browsingSavedShareID = nil
+                    return
+                }
+
+                let existing = Set(mountedShares)
+                mountedShares = existing.union(suggestions).sorted {
+                    $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+                }
+                let previousCount = settings.shares.count
+                suggestions.forEach(importSuggestion)
+                let addedCount = settings.shares.count - previousCount
+                shareBrowserMessage = addedCount > 0
+                    ? "Added \(addedCount) share\(addedCount == 1 ? "" : "s") from Keychain."
+                    : "The selected share was already added."
+            } catch {
+                shareBrowserMessage = "Couldn't connect using this saved connection: \(error.localizedDescription)"
+            }
+            browsingSavedShareID = nil
         }
     }
 

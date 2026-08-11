@@ -566,8 +566,12 @@ final class ShareMonitor: ObservableObject {
 
         if isMounted {
             if let mountedURL {
-                if settings.preferences.recoverUnresponsiveMounts, reason == .timer {
-                    let health = await mountHealthService.checkMount(at: mountedURL, timeout: 3)
+                if reason == .timer && (settings.preferences.recoverUnresponsiveMounts || share.healthCheck.isEnabled) {
+                    let health = await mountHealthService.checkPolicy(
+                        at: mountedURL,
+                        policy: share.healthCheck,
+                        timeout: 3
+                    )
                     if health == .unresponsive {
                         eventLog.record(
                             .unresponsiveDetected,
@@ -592,6 +596,14 @@ final class ShareMonitor: ObservableObject {
                                 for: share.id
                             )
                         }
+                        return
+                    }
+                    if case let .unavailable(message) = health {
+                        eventLog.record(.healthCheckFailed, for: share, detail: message)
+                        state.status = .failed("Health check: \(message)")
+                        state.lastCheckedAt = now()
+                        state.nextRetryDate = nil
+                        saveState(state, for: share)
                         return
                     }
                 }
@@ -775,6 +787,7 @@ final class ShareMonitor: ObservableObject {
             var needsCredentials = false
             if case MountServiceError.authenticationFailed = error {
                 needsCredentials = true
+                eventLog.record(.credentialsRequired, for: share, detail: "Open the share in Finder to refresh its saved credentials.")
             }
 
             registerFailure(error.localizedDescription, for: share.id, needsCredentials: needsCredentials)

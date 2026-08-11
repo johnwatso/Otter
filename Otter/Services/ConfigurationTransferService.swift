@@ -1,7 +1,8 @@
+import CryptoKit
 import Foundation
 
 struct OtterConfigurationArchive: Codable, Equatable {
-    static let currentFormatVersion = 1
+    static let currentFormatVersion = 2
 
     let formatVersion: Int
     let exportedAt: Date
@@ -36,6 +37,7 @@ struct PortableShareConfiguration: Codable, Equatable {
     let autoConnectWhenReachable: Bool
     let wakeOnLAN: WakeOnLANConfiguration
     let rules: ShareRules
+    let healthCheck: ShareHealthCheckConfiguration
 
     init(share: NetworkShare) {
         id = share.id
@@ -53,6 +55,25 @@ struct PortableShareConfiguration: Codable, Equatable {
         autoConnectWhenReachable = share.autoConnectWhenReachable
         wakeOnLAN = share.wakeOnLAN
         rules = share.rules
+        healthCheck = share.healthCheck
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, displayName, urlString, mountPath, keepMounted, mountAtLaunch, autoConnectWhenReachable, wakeOnLAN, rules, healthCheck
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        urlString = try container.decode(String.self, forKey: .urlString)
+        mountPath = try container.decode(String.self, forKey: .mountPath)
+        keepMounted = try container.decode(Bool.self, forKey: .keepMounted)
+        mountAtLaunch = try container.decode(Bool.self, forKey: .mountAtLaunch)
+        autoConnectWhenReachable = try container.decodeIfPresent(Bool.self, forKey: .autoConnectWhenReachable) ?? false
+        wakeOnLAN = try container.decodeIfPresent(WakeOnLANConfiguration.self, forKey: .wakeOnLAN) ?? WakeOnLANConfiguration()
+        rules = try container.decodeIfPresent(ShareRules.self, forKey: .rules) ?? ShareRules()
+        healthCheck = try container.decodeIfPresent(ShareHealthCheckConfiguration.self, forKey: .healthCheck) ?? ShareHealthCheckConfiguration()
     }
 
     func makeNetworkShare(id: UUID? = nil) -> NetworkShare {
@@ -65,13 +86,14 @@ struct PortableShareConfiguration: Codable, Equatable {
             mountAtLaunch: mountAtLaunch,
             autoConnectWhenReachable: autoConnectWhenReachable,
             wakeOnLAN: wakeOnLAN,
-            rules: rules
+            rules: rules,
+            healthCheck: healthCheck
         )
     }
 }
 
 struct ManagedConfigurationPayload: Codable, Equatable {
-    static let currentFormatVersion = 1
+    static let currentFormatVersion = 2
 
     let formatVersion: Int
     let shares: [PortableShareConfiguration]
@@ -90,7 +112,7 @@ enum ManagedConfigurationService {
         else { return nil }
 
         guard let payload = try? JSONDecoder().decode(ManagedConfigurationPayload.self, from: data),
-              payload.formatVersion == ManagedConfigurationPayload.currentFormatVersion,
+              (1...ManagedConfigurationPayload.currentFormatVersion).contains(payload.formatVersion),
               payload.shares.allSatisfy(isValidManagedShare),
               Set(payload.shares.map(\.id)).count == payload.shares.count
         else { return nil }
@@ -111,7 +133,7 @@ enum ManagedConfigurationService {
 
     private static func isValidManagedShare(_ share: PortableShareConfiguration) -> Bool {
         guard let components = URLComponents(string: share.urlString) else { return false }
-        return components.scheme?.lowercased() == "smb"
+        return NetworkShareProtocol(urlScheme: components.scheme) != nil
             && components.host?.isEmpty == false
             && components.user == nil
             && components.password == nil
@@ -134,6 +156,7 @@ struct ConfigurationImportResult: Equatable {
 enum ConfigurationTransferError: LocalizedError {
     case unsupportedVersion(Int)
     case invalidConfiguration
+    case invalidBackupPassword
 
     var errorDescription: String? {
         switch self {
@@ -141,8 +164,24 @@ enum ConfigurationTransferError: LocalizedError {
             "This file uses unsupported Otter configuration format \(version)."
         case .invalidConfiguration:
             "The file does not contain a valid Otter configuration."
+        case .invalidBackupPassword:
+            "The backup password is incorrect or this protected backup is damaged."
         }
     }
+}
+
+// Credentials are only ever included inside this encrypted envelope. Plain
+// .otterconfig files remain safe to put under source control or send to IT.
+private struct CredentialedConfigurationArchive: Codable {
+    let configuration: OtterConfigurationArchive
+    let credentials: [PortableCredential]
+}
+
+struct ProtectedConfigurationBackup: Codable, Equatable {
+    static let currentFormatVersion = 1
+    let formatVersion: Int
+    let salt: Data
+    let encryptedPayload: Data
 }
 
 enum ConfigurationTransferService {
@@ -169,12 +208,12 @@ enum ConfigurationTransferService {
         guard let archive = try? decoder.decode(OtterConfigurationArchive.self, from: data) else {
             throw ConfigurationTransferError.invalidConfiguration
         }
-        guard archive.formatVersion == OtterConfigurationArchive.currentFormatVersion else {
+        guard (1...OtterConfigurationArchive.currentFormatVersion).contains(archive.formatVersion) else {
             throw ConfigurationTransferError.unsupportedVersion(archive.formatVersion)
         }
         guard archive.shares.allSatisfy({
             guard let components = URLComponents(string: $0.urlString) else { return false }
-            return components.scheme?.lowercased() == "smb"
+            return NetworkShareProtocol(urlScheme: components.scheme) != nil
                 && components.host?.isEmpty == false
                 && components.user == nil
                 && components.password == nil
@@ -183,6 +222,80 @@ enum ConfigurationTransferService {
             throw ConfigurationTransferError.invalidConfiguration
         }
         return archive
+    }
+
+    static func encodeProtectedBackup(
+        _ archive: OtterConfigurationArchive,
+        credentials: [PortableCredential],
+        password: String
+    ) throws -> Data {
+        let normalizedPassword = password.trimmingCharacters(in: .newlines)
+        guard !normalizedPassword.isEmpty else { throw ConfigurationTransferError.invalidBackupPassword }
+        let payload = try JSONEncoder.otterEncoder.encode(
+            CredentialedConfigurationArchive(configuration: archive, credentials: credentials)
+        )
+        let salt = Data((0..<32).map { _ in UInt8.random(in: .min ... .max) })
+        let key = derivedKey(password: normalizedPassword, salt: salt)
+        let sealedBox = try AES.GCM.seal(payload, using: key)
+        guard let sealed = sealedBox.combined else { throw ConfigurationTransferError.invalidConfiguration }
+        return try JSONEncoder.otterEncoder.encode(
+            ProtectedConfigurationBackup(
+                formatVersion: ProtectedConfigurationBackup.currentFormatVersion,
+                salt: salt,
+                encryptedPayload: sealed
+            )
+        )
+    }
+
+    static func decodeProtectedBackup(
+        _ data: Data,
+        password: String
+    ) throws -> (archive: OtterConfigurationArchive, credentials: [PortableCredential]) {
+        let backup = try JSONDecoder.otterDecoder.decode(ProtectedConfigurationBackup.self, from: data)
+        guard backup.formatVersion == ProtectedConfigurationBackup.currentFormatVersion else {
+            throw ConfigurationTransferError.unsupportedVersion(backup.formatVersion)
+        }
+        do {
+            let key = derivedKey(password: password.trimmingCharacters(in: .newlines), salt: backup.salt)
+            let box = try AES.GCM.SealedBox(combined: backup.encryptedPayload)
+            let payload = try AES.GCM.open(box, using: key)
+            let protectedArchive = try JSONDecoder.otterDecoder.decode(CredentialedConfigurationArchive.self, from: payload)
+            // Validate configurations exactly as plain imports do.
+            _ = try decode(try encode(protectedArchive.configuration))
+            return (protectedArchive.configuration, protectedArchive.credentials)
+        } catch let error as ConfigurationTransferError {
+            throw error
+        } catch {
+            throw ConfigurationTransferError.invalidBackupPassword
+        }
+    }
+
+    private static func derivedKey(password: String, salt: Data) -> SymmetricKey {
+        // PBKDF2 is not exposed by CryptoKit. Rehashing a salted SHA-256 value
+        // gives a deliberately expensive local-file key derivation without a
+        // dependency, and the random salt prevents precomputed attacks.
+        var material = Data(password.utf8) + salt
+        for _ in 0..<100_000 {
+            material = Data(SHA256.hash(data: material))
+        }
+        return SymmetricKey(data: material)
+    }
+}
+
+private extension JSONEncoder {
+    static var otterEncoder: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }
+}
+
+private extension JSONDecoder {
+    static var otterDecoder: JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
     }
 }
 

@@ -104,6 +104,19 @@ actor SMBShareBrowserService {
             throw MountServiceError.invalidURL
         }
 
+        return try await browse(serverURL, matchingHost: server.hostName)
+    }
+
+    func browse(_ savedShare: SavedSMBShare) async throws -> [MountedShareSuggestion] {
+        guard let connectionURL = savedShare.connectionURL else {
+            throw MountServiceError.invalidURL
+        }
+
+        return try await browse(connectionURL, matchingHost: savedShare.host)
+    }
+
+    private func browse(_ serverURL: URL, matchingHost: String) async throws -> [MountedShareSuggestion] {
+
         let result: (status: Int32, mountPaths: [String]) = await withCheckedContinuation { continuation in
             mountQueue.async {
                 var mountPoints: Unmanaged<CFArray>?
@@ -137,6 +150,6 @@ actor SMBShareBrowserService {
             }
         }
 
-        return MountedShareSuggestion.discover().filter { $0.matches(server: server) }
+        return MountedShareSuggestion.discover().filter { $0.matches(host: matchingHost) }
     }
 }

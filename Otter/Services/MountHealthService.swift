@@ -35,6 +35,33 @@ final class MountHealthService: @unchecked Sendable {
         )
         return !result.timedOut && result.launchError == nil && result.terminationStatus == 0
     }
+
+    // Checks that matter to clients of a mounted volume, not just that macOS
+    // still lists it. This remains read-only: a writable-volume check uses the
+    // filesystem attributes rather than creating a probe file on user data.
+    func checkPolicy(
+        at url: URL,
+        policy: ShareHealthCheckConfiguration,
+        timeout: TimeInterval = 3
+    ) async -> MountHealthResult {
+        guard policy.isEnabled else { return .healthy }
+
+        let responsiveness = await checkMount(at: url, timeout: timeout)
+        guard responsiveness == .healthy else { return responsiveness }
+
+        let values = try? url.resourceValues(forKeys: [.volumeIsReadOnlyKey])
+        if policy.requiresWritableVolume, values?.volumeIsReadOnly == true {
+            return .unavailable("The mounted volume is read-only.")
+        }
+
+        if !policy.sentinelRelativePath.isEmpty {
+            let sentinel = url.appending(path: policy.sentinelRelativePath)
+            guard FileManager.default.fileExists(atPath: sentinel.path) else {
+                return .unavailable("Expected file “\(policy.sentinelRelativePath)” is missing.")
+            }
+        }
+        return .healthy
+    }
 }
 
 private struct TimedProcessResult: Sendable {

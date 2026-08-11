@@ -31,6 +31,7 @@ final class AppModel: ObservableObject {
     let vpnConnectionService: SystemVPNConnectionService
     let discoveryService: SMBDiscoveryService
     let shareBrowserService: SMBShareBrowserService
+    let keychainShareDiscoveryService: KeychainSMBShareDiscoveryService
     let wakeOnLANService: WakeOnLANService
     let notificationService: NotificationService
     let loginItemService: LoginItemService
@@ -137,6 +138,7 @@ final class AppModel: ObservableObject {
         self.vpnConnectionService = vpnConnectionService
         self.discoveryService = SMBDiscoveryService()
         self.shareBrowserService = SMBShareBrowserService()
+        self.keychainShareDiscoveryService = KeychainSMBShareDiscoveryService()
         self.wakeOnLANService = wakeOnLANService
         self.notificationService = notificationService
         self.loginItemService = LoginItemService()

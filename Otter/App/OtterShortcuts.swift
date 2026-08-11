@@ -1,4 +1,5 @@
 import AppIntents
+import AppKit
 import Foundation
 
 struct OtterShareEntity: AppEntity, Identifiable {
@@ -91,6 +92,34 @@ struct GetOtterShareStatusIntent: AppIntent {
     }
 }
 
+struct GetOtterReliabilityIntent: AppIntent {
+    static let title: LocalizedStringResource = "Get Otter Share Reliability"
+    static let description = IntentDescription("Returns a seven-day reliability summary for a configured network share.")
+    static let openAppWhenRun = false
+
+    @Parameter(title: "Share")
+    var share: OtterShareEntity
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let message = try await OtterIntentBridge.reliability(shareID: share.id)
+        return .result(dialog: "\(message)")
+    }
+}
+
+struct RefreshOtterShareCredentialsIntent: AppIntent {
+    static let title: LocalizedStringResource = "Refresh Otter Share Credentials"
+    static let description = IntentDescription("Opens a network share in Finder so macOS can update its Keychain credentials.")
+    static let openAppWhenRun = false
+
+    @Parameter(title: "Share")
+    var share: OtterShareEntity
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let message = try await OtterIntentBridge.refreshCredentials(shareID: share.id)
+        return .result(dialog: "\(message)")
+    }
+}
+
 struct OtterAppShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
@@ -166,6 +195,22 @@ enum OtterIntentBridge {
         let (appModel, share) = try resolve(shareID: shareID)
         let status = appModel.monitor.status(for: share)
         return "\(share.displayName): \(status.label)."
+    }
+
+    static func reliability(shareID: UUID) throws -> String {
+        let (appModel, share) = try resolve(shareID: shareID)
+        let summary = appModel.eventLog.reliabilitySummary(for: share.id)
+        if summary.isStable {
+            return "\(share.displayName) has had no recorded problems in the last seven days."
+        }
+        return "\(share.displayName): \(summary.connectionDrops) connection drops, \(summary.failures) connection failures, and \(summary.healthFailures) health-check failures in the last seven days."
+    }
+
+    static func refreshCredentials(shareID: UUID) throws -> String {
+        let (_, share) = try resolve(shareID: shareID)
+        guard let url = share.url else { throw OtterIntentError.shareNotFound }
+        NSWorkspace.shared.open(url)
+        return "Finder opened \(share.displayName). Sign in and save the password to Keychain if prompted."
     }
 
     private static func resolve(shareID: UUID) throws -> (AppModel, NetworkShare) {

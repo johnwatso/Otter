@@ -14,6 +14,31 @@ final class AppIconAssetTests: XCTestCase {
 }
 
 final class NetworkShareTests: XCTestCase {
+    func testSavedSMBShareBuildsAnEncodedConnectionURL() throws {
+        let savedShare = try XCTUnwrap(
+            SavedSMBShare(host: "  nas.local  ", path: "/Family Photos/", port: 445)
+        )
+
+        XCTAssertEqual(savedShare.displayName, "Family Photos")
+        XCTAssertEqual(savedShare.detail, "nas.local/Family Photos")
+        XCTAssertEqual(savedShare.connectionURL?.absoluteString, "smb://nas.local/Family%20Photos")
+        XCTAssertTrue(savedShare.hasSharePath)
+    }
+
+    func testSavedSMBShareWithoutPathUsesServerRootForNativeSharePicker() throws {
+        let savedShare = try XCTUnwrap(SavedSMBShare(host: "archive.local"))
+
+        XCTAssertEqual(savedShare.displayName, "archive.local")
+        XCTAssertEqual(savedShare.connectionURL?.absoluteString, "smb://archive.local/")
+        XCTAssertFalse(savedShare.hasSharePath)
+    }
+
+    func testSavedSMBShareRejectsInvalidAddresses() {
+        XCTAssertNil(SavedSMBShare(host: ""))
+        XCTAssertNil(SavedSMBShare(host: "server.local/path"))
+        XCTAssertNil(SavedSMBShare(host: "server.local", port: 0))
+    }
+
     func testMountedSuggestionMatchesBonjourDiscoveryIdentity() {
         let suggestion = MountedShareSuggestion(
             displayName: "Media",
@@ -25,6 +50,27 @@ final class NetworkShareTests: XCTestCase {
 
         XCTAssertTrue(suggestion.matches(server: matchingServer))
         XCTAssertFalse(suggestion.matches(server: otherServer))
+    }
+
+    func testMountedSuggestionRecognizesTheSameShareAfterFinderRenamesItsMountPoint() {
+        let original = MountedShareSuggestion(
+            displayName: "Media",
+            urlString: "smb://nas.local/Media",
+            mountPath: "/Volumes/Media"
+        )
+        let remounted = MountedShareSuggestion(
+            displayName: "Media-1",
+            urlString: "smb://nas.local/Media/Movies",
+            mountPath: "/Volumes/Media-1"
+        )
+        let differentShare = MountedShareSuggestion(
+            displayName: "Backups",
+            urlString: "smb://nas.local/Backups",
+            mountPath: "/Volumes/Backups"
+        )
+
+        XCTAssertTrue(original.isSameShare(as: remounted))
+        XCTAssertFalse(original.isSameShare(as: differentShare))
     }
 
     func testFinderImportCandidatesPreferTheSelectedBonjourServer() {
@@ -54,6 +100,20 @@ final class NetworkShareTests: XCTestCase {
         XCTAssertEqual(NetworkShare.inferredShareName(from: "smb://server.local/media/Movies"), "Movies")
         XCTAssertEqual(NetworkShare.inferredShareName(from: "smb://server.local/My%20Share"), "My Share")
         XCTAssertNil(NetworkShare.inferredShareName(from: "smb://server.local"))
+    }
+
+    func testRecognizesSupportedNetworkProtocols() {
+        XCTAssertEqual(NetworkShareProtocol(urlScheme: "smb"), .smb)
+        XCTAssertEqual(NetworkShareProtocol(urlScheme: "nfs"), .nfs)
+        XCTAssertEqual(NetworkShareProtocol(urlScheme: "https"), .webdav)
+        XCTAssertNil(NetworkShareProtocol(urlScheme: "ftp"))
+
+        let nfsShare = NetworkShare(
+            displayName: "Archive",
+            urlString: "nfs://server.local/export/archive",
+            mountPath: "/Volumes/Archive"
+        )
+        XCTAssertEqual(nfsShare.connectionProtocol, .nfs)
     }
 
     func testSharesOnTheSameServerAreGroupedForPresentation() {
@@ -325,6 +385,22 @@ final class NetworkShareTests: XCTestCase {
         XCTAssertTrue(draft.rules.hasNetworkRule)
         XCTAssertFalse(draft.rules.hasVPNRule)
     }
+
+    func testEditorDraftMapsConnectionChoicesToExistingSettings() {
+        var draft = DraftShare(share: nil)
+
+        XCTAssertEqual(draft.automaticConnectionMode, .keepConnected)
+
+        draft.automaticConnectionMode = .whenAvailable
+        XCTAssertFalse(draft.keepMounted)
+        XCTAssertTrue(draft.autoConnectWhenReachable)
+        XCTAssertFalse(draft.mountAtLaunch)
+
+        draft.automaticConnectionMode = .manual
+        XCTAssertFalse(draft.keepMounted)
+        XCTAssertFalse(draft.autoConnectWhenReachable)
+        XCTAssertFalse(draft.mountAtLaunch)
+    }
 }
 
 final class WakeOnLANConfigurationTests: XCTestCase {
@@ -353,6 +429,19 @@ final class WakeOnLANConfigurationTests: XCTestCase {
         XCTAssertEqual(configuration.macAddress, "AA:BB:CC:DD:EE:FF")
         XCTAssertEqual(configuration.broadcastAddress, WakeOnLANConfiguration.defaultBroadcastAddress)
         XCTAssertEqual(configuration.port, 65_535)
+    }
+
+    func testWakeOnLANDiscoveryParsesMACAddressAndInterfaceFromARPOutput() {
+        let output = "? (192.168.1.25) at aa:bb:cc:dd:ee:ff on en0 ifscope [ethernet]"
+
+        let neighbour = WakeOnLANConfigurationDiscoveryService.parseARPNeighbour(output)
+
+        XCTAssertEqual(neighbour?.macAddress, "AA:BB:CC:DD:EE:FF")
+        XCTAssertEqual(neighbour?.interface, "en0")
+    }
+
+    func testWakeOnLANDiscoveryRejectsIncompleteARPEntry() {
+        XCTAssertNil(WakeOnLANConfigurationDiscoveryService.parseARPNeighbour("? (192.168.1.25) at (incomplete) on en0"))
     }
 }
 
@@ -2027,6 +2116,34 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertThrowsError(
             try ConfigurationTransferService.decode(Data(credentialedJSON.utf8))
         )
+    }
+
+    func testProtectedConfigurationBackupRoundTripsCredentials() throws {
+        let share = NetworkShare(
+            displayName: "Archive",
+            urlString: "nfs://server.local/exports/archive",
+            mountPath: "/Volumes/Archive",
+            healthCheck: ShareHealthCheckConfiguration(
+                requiresWritableVolume: true,
+                sentinelRelativePath: ".otter-health"
+            )
+        )
+        let archive = ConfigurationTransferService.archive(
+            shares: [share], preferences: AppPreferences()
+        )
+        let credentials = [PortableCredential(host: "server.local", account: "otter", passwordData: Data("secret".utf8))]
+
+        let data = try ConfigurationTransferService.encodeProtectedBackup(
+            archive, credentials: credentials, password: "correct horse battery staple"
+        )
+        let restored = try ConfigurationTransferService.decodeProtectedBackup(
+            data, password: "correct horse battery staple"
+        )
+
+        XCTAssertEqual(restored.archive.shares.first?.urlString, share.urlString)
+        XCTAssertEqual(restored.archive.shares.first?.healthCheck, share.healthCheck)
+        XCTAssertEqual(restored.credentials, credentials)
+        XCTAssertThrowsError(try ConfigurationTransferService.decodeProtectedBackup(data, password: "wrong"))
     }
 
     @MainActor

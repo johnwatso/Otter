@@ -28,14 +28,16 @@ Otters are small, quick, and famously good at not letting important things drift
 
 ## Features
 
-- 📁 Keeps SMB shares mounted through sleep, wake, network changes, and unexpected disconnects
+- 📁 Keeps SMB, NFS, and WebDAV shares mounted through sleep, wake, network changes, and unexpected disconnects
 - 🔒 Connects on a registered network or over VPN, with optional automatic VPN connection and server checks for providers such as WireGuard
 - 🧭 Guides setup with mounted-share import, SMB discovery, the native macOS share picker, and a Connection Readiness test
 - 🔌 Handles slow or sleeping servers with reachability monitoring, Wake-on-LAN, hostname fallback, and safe recovery tools
-- 🔐 Stores credentials in Keychain and keeps passwords and private identifiers out of exports, diagnostics, and support packages
+- 🔐 Stores credentials in Keychain, with an opt-in password-encrypted backup for eligible SMB credentials; plain exports and support packages stay redacted
 - ⏸️ Provides flexible pause controls, actionable notifications, and Shortcuts actions for everyday management
 - 👀 Notices shares mounted outside Otter and offers to manage them, with an offer that waits in the menu bar until you answer it
-- 🏢 Supports versioned configuration transfer and managed deployment through MDM ([configuration reference](docs/managed-deployment.md))
+- 🩺 Verifies mounted volumes with responsive, writable, and expected-file checks; tracks reliability trends and guides credential recovery
+- 🔗 Includes richer Shortcuts actions for mounting, pausing, status, reliability, and credential recovery
+- 🏢 Supports versioned configuration transfer, protected backups, and managed deployment through MDM ([configuration reference](docs/managed-deployment.md))
 - 🍎 Runs as a lightweight native menu bar app with launch-at-login and automatic updates
 
 No scripts. No daemons. No fuss.
@@ -46,12 +48,12 @@ Just an otter that never lets go.
 
 Otter watches for the moments shares tend to drop—wake from sleep, network path changes, volumes mounting or unmounting—and checks that each configured share is still where it should be. If one is missing, it remounts it using the native macOS NetFS APIs, with retry backoff when the server isn't reachable yet. Shares with Wake-on-LAN enabled send a magic packet before retrying an unreachable server. A low-frequency fallback check catches anything the system events miss.
 
-The first-run assistant can import shares already mounted in Finder, show nearby SMB servers, or take you to manual setup. Browsing a nearby server uses macOS's native authentication and share-selection UI, so credentials continue to be handled by the system and Keychain. The same options remain available later when adding another share.
+The first-run assistant can import shares already mounted in Finder, show nearby SMB servers, check the saved SMB addresses in Keychain, or take you to manual setup. Keychain discovery reads only server and share address metadata; it never reads usernames or passwords, and it checks a server only after you choose it. Browsing a nearby or saved server uses macOS's native authentication and share-selection UI, so credentials continue to be handled by the system and Keychain. The same options remain available later when adding another share.
 
 ## Using Otter
 
 1. Open Otter and follow the first-run assistant.
-2. Import a mounted Finder share, choose a nearby SMB server, or enter an address manually.
+2. Import a mounted Finder share, choose a nearby or saved SMB server, or enter an address manually.
 3. Review the share and save it.
 4. Optional: add a network condition, Wake-on-LAN details, or "connect when reachable" behavior.
 

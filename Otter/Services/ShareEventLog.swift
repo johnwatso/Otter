@@ -10,6 +10,8 @@ enum ShareEventKind: String, Codable {
     case wakePacketSent
     case unresponsiveDetected
     case recoveryAttempted
+    case healthCheckFailed
+    case credentialsRequired
 }
 
 struct ShareEvent: Identifiable, Codable, Equatable {
@@ -18,6 +20,17 @@ struct ShareEvent: Identifiable, Codable, Equatable {
     let date: Date
     let kind: ShareEventKind
     let detail: String?
+}
+
+struct ShareReliabilitySummary: Equatable {
+    let connectionDrops: Int
+    let failures: Int
+    let healthFailures: Int
+    let lastProblemAt: Date?
+
+    var isStable: Bool {
+        connectionDrops == 0 && failures == 0 && healthFailures == 0
+    }
 }
 
 // Persisted, capped log of share status transitions. Feeds the Activity Log
@@ -72,6 +85,29 @@ final class ShareEventLog: ObservableObject {
         return events
             .filter { $0.shareID == shareID && $0.kind == .connectionLost && $0.date >= cutoff }
             .count
+    }
+
+    func reliabilitySummary(
+        for shareID: NetworkShare.ID,
+        within interval: TimeInterval = 7 * 24 * 60 * 60,
+        at date: Date = Date()
+    ) -> ShareReliabilitySummary {
+        let cutoff = date.addingTimeInterval(-interval)
+        let recent = events.filter { $0.shareID == shareID && $0.date >= cutoff }
+        let problems = recent.filter { event in
+            switch event.kind {
+            case .connectionLost, .mountFailed, .unresponsiveDetected, .healthCheckFailed, .credentialsRequired:
+                true
+            default:
+                false
+            }
+        }
+        return ShareReliabilitySummary(
+            connectionDrops: recent.filter { $0.kind == .connectionLost }.count,
+            failures: recent.filter { $0.kind == .mountFailed || $0.kind == .credentialsRequired }.count,
+            healthFailures: recent.filter { $0.kind == .healthCheckFailed || $0.kind == .unresponsiveDetected }.count,
+            lastProblemAt: problems.map(\.date).max()
+        )
     }
 
     func pruneShares(keeping shareIDs: Set<NetworkShare.ID>) {

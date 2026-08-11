@@ -92,6 +92,20 @@ final class SettingsStore: ObservableObject {
         credentialStore.hasCredentials(for: host)
     }
 
+    func portableCredentials() -> [PortableCredential] {
+        shares.compactMap { share in
+            guard share.connectionProtocol == .smb, let host = share.host else { return nil }
+            return credentialStore.exportCredential(for: host)
+        }
+    }
+
+    @discardableResult
+    func importPortableCredentials(_ credentials: [PortableCredential]) -> Int {
+        credentials.reduce(into: 0) { imported, credential in
+            if credentialStore.importCredential(credential) { imported += 1 }
+        }
+    }
+
     func isManagedShare(id: NetworkShare.ID) -> Bool {
         managedShareIDs.contains(id)
     }
@@ -198,19 +212,19 @@ final class SettingsStore: ObservableObject {
         var value = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         if value.hasPrefix("//") {
             value = "smb:\(value)"
-        } else if !value.lowercased().hasPrefix("smb://") {
+        } else if !value.contains("://") {
             value = "smb://\(value)"
         }
 
         guard var components = URLComponents(string: value),
-              components.scheme?.lowercased() == "smb",
+              NetworkShareProtocol(urlScheme: components.scheme) != nil,
               let host = components.host?.trimmingCharacters(in: .whitespacesAndNewlines),
               !host.isEmpty
         else {
             return false
         }
 
-        components.scheme = "smb"
+        components.scheme = components.scheme?.lowercased()
         components.host = host
         guard let normalizedURL = components.string else { return false }
 

@@ -48,10 +48,22 @@ struct MountedShareSuggestion: Identifiable, Hashable, Sendable {
     }
 
     func matches(server: DiscoveredSMBServer) -> Bool {
-        guard let host = URL(string: urlString)?.host(percentEncoded: false) else { return false }
-        let suggestionIdentity = Self.normalizedServerIdentity(host)
-        return suggestionIdentity == Self.normalizedServerIdentity(server.hostName)
-            || suggestionIdentity == Self.normalizedServerIdentity(server.name)
+        matches(host: server.hostName) || matches(host: server.name)
+    }
+
+    func matches(host: String) -> Bool {
+        guard let suggestionHost = URL(string: urlString)?.host(percentEncoded: false) else { return false }
+        return Self.normalizedServerIdentity(suggestionHost) == Self.normalizedServerIdentity(host)
+    }
+
+    func isSameShare(as other: MountedShareSuggestion) -> Bool {
+        if let location = NetworkShareLocation(url: URL(string: urlString)),
+           let otherLocation = NetworkShareLocation(url: URL(string: other.urlString)),
+           location == otherLocation {
+            return true
+        }
+
+        return Self.normalizedMountPath(mountPath) == Self.normalizedMountPath(other.mountPath)
     }
 
     static func finderImportCandidates(
@@ -86,6 +98,13 @@ struct MountedShareSuggestion: Identifiable, Hashable, Sendable {
         return normalized
     }
 
+    private static func normalizedMountPath(_ path: String) -> String {
+        URL(fileURLWithPath: path)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
+    }
+
     private static var resourceKeys: Set<URLResourceKey> {
         [
             .volumeURLKey,
@@ -115,6 +134,31 @@ enum VPNNameSelection: Hashable {
     case unconfigured
     case known(String)
     case custom
+}
+
+enum AutomaticConnectionMode: String, CaseIterable, Hashable {
+    case keepConnected
+    case whenAvailable
+    case manual
+
+    var title: String {
+        switch self {
+        case .keepConnected: "Keep connected"
+        case .whenAvailable: "Connect when available"
+        case .manual: "Manual"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .keepConnected:
+            "Otter reconnects this share whenever it becomes unavailable."
+        case .whenAvailable:
+            "Otter connects when the server responds, without treating an unavailable server as a problem."
+        case .manual:
+            "Otter connects this share only when you ask it to."
+        }
+    }
 }
 
 enum VPNVerificationResult: Equatable {
@@ -181,6 +225,7 @@ struct DraftShare {
     var usesVPNRule: Bool
     var vpnName: String
     var connectVPNAutomatically: Bool
+    var healthCheck: ShareHealthCheckConfiguration
     var createdAt: Date?
 
     init(share: NetworkShare?) {
@@ -207,6 +252,7 @@ struct DraftShare {
         usesVPNRule = share?.rules.requiredVPNName != nil
         vpnName = share?.rules.vpnName ?? ""
         connectVPNAutomatically = share?.rules.connectVPNAutomatically ?? true
+        healthCheck = share?.healthCheck ?? ShareHealthCheckConfiguration()
         createdAt = share?.createdAt
     }
 
@@ -228,4 +274,29 @@ struct DraftShare {
             port: wakeOnLANPort
         )
     }
+
+    var automaticConnectionMode: AutomaticConnectionMode {
+        get {
+            if keepMounted { return .keepConnected }
+            if autoConnectWhenReachable { return .whenAvailable }
+            return .manual
+        }
+        set {
+            switch newValue {
+            case .keepConnected:
+                keepMounted = true
+                autoConnectWhenReachable = false
+                mountAtLaunch = true
+            case .whenAvailable:
+                keepMounted = false
+                autoConnectWhenReachable = true
+                mountAtLaunch = false
+            case .manual:
+                keepMounted = false
+                autoConnectWhenReachable = false
+                mountAtLaunch = false
+            }
+        }
+    }
+
 }

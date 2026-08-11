@@ -28,7 +28,17 @@ enum MountHealthResult: Equatable, Sendable {
 
 protocol MountHealthChecking: Sendable {
     func checkMount(at url: URL, timeout: TimeInterval) async -> MountHealthResult
+    func checkPolicy(at url: URL, policy: ShareHealthCheckConfiguration, timeout: TimeInterval) async -> MountHealthResult
     func unmountForRecovery(at url: URL, timeout: TimeInterval) async -> Bool
+}
+
+extension MountHealthChecking {
+    // Test doubles and third-party implementations retain the original health
+    // contract. The system implementation adds the richer capacity, writability
+    // and sentinel checks.
+    func checkPolicy(at url: URL, policy: ShareHealthCheckConfiguration, timeout: TimeInterval) async -> MountHealthResult {
+        await checkMount(at: url, timeout: timeout)
+    }
 }
 
 @MainActor

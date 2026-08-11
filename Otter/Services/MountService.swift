@@ -139,7 +139,7 @@ actor MountService {
         return mountedVolumes.first { mountedURL in
             guard let resourceValues = try? mountedURL.resourceValues(forKeys: Self.mountedVolumeResourceKeys),
                   let remountURL = resourceValues.volumeURLForRemounting,
-                  let mountedLocation = SMBShareLocation(url: remountURL)
+                  let mountedLocation = NetworkShareLocation(url: remountURL)
             else {
                 return false
             }
@@ -148,10 +148,10 @@ actor MountService {
         }
     }
 
-    private func expectedShareLocations(for share: NetworkShare) -> [SMBShareLocation] {
-        var locations: [SMBShareLocation] = []
+    private func expectedShareLocations(for share: NetworkShare) -> [NetworkShareLocation] {
+        var locations: [NetworkShareLocation] = []
 
-        if let location = SMBShareLocation(url: share.url) {
+        if let location = NetworkShareLocation(url: share.url) {
             locations.append(location)
         }
 
@@ -159,7 +159,7 @@ actor MountService {
            let url = share.url,
            var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
             components.host = cachedIPAddress
-            if let location = SMBShareLocation(url: components.url), !locations.contains(location) {
+            if let location = NetworkShareLocation(url: components.url), !locations.contains(location) {
                 locations.append(location)
             }
         }
@@ -172,7 +172,8 @@ actor MountService {
     ]
 }
 
-struct SMBShareLocation: Equatable {
+struct NetworkShareLocation: Equatable {
+    let scheme: String
     let host: String
     let port: Int
     let sharePath: String
@@ -180,7 +181,8 @@ struct SMBShareLocation: Equatable {
     init?(url: URL?) {
         guard let url,
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              components.scheme?.lowercased() == "smb",
+              let scheme = components.scheme?.lowercased(),
+              NetworkShareProtocol(urlScheme: scheme) != nil,
               let host = components.host?.lowercased(),
               !host.isEmpty
         else {
@@ -193,10 +195,25 @@ struct SMBShareLocation: Equatable {
 
         guard !pathParts.isEmpty else { return nil }
 
+        self.scheme = scheme
         self.host = host
-        self.port = components.port ?? 445
-        // SMB mounts are identified by server and share. A deeper URL path is a
-        // folder within that share and should not change the mounted-volume identity.
+        self.port = components.port ?? Self.defaultPort(for: scheme)
+        // Network filesystems are mounted at their exported root. A deeper URL
+        // path is normally a folder within that volume, so match its first path
+        // component to avoid treating a subfolder as a separate disk.
         self.sharePath = pathParts[0]
     }
+
+    private static func defaultPort(for scheme: String) -> Int {
+        switch scheme {
+        case "smb": 445
+        case "nfs": 2049
+        case "https", "webdavs": 443
+        case "http", "webdav": 80
+        default: 0
+        }
+    }
 }
+
+// Kept as a source-compatible name for the SMB discovery and test helpers.
+typealias SMBShareLocation = NetworkShareLocation

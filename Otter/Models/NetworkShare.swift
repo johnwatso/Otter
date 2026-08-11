@@ -1,6 +1,69 @@
 import Darwin
 import Foundation
 
+enum NetworkShareProtocol: String, Codable, CaseIterable, Hashable {
+    case smb
+    case nfs
+    case webdav
+
+    init?(urlScheme: String?) {
+        switch urlScheme?.lowercased() {
+        case "smb": self = .smb
+        case "nfs": self = .nfs
+        case "http", "https", "webdav", "webdavs": self = .webdav
+        default: return nil
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .smb: "SMB"
+        case .nfs: "NFS"
+        case .webdav: "WebDAV"
+        }
+    }
+
+    var exampleURL: String {
+        switch self {
+        case .smb: "smb://server.local/Share"
+        case .nfs: "nfs://server.local/export"
+        case .webdav: "https://server.example.com/dav"
+        }
+    }
+}
+
+struct ShareHealthCheckConfiguration: Codable, Hashable {
+    var isEnabled: Bool
+    var requiresWritableVolume: Bool
+    var sentinelRelativePath: String
+
+    init(
+        isEnabled: Bool = true,
+        requiresWritableVolume: Bool = false,
+        sentinelRelativePath: String = ""
+    ) {
+        self.isEnabled = isEnabled
+        self.requiresWritableVolume = requiresWritableVolume
+        self.sentinelRelativePath = sentinelRelativePath
+        normalize()
+    }
+
+    mutating func normalize() {
+        sentinelRelativePath = sentinelRelativePath
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        // A sentinel must stay inside the mounted volume; never let a health
+        // check turn into an arbitrary filesystem probe.
+        if sentinelRelativePath.split(separator: "/").contains("..") {
+            sentinelRelativePath = ""
+        }
+    }
+
+    var hasCustomChecks: Bool {
+        requiresWritableVolume || !sentinelRelativePath.isEmpty
+    }
+}
+
 struct IPAddressChangeObservation: Codable, Hashable, Sendable {
     let previousAddress: String
     let currentAddress: String
@@ -35,6 +98,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
     var pauseState: PauseState
     var wakeOnLAN: WakeOnLANConfiguration
     var rules: ShareRules
+    var healthCheck: ShareHealthCheckConfiguration
     var cachedIPAddress: String?
     var ipAddressChangeObservations: [IPAddressChangeObservation]
     var createdAt: Date
@@ -51,6 +115,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         pauseState: PauseState = .inactive,
         wakeOnLAN: WakeOnLANConfiguration = WakeOnLANConfiguration(),
         rules: ShareRules = ShareRules(),
+        healthCheck: ShareHealthCheckConfiguration = ShareHealthCheckConfiguration(),
         cachedIPAddress: String? = nil,
         ipAddressChangeObservations: [IPAddressChangeObservation] = [],
         createdAt: Date = Date(),
@@ -66,6 +131,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         self.pauseState = pauseState
         self.wakeOnLAN = wakeOnLAN
         self.rules = rules
+        self.healthCheck = healthCheck
         self.cachedIPAddress = cachedIPAddress
         self.ipAddressChangeObservations = ipAddressChangeObservations
         self.createdAt = createdAt
@@ -84,6 +150,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         case pauseState
         case wakeOnLAN
         case rules
+        case healthCheck
         case cachedIPAddress
         case ipAddressChangeObservations
         case createdAt
@@ -102,6 +169,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         pauseState = try container.decodeIfPresent(PauseState.self, forKey: .pauseState) ?? .inactive
         wakeOnLAN = try container.decodeIfPresent(WakeOnLANConfiguration.self, forKey: .wakeOnLAN) ?? WakeOnLANConfiguration()
         rules = try container.decodeIfPresent(ShareRules.self, forKey: .rules) ?? ShareRules()
+        healthCheck = try container.decodeIfPresent(ShareHealthCheckConfiguration.self, forKey: .healthCheck) ?? ShareHealthCheckConfiguration()
         cachedIPAddress = try container.decodeIfPresent(String.self, forKey: .cachedIPAddress)
         ipAddressChangeObservations = try container.decodeIfPresent(
             [IPAddressChangeObservation].self,
@@ -150,6 +218,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         pauseState.clearIfExpired()
         wakeOnLAN.normalize()
         rules.normalize()
+        healthCheck.normalize()
         cachedIPAddress = cachedIPAddress?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if cachedIPAddress?.isEmpty == true {
@@ -165,6 +234,10 @@ struct NetworkShare: Identifiable, Codable, Hashable {
                 .sorted { $0.observedAt < $1.observedAt }
                 .suffix(Self.maxIPAddressChangeObservations)
         )
+    }
+
+    var connectionProtocol: NetworkShareProtocol? {
+        url.flatMap { NetworkShareProtocol(urlScheme: $0.scheme) }
     }
 
     mutating func recordResolvedIPAddress(

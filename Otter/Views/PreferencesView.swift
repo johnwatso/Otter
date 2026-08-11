@@ -470,6 +470,7 @@ struct ShareManagementView: View {
                 share.autoConnectWhenReachable = source.autoConnectWhenReachable
                 share.wakeOnLAN = source.wakeOnLAN
                 share.rules = source.rules
+                share.healthCheck = source.healthCheck
             }
         }
 
@@ -739,7 +740,23 @@ private struct GeneralPreferencesView: View {
                     .tahoeSecondaryActionButton()
                 }
 
-                SettingsSecondaryText("Includes shares, network rules, Wake-on-LAN, and monitoring settings. Keychain credentials are never exported.")
+                HStack {
+                    Button {
+                        exportProtectedBackup()
+                    } label: {
+                        Label("Export Protected Backup…", systemImage: "lock.square.stack")
+                    }
+                    .tahoeSecondaryActionButton()
+
+                    Button {
+                        importProtectedBackup()
+                    } label: {
+                        Label("Restore Protected Backup…", systemImage: "lock.open")
+                    }
+                    .tahoeSecondaryActionButton()
+                }
+
+                SettingsSecondaryText("Standard exports are safe templates and never include credentials. Protected backups encrypt eligible SMB Keychain credentials with a password you choose.")
 
                 if let configurationMessage {
                     Text(configurationMessage)
@@ -922,6 +939,10 @@ private struct GeneralPreferencesView: View {
         UTType(filenameExtension: "ottersupport", conformingTo: .json) ?? .json
     }
 
+    private var protectedConfigurationFileType: UTType {
+        UTType(filenameExtension: "otterbackup", conformingTo: .json) ?? .json
+    }
+
     private func exportSupportPackage() {
         let panel = NSSavePanel()
         panel.title = "Export Otter Support Package"
@@ -976,30 +997,101 @@ private struct GeneralPreferencesView: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
         do {
-            let archive = try ConfigurationTransferService.decode(Data(contentsOf: url))
-            let alert = NSAlert()
-            alert.messageText = "Import \(archive.shares.count) Share\(archive.shares.count == 1 ? "" : "s")?"
-            alert.informativeText = "Merge updates matching SMB addresses and keeps other shares. Replace removes the current share list first. Keychain credentials are not changed."
-            alert.addButton(withTitle: "Merge")
-            alert.addButton(withTitle: "Replace")
-            alert.addButton(withTitle: "Cancel")
-
-            let response = alert.runModal()
-            let strategy: ConfigurationImportStrategy
-            switch response {
-            case .alertFirstButtonReturn:
-                strategy = .merge
-            case .alertSecondButtonReturn:
-                strategy = .replace
-            default:
-                return
-            }
-
-            let result = settings.importConfiguration(archive, strategy: strategy)
-            configurationMessage = "Imported: \(result.added) added, \(result.updated) updated, \(result.removed) removed."
+            importArchive(try ConfigurationTransferService.decode(Data(contentsOf: url)))
         } catch {
             configurationMessage = "Import failed: \(error.localizedDescription)"
         }
+    }
+
+    private func exportProtectedBackup() {
+        guard let password = backupPassword(confirm: true) else { return }
+        let panel = NSSavePanel()
+        panel.title = "Export Protected Otter Backup"
+        panel.nameFieldStringValue = "Otter Backup.otterbackup"
+        panel.allowedContentTypes = [protectedConfigurationFileType]
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let credentials = settings.portableCredentials()
+            let data = try ConfigurationTransferService.encodeProtectedBackup(
+                settings.configurationArchive(), credentials: credentials, password: password
+            )
+            try data.write(to: url, options: .atomic)
+            configurationMessage = "Protected backup exported with \(credentials.count) SMB credential\(credentials.count == 1 ? "" : "s"). Keep its password safe."
+        } catch {
+            configurationMessage = "Protected backup failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func importProtectedBackup() {
+        let panel = NSOpenPanel()
+        panel.title = "Restore Protected Otter Backup"
+        panel.allowedContentTypes = [protectedConfigurationFileType, .json]
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url,
+              let password = backupPassword(confirm: false)
+        else { return }
+        do {
+            let backup = try ConfigurationTransferService.decodeProtectedBackup(Data(contentsOf: url), password: password)
+            importArchive(backup.archive, credentials: backup.credentials)
+        } catch {
+            configurationMessage = "Restore failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func importArchive(_ archive: OtterConfigurationArchive, credentials: [PortableCredential] = []) {
+        let alert = NSAlert()
+        alert.messageText = "Import \(archive.shares.count) Share\(archive.shares.count == 1 ? "" : "s")?"
+        alert.informativeText = credentials.isEmpty
+            ? "Merge updates matching network addresses and keeps other shares. Replace removes the current share list first."
+            : "Merge updates matching network addresses and keeps other shares. Eligible SMB Keychain credentials are restored after the import."
+        alert.addButton(withTitle: "Merge")
+        alert.addButton(withTitle: "Replace")
+        alert.addButton(withTitle: "Cancel")
+        let strategy: ConfigurationImportStrategy
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: strategy = .merge
+        case .alertSecondButtonReturn: strategy = .replace
+        default: return
+        }
+        let result = settings.importConfiguration(archive, strategy: strategy)
+        let allowedCredentialHosts = Set<String>(archive.shares.compactMap { configuration in
+            guard NetworkShareProtocol(urlScheme: URL(string: configuration.urlString)?.scheme) == .smb else { return nil }
+            return URL(string: configuration.urlString)?.host(percentEncoded: false)
+        })
+        let restored = settings.importPortableCredentials(credentials.filter {
+            allowedCredentialHosts.contains($0.host)
+        })
+        configurationMessage = "Imported: \(result.added) added, \(result.updated) updated, \(result.removed) removed.\(credentials.isEmpty ? "" : " Restored \(restored) credential\(restored == 1 ? "" : "s").")"
+    }
+
+    private func backupPassword(confirm: Bool) -> String? {
+        let alert = NSAlert()
+        alert.messageText = confirm ? "Choose a Backup Password" : "Enter Backup Password"
+        alert.informativeText = confirm
+            ? "Otter cannot recover this password. It protects any included SMB Keychain credentials."
+            : "Enter the password used when this protected backup was exported."
+        let first = NSSecureTextField(frame: NSRect(x: 0, y: 28, width: 280, height: 24))
+        first.placeholderString = "Password"
+        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: confirm ? 56 : 24))
+        accessory.addSubview(first)
+        var confirmation: NSSecureTextField?
+        if confirm {
+            let second = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+            second.placeholderString = "Confirm password"
+            accessory.addSubview(second)
+            confirmation = second
+        }
+        alert.accessoryView = accessory
+        alert.addButton(withTitle: confirm ? "Export" : "Restore")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn,
+              !first.stringValue.isEmpty,
+              confirmation.map({ $0.stringValue == first.stringValue }) ?? true
+        else { return nil }
+        return first.stringValue
     }
 }
 
