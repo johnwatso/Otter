@@ -88,7 +88,7 @@ struct MenuBarView: View {
         Button {
             updaterViewModel.checkForUpdates()
         } label: {
-            Label("Check for Updates...", systemImage: "arrow.down.circle")
+            Label("Check for Updates…", systemImage: "arrow.down.circle")
         }
         .disabled(!updaterViewModel.canCheckForUpdates)
 
@@ -289,7 +289,7 @@ private struct ShareMenu: View {
                 Button {
                     NSWorkspace.shared.open(url)
                 } label: {
-                    Label("Connect Once in Finder...", systemImage: "person.badge.key")
+                    Label("Connect Once in Finder…", systemImage: "person.badge.key")
                 }
             }
         } label: {

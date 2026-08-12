@@ -55,7 +55,7 @@ The first-run assistant can import shares already mounted in Finder, show nearby
 1. Open Otter and follow the first-run assistant.
 2. Import a mounted Finder share, choose a nearby or saved SMB server, or enter an address manually.
 3. Review the share and save it.
-4. Optional: add a network condition, Wake-on-LAN details, or "connect when reachable" behavior.
+4. Optional: add VPN or Wake-on-LAN details, or choose "connect when reachable" behavior.
 
 Connection paths are configured per share. Otter can register the network where a share was set up (its IPv4 subnet, plus the Wi-Fi name when available) and connect whenever the Mac is back on that network — over Wi-Fi or Ethernet. A VPN can be enabled as an alternative path for use away from that network. Otter can wait for you to connect the selected VPN, or connect it automatically when macOS allows it. For VPNs such as WireGuard, a live tunnel triggers a server reachability check even when macOS does not expose the exact profile name to other apps. If Otter cannot confirm that the selected VPN is active and the server does not answer, the share waits quietly instead of reporting an error. A confirmed VPN, a manual connection attempt, or a previously connected share can still surface a genuine connection problem.
 

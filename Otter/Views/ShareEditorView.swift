@@ -8,7 +8,7 @@ struct ShareEditorView: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var discovery: SMBDiscoveryService
     @State private var draft: DraftShare
-    @State private var validationMessage: String?
+    @State private var validationIssue: ValidationIssue?
     @State private var mountedShareSuggestions: [MountedShareSuggestion] = []
     @State private var readinessReport: ConnectionDiagnosticReport?
     @State private var isTestingSetup = false
@@ -22,6 +22,9 @@ struct ShareEditorView: View {
     @State private var shareBrowserMessage: String?
     @State private var isDiscoveringWakeOnLANSettings = false
     @State private var wakeOnLANDiscoveryMessage: String?
+    @State private var stage: EditorStage
+    @State private var isShowingSavedConnectionHelp = false
+    @FocusState private var focusedField: ValidationField?
 
     private let sourceShare: NetworkShare?
     private let appliesToShareCount: Int?
@@ -66,421 +69,61 @@ struct ShareEditorView: View {
             initialDraft.mountPath = prefill.mountPath
         }
         _draft = State(initialValue: initialDraft)
+        // Adding a share starts by choosing one. Editing, or arriving with a
+        // share already picked, skips straight to its settings.
+        _stage = State(initialValue: share == nil && prefill == nil ? .discovery : .configure)
 
         self.onSave = onSave
         self.onCancel = onCancel
     }
 
+    private enum EditorStage: Hashable {
+        case discovery
+        case configure
+        case advanced
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text(editorTitle)
-                    .font(.title2)
-                    .fontWeight(.bold)
-                if isEditing && appliesToShareCount == nil {
-                    Text("— \(draft.displayName)")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 10)
-
-            Form {
-                if !isEditing {
-                    Section("Available SMB Shares") {
-                        if mountedShareSuggestions.isEmpty {
-                            Text("No mounted SMB shares found.")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("Mounted in Finder")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.secondary)
-
-                            ForEach(mountedShareSuggestions) { suggestion in
-                                Button {
-                                    apply(suggestion)
-                                } label: {
-                                    HStack {
-                                        Label(suggestion.displayName, systemImage: "externaldrive.fill")
-                                        Spacer()
-                                        Text(suggestion.mountPath)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                    }
-                                }
-                            }
-                        }
-
-                        if !discovery.servers.isEmpty || discovery.state == .searching {
-                            if !mountedShareSuggestions.isEmpty {
-                                Divider()
-                            }
-
-                            Text("Nearby servers")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.secondary)
-
-                            if discovery.servers.isEmpty {
-                                HStack {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                    Text("Searching the local network…")
-                                        .foregroundStyle(.secondary)
-                                }
-                            } else {
-                                ForEach(discovery.servers) { server in
-                                    Button {
-                                        browseShares(on: server)
-                                    } label: {
-                                        HStack {
-                                            Label(server.name, systemImage: "server.rack")
-                                            Spacer()
-                                            if browsingServerID == server.id {
-                                                ProgressView()
-                                                    .controlSize(.small)
-                                            } else {
-                                                Text(mountedShareCount(on: server) > 0 ? "Browse Other Shares…" : "Browse Shares…")
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                        }
-                                    }
-                                    .disabled(browsingServerID != nil || browsingSavedShareID != nil)
-                                }
-                            }
-                        }
-
-                        HStack {
-                            Button {
-                                chooseMountedShare()
-                            } label: {
-                                Label("Choose Mounted Volume…", systemImage: "folder")
-                            }
-                            .tahoeCompactActionButton()
-
-                            Button {
-                                refreshMountedShares()
-                                discovery.restart()
-                            } label: {
-                                Label("Refresh", systemImage: "arrow.clockwise")
-                            }
-                            .tahoeCompactActionButton()
-                        }
-
-                        if let shareBrowserMessage {
-                            Text(shareBrowserMessage)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("Select a mounted share, or browse a nearby server to add another one. macOS handles sign-in and can save credentials in Keychain.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    Section("Saved SMB Connections") {
-                        if isRefreshingSavedSMBShares {
-                            ProgressView("Checking Keychain…")
-                        } else if savedSMBShares.isEmpty {
-                            Text("No saved SMB connections found in Keychain.")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(savedSMBShares) { savedShare in
-                                Button {
-                                    browseShares(using: savedShare)
-                                } label: {
-                                    HStack {
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Label(savedShare.displayName, systemImage: "key.fill")
-                                            Text(savedShare.detail)
-                                                .font(.footnote)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
-                                        if browsingSavedShareID == savedShare.id {
-                                            ProgressView()
-                                                .controlSize(.small)
-                                        } else {
-                                            Text(savedShare.hasSharePath ? "Mount" : "Browse Shares…")
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                }
-                                .disabled(browsingServerID != nil || browsingSavedShareID != nil)
-                            }
-                        }
-
-                        Button {
-                            refreshSavedSMBShares()
-                        } label: {
-                            Label("Refresh Saved Connections", systemImage: "key.viewfinder")
-                        }
-                        .tahoeCompactActionButton()
-
-                        Text("Otter checks reachability only after you choose a saved connection. Passwords and usernames stay in Keychain.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                if appliesToShareCount == nil {
-                    // General Section
-                    Section("General") {
-                        TextField("Share name", text: $draft.displayName, prompt: Text(inferredDisplayName ?? "OtterNAS"))
-                        TextField("Network address", text: $draft.urlString, prompt: Text(selectedProtocol.exampleURL))
-                        TextField("Finder mount location", text: $draft.mountPath, prompt: Text(inferredMountPath))
-                        Picker("Protocol", selection: protocolSelection) {
-                            ForEach(NetworkShareProtocol.allCases, id: \.self) { protocolKind in
-                                Text(protocolKind.title).tag(protocolKind)
-                            }
-                        }
-
-                        if isEditing {
-                            Button {
-                                chooseMountedShare()
-                            } label: {
-                                Label("Auto-fill details from Finder...", systemImage: "arrow.down.doc.fill")
-                            }
-                            .tahoeCompactActionButton()
-                            .padding(.vertical, 2)
-                        }
-                    }
-                }
-
-                Section("Connection") {
-                    Picker("Connection mode", selection: $draft.automaticConnectionMode) {
-                        ForEach(AutomaticConnectionMode.allCases, id: \.self) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.menu)
-
-                    Text(draft.automaticConnectionMode.detail)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-
-                    DisclosureGroup {
-                        vpnConfiguration
-                    } label: {
-                        HStack {
-                            Text("Remote access")
-                            Spacer()
-                            Text(remoteAccessSummary)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                Section("Advanced") {
-                    if draft.automaticConnectionMode == .manual {
-                        Toggle("Mount once when Otter starts", isOn: $draft.mountAtLaunch)
-                        Text("Use this for a one-time login mount without ongoing automatic reconnection.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    DisclosureGroup {
-                        Toggle("Disconnect outside this network", isOn: networkRestrictionEnabled)
-
-                        if draft.limitsToRegisteredNetwork {
-                            registeredNetworkConfiguration
-                        }
-                    } label: {
-                        advancedRowLabel("Network restriction", detail: networkRestrictionSummary)
-                    }
-
-                    DisclosureGroup {
-                        Toggle("Wake this server before connecting", isOn: $draft.wakeOnLANEnabled)
-
-                        if draft.wakeOnLANEnabled {
-                            TextField("MAC address", text: $draft.wakeOnLANMACAddress, prompt: Text("AA:BB:CC:DD:EE:FF"))
-                            TextField(
-                                "Broadcast address",
-                                text: $draft.wakeOnLANBroadcastAddress,
-                                prompt: Text(WakeOnLANConfiguration.defaultBroadcastAddress)
-                            )
-                            Stepper(value: $draft.wakeOnLANPort, in: 1...65_535, step: 1) {
-                                Text("Port: \(draft.wakeOnLANPort)")
-                            }
-
-                            Button {
-                                discoverWakeOnLANSettings()
-                            } label: {
-                                if isDiscoveringWakeOnLANSettings {
-                                    HStack(spacing: 8) {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                        Text("Detecting Settings…")
-                                    }
-                                } else {
-                                    Label("Auto-detect Settings", systemImage: "dot.radiowaves.left.and.right")
-                                }
-                            }
-                            .tahoeSecondaryActionButton()
-                            .disabled(isDiscoveringWakeOnLANSettings)
-
-                            Text("Otter fills in the server MAC address and local broadcast address while this share is mounted. It cannot discover these settings over a VPN or after the server sleeps.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-
-                            if let wakeOnLANDiscoveryMessage {
-                                Text(wakeOnLANDiscoveryMessage)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    } label: {
-                        advancedRowLabel("Wake-on-LAN", detail: draft.wakeOnLANEnabled ? "On" : "Off")
-                    }
-
-                    DisclosureGroup {
-                        Toggle("Check mounted volume", isOn: $draft.healthCheck.isEnabled)
-
-                        if draft.healthCheck.isEnabled {
-                            Toggle("Require writable volume", isOn: $draft.healthCheck.requiresWritableVolume)
-                            TextField("Expected file (optional)", text: $draft.healthCheck.sentinelRelativePath, prompt: Text(".otter-health"))
-                        }
-
-                        Text("Checks that the mounted volume responds, and can optionally require write access or a file that should exist on it.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } label: {
-                        advancedRowLabel("Health checks", detail: healthCheckSummary)
-                    }
-                }
-
-                // Credentials and diagnostics are specific to one share.
-                if appliesToShareCount == nil {
-                    Section("Credentials") {
-                        HStack(spacing: 8) {
-                            Image(systemName: hasKeychainCredentials ? "checkmark.circle.fill" : "minus.circle")
-                                .foregroundStyle(hasKeychainCredentials ? .green : .secondary)
-                            Text(hasKeychainCredentials ? "Credentials found in macOS Keychain." : "No credentials found in macOS Keychain.")
-                                .font(.subheadline)
-                                .foregroundStyle(.primary)
-                        }
-                        if !hasKeychainCredentials {
-                            Text("To mount this share, connect once in Finder and select \"Remember this password in my keychain\".")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    Section("Connection Readiness") {
-                        Button {
-                            testSetup()
-                        } label: {
-                            if isTestingSetup {
-                                HStack(spacing: 8) {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                    Text("Testing Setup\u{2026}")
-                                }
-                            } else {
-                                Label("Test Setup", systemImage: "checkmark.circle.badge.questionmark")
-                            }
-                        }
-                        .tahoeSecondaryActionButton()
-                        .disabled(isTestingSetup)
-
-                        Text("Checks the network, VPN connection, credentials, SMB service, and mount. macOS may ask you to sign in or choose a share.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-
-                        if let readinessReport {
-                            ForEach(readinessReport.steps) { step in
-                                HStack(alignment: .top, spacing: 8) {
-                                    Image(systemName: readinessSymbol(for: step.status))
-                                        .foregroundStyle(readinessColor(for: step.status))
-                                        .frame(width: 16)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(step.title)
-                                            .font(.subheadline.weight(.medium))
-                                        Text(step.detail)
-                                            .font(.footnote)
-                                            .foregroundStyle(.secondary)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                }
-                                .padding(.vertical, 2)
-                            }
-                        }
-                    }
-
-                    // Advanced Section
-                    if let fallbackURL = fallbackURLString {
-                        Section("Advanced") {
-                            LabeledContent("Fallback IP", value: fallbackURL)
-
-                            if let host = hostFromURL, !NetworkShare.isIPAddress(host) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Label("VPN IP Fallback", systemImage: "info.circle")
-                                        .font(.subheadline)
-                                        .fontWeight(.medium)
-                                    Text("Otter will resolve and cache this server's local IP address when connected locally. If you connect to your VPN later, Otter will use the cached IP address to bypass mDNS limits. Ensure your server has a static IP address, or this fallback may fail if the IP changes.")
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .padding(.top, 4)
-                            }
-                        }
-                    }
-                }
-
-            }
-            .formStyle(.grouped)
-            .padding(20)
+            header
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 10) {
-                if let validationMessage {
-                    Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
+            ScrollViewReader { proxy in
+                Group {
+                    switch stage {
+                    case .discovery:
+                        discoveryForm
+                    case .configure:
+                        configureForm
+                    case .advanced:
+                        advancedForm
+                    }
                 }
-
-                HStack {
-                    Button {
-                        onCancel()
-                        dismiss()
-                    } label: {
-                        Label("Cancel", systemImage: "xmark")
-                    }
-                    .tahoeSecondaryActionButton()
-                    .keyboardShortcut(.cancelAction)
-
-                    Spacer()
-
-                    Button {
-                        save()
-                    } label: {
-                        Label("Done", systemImage: "checkmark")
-                    }
-                    .tahoePrimaryActionButton()
-                    .keyboardShortcut(.defaultAction)
+                .formStyle(.grouped)
+                .onChange(of: validationIssue) { _, issue in
+                    guard let issue else { return }
+                    revealField(issue.field, using: proxy)
                 }
             }
-            .padding(20)
+
+            Divider()
+
+            actionBar
         }
         .frame(width: 540)
+        // Let the sheet follow its content. The scrollable form still keeps
+        // longer saved-connection lists and advanced settings within a
+        // sensible sheet height.
+        .frame(maxHeight: 720)
         .onAppear {
             resetDraftIfNeeded()
             networkService.refreshNetworkDetails()
-            if !isEditing {
+            if stage == .discovery {
                 refreshMountedShares()
                 discovery.start()
                 refreshSavedSMBShares()
             }
-        }
-        .onChange(of: networkService.currentWiFiNetworkName) {
-            fillDraftFromCurrentNetwork()
-        }
-        .onChange(of: networkService.currentIPv4Subnets) {
-            fillDraftFromCurrentNetwork()
         }
         .onChange(of: draft.wakeOnLANEnabled) { _, enabled in
             guard enabled else {
@@ -496,15 +139,790 @@ struct ShareEditorView: View {
         }
     }
 
-    private var editorTitle: String {
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let backTitle = backNavigationTitle {
+                Button {
+                    navigate(to: stage == .advanced ? .configure : .discovery)
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "chevron.backward")
+                            .font(.callout.weight(.semibold))
+                        Text(backTitle)
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+            }
+
+            switch stage {
+            case .discovery:
+                Text("Add Share")
+                    .font(.title2)
+                    .fontWeight(.bold)
+            case .configure:
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(headerTitle)
+                        .font(.title2)
+                        .fontWeight(.bold)
+
+                    if let headerSubtitle {
+                        Text(headerSubtitle)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+            case .advanced:
+                Text("Advanced")
+                    .font(.title2)
+                    .fontWeight(.bold)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
+        .padding(.top, 16)
+        .padding(.bottom, 12)
+    }
+
+    private var actionBar: some View {
+        HStack {
+            Button("Cancel") {
+                cancel()
+            }
+            .tahoeSecondaryActionButton()
+            .keyboardShortcut(.cancelAction)
+
+            Spacer()
+
+            // Nothing has been chosen yet on the discovery screen, so there is
+            // no action to confirm.
+            if stage != .discovery {
+                Button(confirmationTitle) {
+                    save()
+                }
+                .tahoePrimaryActionButton()
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+    }
+
+    private var backNavigationTitle: String? {
+        switch stage {
+        case .discovery:
+            nil
+        case .configure:
+            isEditing || appliesToShareCount != nil ? nil : "Available Shares"
+        case .advanced:
+            headerTitle
+        }
+    }
+
+    private var headerTitle: String {
         if let appliesToShareCount {
             return "Settings for \(appliesToShareCount) Shares"
         }
-        return isEditing ? "Settings" : "New Share"
+
+        let trimmedName = draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty {
+            return trimmedName
+        }
+
+        return inferredDisplayName ?? (isEditing ? "Settings" : "New Share")
     }
 
-    private func mountedShareCount(on server: DiscoveredSMBServer) -> Int {
-        mountedShareSuggestions.count { $0.matches(server: server) }
+    private var headerSubtitle: String? {
+        guard appliesToShareCount == nil else { return nil }
+
+        let trimmedURL = draft.urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedURL.isEmpty ? nil : trimmedURL
+    }
+
+    private func navigate(to destination: EditorStage) {
+        guard stage != destination else { return }
+        withAnimation(.easeInOut(duration: 0.18)) {
+            stage = destination
+        }
+    }
+
+    private var confirmationTitle: String {
+        isEditing ? "Done" : "Add Share"
+    }
+
+    // MARK: - Discovery
+
+    private var discoveryForm: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                availableSharesSection
+                quickActions
+
+                Divider()
+
+                savedConnectionsSection
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
+        }
+    }
+
+    private var availableSharesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionTitle("Available Shares")
+
+            if shareBrowserServers.isEmpty {
+                HStack(spacing: 8) {
+                    if discovery.state == .searching {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Searching the local network…")
+                    } else {
+                        Text("No SMB servers found on this network.")
+                    }
+                }
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 8)
+            } else {
+                VStack(alignment: .leading, spacing: 18) {
+                    ForEach(shareBrowserServers) { server in
+                        serverGroup(server)
+                    }
+                }
+
+                if discovery.state == .searching {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Still searching…")
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            if let shareBrowserMessage {
+                Text(shareBrowserMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var quickActions: some View {
+        HStack(spacing: 10) {
+            discoveryAction(
+                title: "Choose Mounted Volume…",
+                subtitle: "Add from an already mounted volume",
+                image: "folder"
+            ) {
+                chooseMountedShare()
+            }
+
+            discoveryAction(
+                title: "Refresh",
+                subtitle: "Scan for available shares",
+                image: "arrow.clockwise"
+            ) {
+                refreshMountedShares()
+                discovery.restart()
+            }
+        }
+    }
+
+    private var savedConnectionsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                sectionTitle("Saved Connections")
+
+                Spacer()
+
+                Button {
+                    refreshSavedSMBShares()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Refresh saved connections")
+                .accessibilityLabel("Refresh saved connections")
+                .disabled(isRefreshingSavedSMBShares)
+
+                Button {
+                    isShowingSavedConnectionHelp.toggle()
+                } label: {
+                    Image(systemName: "info.circle")
+                }
+                .buttonStyle(.borderless)
+                .help("About saved connections")
+                .accessibilityLabel("About saved connections")
+                .popover(isPresented: $isShowingSavedConnectionHelp, arrowEdge: .bottom) {
+                    Text("Connections you have signed into before. Passwords and usernames stay in Keychain — Otter only checks whether a server is reachable after you choose one.")
+                        .font(.callout)
+                        .frame(width: 260, alignment: .leading)
+                        .padding(12)
+                }
+            }
+
+            if isRefreshingSavedSMBShares {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Checking Keychain…")
+                }
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 8)
+            } else if savedSMBShares.isEmpty {
+                VStack(spacing: 4) {
+                    Image(systemName: "bookmark")
+                        .font(.callout)
+                        .foregroundStyle(.tertiary)
+                    Text("No saved connections")
+                        .font(.callout.weight(.medium))
+                    Text("Saved connections will appear here.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 78)
+                .accessibilityElement(children: .combine)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(savedSMBShares.enumerated()), id: \.element.id) { index, savedShare in
+                        savedConnectionRow(savedShare)
+
+                        if index < savedSMBShares.count - 1 {
+                            Divider()
+                                .padding(.leading, 28)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.headline)
+    }
+
+    private func discoveryAction(
+        title: String,
+        subtitle: String,
+        image: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: image)
+                    .font(.title3)
+                    .frame(width: 22)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.callout.weight(.medium))
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.roundedRectangle)
+        .controlSize(.large)
+    }
+
+    private func savedConnectionRow(_ savedShare: SavedSMBShare) -> some View {
+        Button {
+            browseShares(using: savedShare)
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: "externaldrive.fill")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(savedShare.displayName)
+                        .font(.callout.weight(.medium))
+                    Text(savedShare.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                if browsingSavedShareID == savedShare.id {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Text(savedShare.hasSharePath ? "Mount" : "Browse Shares…")
+                        .foregroundStyle(.secondary)
+                    rowChevron
+                }
+            }
+            .padding(.vertical, 9)
+        }
+        .buttonStyle(.plain)
+        .disabled(isBrowsingShares)
+        .accessibilityLabel("\(savedShare.hasSharePath ? "Mount" : "Browse shares on") \(savedShare.displayName)")
+    }
+
+    // MARK: - Configure
+
+    private var configureForm: some View {
+        Form {
+            Section("Connection") {
+                Picker("Connection mode", selection: $draft.automaticConnectionMode) {
+                    ForEach(AutomaticConnectionMode.allCases, id: \.self) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Text(draft.automaticConnectionMode.detail)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                if draft.automaticConnectionMode == .manual {
+                    Toggle("Mount once when Otter starts", isOn: $draft.mountAtLaunch)
+                }
+
+            }
+
+            Section("Remote Access") {
+                vpnConfiguration
+                    .id(ValidationField.vpn)
+            }
+
+            Section {
+                Button {
+                    navigate(to: .advanced)
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Advanced")
+                            Text(advancedSummary)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        rowChevron
+                    }
+                }
+            }
+
+            if isEditing && appliesToShareCount == nil {
+                diagnosticsSections
+            }
+        }
+    }
+
+    private var advancedSummary: String {
+        if appliesToShareCount != nil {
+            return "Network access, Wake-on-LAN, health checks"
+        }
+        return "Share details, network access, Wake-on-LAN, health checks"
+    }
+
+    // MARK: - Advanced
+
+    private var advancedForm: some View {
+        Form {
+            if appliesToShareCount == nil {
+                Section("Share Details") {
+                    TextField("Name", text: $draft.displayName, prompt: Text(inferredDisplayName ?? "OtterNAS"))
+                        .focused($focusedField, equals: .shareName)
+                        .id(ValidationField.shareName)
+
+                    TextField("Network address", text: $draft.urlString, prompt: Text(selectedProtocol.exampleURL))
+                        .focused($focusedField, equals: .address)
+                        .id(ValidationField.address)
+                    validationNotice(for: .address)
+
+                    Picker("Protocol", selection: protocolSelection) {
+                        ForEach(NetworkShareProtocol.allCases, id: \.self) { protocolKind in
+                            Text(protocolKind.title).tag(protocolKind)
+                        }
+                    }
+
+                    if isEditing {
+                        Button {
+                            chooseMountedShare()
+                        } label: {
+                            Label("Auto-fill details from Finder…", systemImage: "arrow.down.doc.fill")
+                        }
+                        .tahoeCompactActionButton()
+                        .padding(.vertical, 2)
+                    }
+                }
+
+            }
+
+            Section("Wake-on-LAN") {
+                wakeOnLANSettings
+            }
+
+            Section("Health Checks") {
+                healthCheckSettings
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var wakeOnLANSettings: some View {
+        Toggle("Wake this server before connecting", isOn: $draft.wakeOnLANEnabled)
+            .id(ValidationField.wakeOnLAN)
+
+        if draft.wakeOnLANEnabled {
+            TextField("MAC address", text: $draft.wakeOnLANMACAddress, prompt: Text("AA:BB:CC:DD:EE:FF"))
+            TextField(
+                "Broadcast address",
+                text: $draft.wakeOnLANBroadcastAddress,
+                prompt: Text(WakeOnLANConfiguration.defaultBroadcastAddress)
+            )
+            Stepper(value: $draft.wakeOnLANPort, in: 1...65_535, step: 1) {
+                Text("Port: \(draft.wakeOnLANPort)")
+            }
+
+            Button {
+                discoverWakeOnLANSettings()
+            } label: {
+                if isDiscoveringWakeOnLANSettings {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Detecting Settings…")
+                    }
+                } else {
+                    Label("Auto-detect Settings", systemImage: "dot.radiowaves.left.and.right")
+                }
+            }
+            .tahoeCompactActionButton()
+            .disabled(isDiscoveringWakeOnLANSettings)
+
+            Text("Otter fills these in while the share is mounted. It cannot discover them over a VPN or after the server sleeps.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            if let wakeOnLANDiscoveryMessage {
+                Text(wakeOnLANDiscoveryMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        validationNotice(for: .wakeOnLAN)
+    }
+
+    @ViewBuilder
+    private var healthCheckSettings: some View {
+        Toggle("Check mounted volume", isOn: $draft.healthCheck.isEnabled)
+
+        Text("Otter periodically confirms the mounted volume responds. Enable this for important shares, especially backups, to catch disconnected or read-only volumes early.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+
+        if draft.healthCheck.isEnabled {
+            Toggle("Require writable volume", isOn: $draft.healthCheck.requiresWritableVolume)
+            TextField("Expected file (optional)", text: $draft.healthCheck.sentinelRelativePath, prompt: Text(".otter-health"))
+        }
+    }
+
+    // MARK: - Diagnostics
+
+    // Credentials and diagnostics describe a share that already exists. A new
+    // share has nothing to report on yet, and running them would mount a share
+    // the user can still cancel.
+    @ViewBuilder
+    private var diagnosticsSections: some View {
+        Section("Credentials") {
+            HStack(spacing: 8) {
+                Image(systemName: hasKeychainCredentials ? "checkmark.circle.fill" : "minus.circle")
+                    .foregroundStyle(hasKeychainCredentials ? .green : .secondary)
+                Text(hasKeychainCredentials ? "Credentials found in macOS Keychain." : "No credentials found in macOS Keychain.")
+                    .font(.subheadline)
+            }
+
+            if !hasKeychainCredentials {
+                Text("To mount this share, connect once in Finder and select \"Remember this password in my keychain\".")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        Section("Connection Readiness") {
+            Button {
+                testSetup()
+            } label: {
+                if isTestingSetup {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Testing Setup\u{2026}")
+                    }
+                } else {
+                    Label("Test Setup", systemImage: "checkmark.circle.badge.questionmark")
+                }
+            }
+            .tahoeSecondaryActionButton()
+            .disabled(isTestingSetup)
+
+            Text("Checks the network, VPN connection, credentials, SMB service, and mount. macOS may ask you to sign in or choose a share.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            if let readinessReport {
+                ForEach(readinessReport.steps) { step in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: readinessSymbol(for: step.status))
+                            .foregroundStyle(readinessColor(for: step.status))
+                            .frame(width: 16)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(step.title)
+                                .font(.subheadline.weight(.medium))
+                            Text(step.detail)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+
+        if let fallbackURL = fallbackURLString {
+            Section("Fallback Address") {
+                LabeledContent("Fallback IP", value: fallbackURL)
+
+                if let host = hostFromURL, !NetworkShare.isIPAddress(host) {
+                    Text("Otter caches this server's local IP while you are on the same network, then uses it over a VPN where mDNS names don't resolve. Give the server a static IP so the cached address stays valid.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var rowChevron: some View {
+        Image(systemName: "chevron.forward")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.tertiary)
+            .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func validationNotice(for field: ValidationField) -> some View {
+        if let validationIssue, validationIssue.field == field {
+            Label(validationIssue.message, systemImage: "exclamationmark.triangle.fill")
+                .font(.footnote)
+                .foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Scrolls the offending control into view and focuses it where it can take
+    /// focus.
+    private func revealField(_ field: ValidationField, using proxy: ScrollViewProxy) {
+        navigate(to: stage(containing: field))
+
+        // The destination screen may have just been swapped in, so let it mount
+        // before asking the scroll view to find the row.
+        Task { @MainActor in
+            await Task.yield()
+            withAnimation {
+                proxy.scrollTo(field, anchor: .center)
+            }
+
+            switch field {
+            case .shareName, .address:
+                focusedField = field
+            case .vpn, .wakeOnLAN:
+                break
+            }
+        }
+    }
+
+    private func stage(containing field: ValidationField) -> EditorStage {
+        switch field {
+        case .vpn:
+            .configure
+        case .shareName, .address, .wakeOnLAN:
+            .advanced
+        }
+    }
+
+    private func cancel() {
+        onCancel()
+        dismiss()
+    }
+
+    /// One server and the shares Otter already knows about on it. Servers that
+    /// have not been browsed yet appear with no nested shares — Otter cannot
+    /// list a server's shares without mounting one, so browsing stays an
+    /// explicit hand-off to Finder.
+    private struct ShareBrowserServer: Identifiable {
+        let id: String
+        let name: String
+        let shares: [MountedShareSuggestion]
+        let discovered: DiscoveredSMBServer?
+
+        var isNearby: Bool { discovered != nil }
+    }
+
+    private var shareBrowserServers: [ShareBrowserServer] {
+        var unclaimed = mountedShareSuggestions
+        var servers: [ShareBrowserServer] = []
+
+        for discovered in discovery.servers {
+            let matches = unclaimed.filter { $0.matches(server: discovered) }
+            let matchedIDs = Set(matches.map(\.id))
+            unclaimed.removeAll { matchedIDs.contains($0.id) }
+
+            servers.append(
+                ShareBrowserServer(
+                    id: discovered.id,
+                    name: discovered.name,
+                    shares: sortedByName(matches),
+                    discovered: discovered
+                )
+            )
+        }
+
+        // A mounted share whose server is not advertising itself right now
+        // still needs a home, so group the leftovers by their own host.
+        let groupedByHost = Dictionary(grouping: unclaimed) { suggestion in
+            URL(string: suggestion.urlString)?.host(percentEncoded: false) ?? suggestion.displayName
+        }
+
+        for (host, shares) in groupedByHost {
+            servers.append(
+                ShareBrowserServer(
+                    id: "host:\(host)",
+                    name: host,
+                    shares: sortedByName(shares),
+                    discovered: nil
+                )
+            )
+        }
+
+        return servers.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    private func sortedByName(_ suggestions: [MountedShareSuggestion]) -> [MountedShareSuggestion] {
+        suggestions.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+    }
+
+    private var isBrowsingShares: Bool {
+        browsingServerID != nil || browsingSavedShareID != nil
+    }
+
+    private func serverGroup(_ server: ShareBrowserServer) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            serverHeaderRow(server)
+
+            if server.shares.isEmpty {
+                Text(server.isNearby
+                    ? "No shares mounted yet."
+                    : "Not on this network right now.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 30)
+                    .padding(.vertical, 4)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(server.shares.enumerated()), id: \.element.id) { index, share in
+                        shareRow(share)
+
+                        if index < server.shares.count - 1 {
+                            Divider()
+                                .padding(.leading, 30)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func serverHeaderRow(_ server: ShareBrowserServer) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: "server.rack")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(server.name)
+                    .font(.subheadline.weight(.semibold))
+
+                if server.isNearby {
+                    Label("Online", systemImage: "circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                        .labelStyle(.titleAndIcon)
+                }
+            }
+
+            Spacer()
+
+            if browsingServerID == server.discovered?.id {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("Browsing shares on \(server.name)")
+            } else if let discovered = server.discovered {
+                Button(server.shares.isEmpty ? "Browse Shares…" : "Browse Other Shares…") {
+                    browseShares(on: discovered)
+                }
+                .tahoeCompactActionButton()
+                .disabled(isBrowsingShares)
+                .accessibilityLabel("Browse shares on \(server.name)")
+            }
+        }
+    }
+
+    private func shareRow(_ suggestion: MountedShareSuggestion) -> some View {
+        let isAlreadyAdded = settings.isDuplicateShare(urlString: suggestion.urlString, excluding: draft.id)
+
+        return HStack(spacing: 9) {
+            Image(systemName: "externaldrive.fill")
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(suggestion.displayName)
+                    .font(.callout.weight(.medium))
+                Text(suggestion.mountPath)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer()
+
+            if isAlreadyAdded {
+                Text("Added")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityLabel("Already added")
+            } else {
+                Button("Add") {
+                    apply(suggestion)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .accessibilityLabel("Add \(suggestion.displayName)")
+            }
+        }
+        .padding(.vertical, 11)
+        .help(suggestion.mountPath)
     }
 
     private var hasKeychainCredentials: Bool {
@@ -544,7 +962,7 @@ struct ShareEditorView: View {
     private func resetDraftIfNeeded() {
         guard draft.id != sourceShare?.id else { return }
         draft = DraftShare(share: sourceShare)
-        validationMessage = nil
+        validationIssue = nil
         readinessReport = nil
         vpnVerification = nil
     }
@@ -574,70 +992,6 @@ struct ShareEditorView: View {
                 break
             }
         }
-    }
-
-    private var networkRestrictionEnabled: Binding<Bool> {
-        Binding {
-            draft.limitsToRegisteredNetwork
-        } set: { isEnabled in
-            draft.limitsToRegisteredNetwork = isEnabled
-            if isEnabled {
-                registerCurrentNetworkIfNeeded()
-            } else {
-                draft.registeredSubnets = []
-                draft.wifiNetworkName = ""
-            }
-        }
-    }
-
-    private var registeredNetworkConfiguration: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Otter disconnects this share when your Mac leaves this Wi-Fi or wired network.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 8) {
-                LabeledContent("Network", value: registeredNetworkSummary)
-
-                if !networkService.currentIPv4Subnets.isEmpty || networkService.currentWiFiNetworkName != nil {
-                    Button {
-                        registerCurrentNetwork()
-                    } label: {
-                        Label(
-                            draft.registeredSubnets.isEmpty && draft.wifiNetworkName.isEmpty
-                                ? "Use Current Network"
-                                : "Update",
-                            systemImage: "location"
-                        )
-                    }
-                    .tahoeCompactActionButton()
-                }
-            }
-
-            DisclosureGroup("Network details") {
-                LabeledContent(
-                    "Wi-Fi",
-                    value: draft.wifiNetworkName.isEmpty ? "Not available" : draft.wifiNetworkName
-                )
-                LabeledContent(
-                    "Subnet",
-                    value: draft.registeredSubnets.isEmpty ? "Not available" : draft.registeredSubnets.joined(separator: ", ")
-                )
-                Text("Otter captures both details so the network can still be recognized if either one changes.")
-                    .font(.footnote)
-                    .foregroundStyle(.tertiary)
-            }
-
-            if draft.registeredSubnets.isEmpty && draft.wifiNetworkName.isEmpty && networkService.wifiNameRequiresLocationPermission {
-                locationPermissionNotice
-            }
-        }
-        .padding(.leading, 20)
-    }
-
-    private var remoteAccessSummary: String {
-        let vpnName = draft.vpnName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return draft.usesVPNRule && !vpnName.isEmpty ? vpnName : "Local network"
     }
 
     private var vpnConfiguration: some View {
@@ -676,70 +1030,38 @@ struct ShareEditorView: View {
 
             if vpnSelection.wrappedValue != .unconfigured,
                vpnSelection.wrappedValue != .custom {
-                DisclosureGroup("VPN details") {
-                    Toggle("Start VPN automatically", isOn: $draft.connectVPNAutomatically)
-                    Text(automaticVPNDescription)
+                Toggle("Start VPN automatically", isOn: $draft.connectVPNAutomatically)
+                Text(automaticVPNDescription)
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+
+                HStack(spacing: 8) {
+                    Button {
+                        verifyVPN()
+                    } label: {
+                        if isVerifyingVPN {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label("Verify Connection", systemImage: "checkmark.shield")
+                        }
+                    }
+                    .tahoeCompactActionButton()
+                    .disabled(isVerifyingVPN)
+
+                    if let vpnVerification {
+                        Label(
+                            vpnVerification.message,
+                            systemImage: vpnVerification.isVerified
+                                ? "checkmark.circle.fill"
+                                : "exclamationmark.triangle.fill"
+                        )
                         .font(.footnote)
-                        .foregroundStyle(.tertiary)
-
-                    HStack(spacing: 8) {
-                        Button {
-                            verifyVPN()
-                        } label: {
-                            if isVerifyingVPN {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Label("Verify Connection", systemImage: "checkmark.shield")
-                            }
-                        }
-                        .tahoeCompactActionButton()
-                        .disabled(isVerifyingVPN)
-
-                        if let vpnVerification {
-                            Label(
-                                vpnVerification.message,
-                                systemImage: vpnVerification.isVerified
-                                    ? "checkmark.circle.fill"
-                                    : "exclamationmark.triangle.fill"
-                            )
-                            .font(.footnote)
-                            .foregroundStyle(vpnVerification.isVerified ? .green : .orange)
-                            .fixedSize(horizontal: false, vertical: true)
-                        }
+                        .foregroundStyle(vpnVerification.isVerified ? .green : .orange)
+                        .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
-        }
-        .padding(.leading, 20)
-    }
-
-    private var registeredNetworkSummary: String {
-        let wifiName = draft.wifiNetworkName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !wifiName.isEmpty {
-            return wifiName
-        }
-        if !draft.registeredSubnets.isEmpty {
-            return draft.registeredSubnets.joined(separator: ", ")
-        }
-        return "Identifying current network…"
-    }
-
-    private var networkRestrictionSummary: String {
-        draft.limitsToRegisteredNetwork ? registeredNetworkSummary : "Off"
-    }
-
-    private var healthCheckSummary: String {
-        guard draft.healthCheck.isEnabled else { return "Off" }
-        return draft.healthCheck.hasCustomChecks ? "Custom" : "Standard"
-    }
-
-    private func advancedRowLabel(_ title: String, detail: String) -> some View {
-        HStack {
-            Text(title)
-            Spacer()
-            Text(detail)
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -760,41 +1082,10 @@ struct ShareEditorView: View {
 
     private var automaticVPNDescription: String {
         if draft.connectVPNAutomatically {
-            return draft.limitsToRegisteredNetwork
-                ? "Away from the registered network, Otter starts this VPN when needed to keep the share connected."
-                : "Otter starts this VPN when needed to keep the share connected."
+            return "Otter starts this VPN when needed to keep the share connected."
         }
 
         return "Otter waits for this VPN, then connects the share."
-    }
-
-    private var locationPermissionNotice: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("macOS requires Location Services access to read the Wi-Fi network name.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            if networkService.canRequestLocationAuthorization {
-                Button {
-                    networkService.requestLocationAuthorization()
-                } label: {
-                    Label("Allow Location Access", systemImage: "location")
-                }
-                .tahoeCompactActionButton()
-            } else {
-                Button {
-                    openLocationPrivacySettings()
-                } label: {
-                    Label("Open Location Settings", systemImage: "gearshape")
-                }
-                .tahoeCompactActionButton()
-            }
-        }
-    }
-
-    private func openLocationPrivacySettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices") else { return }
-        NSWorkspace.shared.open(url)
     }
 
     private func chooseMountedShare() {
@@ -814,7 +1105,7 @@ struct ShareEditorView: View {
             apply(try MountedShareSuggestion.make(from: url))
             refreshMountedShares()
         } catch {
-            validationMessage = error.localizedDescription
+            validationIssue = ValidationIssue(field: .address, message: error.localizedDescription)
         }
     }
 
@@ -844,7 +1135,14 @@ struct ShareEditorView: View {
         draft.displayName = suggestion.displayName
         draft.urlString = suggestion.urlString
         draft.mountPath = suggestion.mountPath
-        validationMessage = nil
+        validationIssue = nil
+
+        // Choosing a share is what moves the add flow forward. When editing,
+        // this is only auto-fill and the user stays where they are.
+        if !isEditing {
+            shareBrowserMessage = nil
+            navigate(to: .configure)
+        }
     }
 
     private func browseShares(on server: DiscoveredSMBServer) {
@@ -924,13 +1222,6 @@ struct ShareEditorView: View {
         return newSuggestions
     }
 
-    private func registerCurrentNetwork() {
-        draft.registeredSubnets = networkService.currentIPv4Subnets
-        if let currentSSID = networkService.currentWiFiNetworkName {
-            draft.wifiNetworkName = currentSSID
-        }
-    }
-
     private func discoverWakeOnLANSettings() {
         guard !isDiscoveringWakeOnLANSettings else { return }
         guard let url = networkURLComponents(from: draft.urlString)?.url else {
@@ -954,38 +1245,9 @@ struct ShareEditorView: View {
         }
     }
 
-    private func registerCurrentNetworkIfNeeded() {
-        fillDraftFromCurrentNetwork()
-
-        // Reading the Wi-Fi name needs Location Services, so ask the moment
-        // the user enables the condition (no-op unless undetermined). The
-        // draft back-fills via onChange once the refreshed details arrive.
-        if draft.wifiNetworkName.isEmpty {
-            networkService.requestLocationAuthorization()
-        }
-
-        Task {
-            await networkService.refreshNetworkDetailsNow()
-            fillDraftFromCurrentNetwork()
-        }
-    }
-
-    // Fills whatever the current network can provide into fields the user
-    // hasn't set, so the condition configures itself where possible.
-    private func fillDraftFromCurrentNetwork() {
-        guard draft.limitsToRegisteredNetwork else { return }
-
-        if draft.registeredSubnets.isEmpty {
-            draft.registeredSubnets = networkService.currentIPv4Subnets
-        }
-        if draft.wifiNetworkName.isEmpty, let currentSSID = networkService.currentWiFiNetworkName {
-            draft.wifiNetworkName = currentSSID
-        }
-    }
-
     private func save() {
-        validationMessage = validate()
-        guard validationMessage == nil, let share = makeShareFromDraft() else { return }
+        validationIssue = validate()
+        guard validationIssue == nil, let share = makeShareFromDraft() else { return }
 
         onSave(share)
         dismiss()
@@ -1046,8 +1308,8 @@ struct ShareEditorView: View {
     }
 
     private func testSetup() {
-        validationMessage = validate()
-        guard validationMessage == nil, let share = makeShareFromDraft() else { return }
+        validationIssue = validate()
+        guard validationIssue == nil, let share = makeShareFromDraft() else { return }
 
         isTestingSetup = true
         readinessReport = nil
@@ -1075,38 +1337,41 @@ struct ShareEditorView: View {
         }
     }
 
-    private func validate() -> String? {
+    private func validate() -> ValidationIssue? {
         guard let components = networkURLComponents(from: draft.urlString) else {
-            return "Use an SMB, NFS, or WebDAV address such as smb://server.local/Share."
+            return ValidationIssue(
+                field: .address,
+                message: "Use an SMB, NFS, or WebDAV address such as smb://server.local/Share."
+            )
         }
 
         if components.user != nil || components.password != nil {
-            return "Remove credentials from the address."
+            return ValidationIssue(field: .address, message: "Remove credentials from the address.")
         }
 
         if components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty {
-            return "Include the share name in the address."
-        }
-
-        if draft.limitsToRegisteredNetwork
-            && draft.registeredSubnets.isEmpty
-            && draft.wifiNetworkName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Register the network while connected to it, or turn off the network condition."
+            return ValidationIssue(field: .address, message: "Include the share name in the address.")
         }
 
         if draft.usesVPNRule {
             let vpnName = draft.vpnName.trimmingCharacters(in: .whitespacesAndNewlines)
             if vpnName.isEmpty {
-                return "Choose a VPN from System Settings, or turn off the VPN condition."
+                return ValidationIssue(
+                    field: .vpn,
+                    message: "Choose a VPN from System Settings, or turn off the VPN condition."
+                )
             }
             if configuredSystemVPN(named: vpnName) == nil {
-                return "Choose a VPN that is available in System Settings."
+                return ValidationIssue(
+                    field: .vpn,
+                    message: "Choose a VPN that is available in System Settings."
+                )
             }
         }
 
         if draft.wakeOnLANEnabled {
             if WakeOnLANConfiguration.normalizedMACAddress(draft.wakeOnLANMACAddress) == nil {
-                return "Add a valid Wake-on-LAN MAC address."
+                return ValidationIssue(field: .wakeOnLAN, message: "Add a valid Wake-on-LAN MAC address.")
             }
 
             let broadcastAddress = draft.wakeOnLANBroadcastAddress
@@ -1116,12 +1381,18 @@ struct ShareEditorView: View {
                 : broadcastAddress
 
             if !WakeOnLANService.isValidIPv4Address(resolvedBroadcastAddress) {
-                return "Use an IPv4 broadcast address like 255.255.255.255."
+                return ValidationIssue(
+                    field: .wakeOnLAN,
+                    message: "Use an IPv4 broadcast address like 255.255.255.255."
+                )
             }
         }
 
         if settings.isDuplicateShare(urlString: draft.urlString, excluding: draft.id) {
-            return "This network share address is already configured."
+            return ValidationIssue(
+                field: .address,
+                message: "This network share address is already configured."
+            )
         }
 
         return nil
@@ -1130,17 +1401,6 @@ struct ShareEditorView: View {
     private var inferredDisplayName: String? {
         guard let normalizedURLString = normalizedNetworkURLString(from: draft.urlString) else { return nil }
         return NetworkShare.inferredShareName(from: normalizedURLString)
-    }
-
-    private var inferredMountPath: String {
-        guard let normalizedURLString = normalizedNetworkURLString(from: draft.urlString) else {
-            return "/Volumes/OtterNAS"
-        }
-
-        return NetworkShare.defaultMountPath(
-            displayName: resolvedDisplayName(for: normalizedURLString),
-            urlString: normalizedURLString
-        )
     }
 
     private func resolvedDisplayName(for normalizedURLString: String) -> String {

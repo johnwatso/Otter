@@ -333,7 +333,7 @@ final class NetworkShareTests: XCTestCase {
         XCTAssertEqual(DraftShare(share: share).pauseState, .paused(until: resumeAt))
     }
 
-    func testEditorDraftKeepsNetworkAndVPNConnectionPathsIndependent() {
+    func testEditorDraftRetiresNetworkRestrictionsWhilePreservingVPNRules() {
         let networkOnlyShare = NetworkShare(
             displayName: "Media",
             urlString: "smb://server.local/Media",
@@ -342,9 +342,8 @@ final class NetworkShareTests: XCTestCase {
         )
         let networkDraft = DraftShare(share: networkOnlyShare)
 
-        XCTAssertTrue(networkDraft.limitsToRegisteredNetwork)
         XCTAssertFalse(networkDraft.usesVPNRule)
-        XCTAssertTrue(networkDraft.rules.hasNetworkRule)
+        XCTAssertFalse(networkDraft.rules.hasNetworkRule)
         XCTAssertFalse(networkDraft.rules.hasVPNRule)
 
         let vpnOnlyShare = NetworkShare(
@@ -359,7 +358,6 @@ final class NetworkShareTests: XCTestCase {
         )
         let vpnDraft = DraftShare(share: vpnOnlyShare)
 
-        XCTAssertFalse(vpnDraft.limitsToRegisteredNetwork)
         XCTAssertTrue(vpnDraft.usesVPNRule)
         XCTAssertFalse(vpnDraft.connectVPNAutomatically)
         XCTAssertEqual(vpnDraft.rules.requiredVPNName, "Work VPN")
@@ -380,9 +378,8 @@ final class NetworkShareTests: XCTestCase {
 
         let draft = DraftShare(share: legacyShare)
 
-        XCTAssertTrue(draft.limitsToRegisteredNetwork)
         XCTAssertFalse(draft.usesVPNRule)
-        XCTAssertTrue(draft.rules.hasNetworkRule)
+        XCTAssertFalse(draft.rules.hasNetworkRule)
         XCTAssertFalse(draft.rules.hasVPNRule)
     }
 
@@ -1284,6 +1281,7 @@ final class ShareMonitorRetryTests: XCTestCase {
         XCTAssertNil(monitor.runtimeState(for: share).nextRetryDate)
         XCTAssertEqual(mountCallCount, 0)
     }
+
 }
 
 final class MountIdentityTests: XCTestCase {

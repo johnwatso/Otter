@@ -130,6 +130,21 @@ struct MountedShareSuggestion: Identifiable, Hashable, Sendable {
     }
 }
 
+/// Identifies the control a validation failure belongs to, so the editor can
+/// reveal, scroll to, and annotate that control instead of reporting the
+/// problem far away from its cause.
+enum ValidationField: Hashable {
+    case shareName
+    case address
+    case vpn
+    case wakeOnLAN
+}
+
+struct ValidationIssue: Equatable {
+    let field: ValidationField
+    let message: String
+}
+
 enum VPNNameSelection: Hashable {
     case unconfigured
     case known(String)
@@ -219,9 +234,6 @@ struct DraftShare {
     var wakeOnLANMACAddress: String
     var wakeOnLANBroadcastAddress: String
     var wakeOnLANPort: Int
-    var limitsToRegisteredNetwork: Bool
-    var wifiNetworkName: String
-    var registeredSubnets: [String]
     var usesVPNRule: Bool
     var vpnName: String
     var connectVPNAutomatically: Bool
@@ -243,9 +255,6 @@ struct DraftShare {
         wakeOnLANMACAddress = share?.wakeOnLAN.macAddress ?? ""
         wakeOnLANBroadcastAddress = share?.wakeOnLAN.broadcastAddress ?? WakeOnLANConfiguration.defaultBroadcastAddress
         wakeOnLANPort = share?.wakeOnLAN.port ?? WakeOnLANConfiguration.defaultPort
-        limitsToRegisteredNetwork = share?.rules.hasNetworkRule ?? false
-        wifiNetworkName = share?.rules.wifiNetworkName ?? ""
-        registeredSubnets = share?.rules.registeredSubnets ?? []
         // An enabled rule with no name is the retired "arbitrary VPN" format.
         // Present it as off so editing and saving an older share removes that
         // rule instead of trapping the user behind an unselectable validation.
@@ -258,8 +267,8 @@ struct DraftShare {
 
     var rules: ShareRules {
         ShareRules(
-            wifiNetworkName: limitsToRegisteredNetwork ? wifiNetworkName : "",
-            registeredSubnets: limitsToRegisteredNetwork ? registeredSubnets : [],
+            wifiNetworkName: "",
+            registeredSubnets: [],
             vpnRuleEnabled: usesVPNRule,
             vpnName: usesVPNRule ? vpnName : "",
             connectVPNAutomatically: usesVPNRule && connectVPNAutomatically

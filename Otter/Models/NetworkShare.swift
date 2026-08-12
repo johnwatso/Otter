@@ -91,6 +91,8 @@ struct NetworkShare: Identifiable, Codable, Hashable {
     var id: UUID
     var displayName: String
     var urlString: String
+    /// Where the share is actually mounted right now. Observed, not chosen —
+    /// `ShareMonitor` keeps it in step with reality.
     var mountPath: String
     var keepMounted: Bool
     var mountAtLaunch: Bool

@@ -47,7 +47,9 @@ struct OtterApp: App {
                 .environmentObject(appModel.newShareDetector)
                 .frame(minWidth: 660, minHeight: 560)
         }
-        .defaultSize(width: 680, height: 600)
+        // macOS caps a sheet at its parent window's height, so the share
+        // editor can only be as tall as this window allows.
+        .defaultSize(width: 680, height: 720)
 
         Window("Preferences", id: AppModel.preferencesWindowID) {
             PreferencesView()

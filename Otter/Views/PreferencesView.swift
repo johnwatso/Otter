@@ -365,7 +365,7 @@ struct ShareManagementView: View {
                 Button {
                     appModel.requestNewShare()
                 } label: {
-                    Label("Add Share...", systemImage: "plus")
+                    Label("Add Share…", systemImage: "plus")
                 }
                 .tahoePrimaryActionButton()
             }
@@ -1117,7 +1117,7 @@ private struct UpdatesPreferencesView: View {
                 Button {
                     updaterViewModel.checkForUpdates()
                 } label: {
-                    Label("Check for Updates...", systemImage: "arrow.clockwise")
+                    Label("Check for Updates…", systemImage: "arrow.clockwise")
                 }
                 .tahoeSecondaryActionButton()
                 .disabled(!updaterViewModel.canCheckForUpdates)
@@ -1151,7 +1151,7 @@ private struct EmptyShareDetailView: View {
             Button {
                 appModel.requestNewShare()
             } label: {
-                Label("Add Share...", systemImage: "plus")
+                Label("Add Share…", systemImage: "plus")
             }
             .tahoePrimaryActionButton()
         }
