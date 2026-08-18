@@ -226,12 +226,17 @@ struct ShareManagementView: View {
                     isShowingOnboarding = true
                 }
             }
+
+            presentRequestedOnboardingIfNeeded()
         }
         .onChange(of: appModel.screenshotDemoShares != nil) {
             selection = defaultSelection
         }
         .onChange(of: selectionValidationSignature) {
             validateSelection()
+        }
+        .onChange(of: appModel.shouldPresentOnboarding) { _, shouldPresent in
+            presentRequestedOnboardingIfNeeded()
         }
         .onDisappear {
             if didRegisterWindowAppearance {
@@ -240,6 +245,12 @@ struct ShareManagementView: View {
                 appModel.sharesWindowDidDisappear()
             }
         }
+    }
+
+    private func presentRequestedOnboardingIfNeeded() {
+        guard appModel.shouldPresentOnboarding else { return }
+        isShowingOnboarding = true
+        appModel.shouldPresentOnboarding = false
     }
 
     // Custom rows instead of List(selection:) so the selection is a sliding
@@ -613,6 +624,7 @@ private struct PreferencesTabItem: View {
 }
 
 private struct GeneralPreferencesView: View {
+    @Environment(\.openWindow) private var openWindow
     @EnvironmentObject private var appModel: AppModel
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var networkService: NetworkReachabilityService
@@ -664,7 +676,11 @@ private struct GeneralPreferencesView: View {
                     Toggle("Problems", isOn: notificationPreferenceBinding(\.notifyProblems))
                     Toggle("Play sound", isOn: notificationPreferenceBinding(\.notificationSoundsEnabled))
 
-                    LabeledContent("Permission", value: notificationService.authorizationStatusTitle)
+                    LabeledContent("macOS notifications", value: notificationService.authorizationStatusTitle)
+
+                    if notificationService.authorizationStatus == .denied {
+                        SettingsSecondaryText("Enable Otter in System Settings → Notifications to receive alerts.")
+                    }
 
                     if notificationService.canAskForAuthorization {
                         Button {
@@ -855,6 +871,16 @@ private struct GeneralPreferencesView: View {
                     set: { appModel.setScreenshotDemo($0) }
                 ))
                 SettingsSecondaryText("Replaces the share list with five fake shares in assorted states for product screenshots. Real configuration is untouched. Debug builds only.")
+
+                Button {
+                    appModel.requestOnboarding()
+                    openWindow(id: AppModel.sharesWindowID)
+                    NSApp.activate(ignoringOtherApps: true)
+                } label: {
+                    Label("Run Onboarding Again", systemImage: "arrow.counterclockwise")
+                }
+                .tahoeSecondaryActionButton()
+                SettingsSecondaryText("Reopens onboarding without removing shares or resetting macOS permissions. Debug builds only.")
             } header: {
                 Text("Developer")
             }
@@ -935,36 +961,27 @@ private struct GeneralPreferencesView: View {
         UTType(filenameExtension: "otterconfig", conformingTo: .json) ?? .json
     }
 
-    private var supportPackageFileType: UTType {
-        UTType(filenameExtension: "ottersupport", conformingTo: .json) ?? .json
-    }
-
     private var protectedConfigurationFileType: UTType {
         UTType(filenameExtension: "otterbackup", conformingTo: .json) ?? .json
     }
 
     private func exportSupportPackage() {
-        let panel = NSSavePanel()
-        panel.title = "Export Otter Support Package"
-        panel.nameFieldStringValue = "Otter Support.ottersupport"
-        panel.allowedContentTypes = [supportPackageFileType]
-        panel.canCreateDirectories = true
-
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-
-        do {
-            let package = SupportPackageService.make(
+        Task { @MainActor in
+            switch await SupportDiagnosticsExporter.presentSavePanel(
                 settings: settings,
                 eventLog: appModel.eventLog,
                 monitor: appModel.monitor,
                 networkService: networkService,
                 notificationService: notificationService,
                 loginItemService: loginItemService
-            )
-            try SupportPackageService.encode(package).write(to: url, options: .atomic)
-            supportPackageMessage = "Support package exported with identifying details removed."
-        } catch {
-            supportPackageMessage = "Export failed: \(error.localizedDescription)"
+            ) {
+            case .success(.some):
+                supportPackageMessage = "Support package exported with identifying details removed."
+            case .success(.none):
+                break
+            case let .failure(error):
+                supportPackageMessage = "Export failed: \(error.localizedDescription)"
+            }
         }
     }
 

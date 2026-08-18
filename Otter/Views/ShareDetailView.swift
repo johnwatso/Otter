@@ -80,7 +80,7 @@ struct ShareDetailView: View {
                     VStack(spacing: 6) {
                         DetailRow(label: "Server", value: currentShare.host ?? "Unknown")
                         if let cachedIPAddress = currentShare.cachedIPAddress {
-                            DetailRow(label: "LAN fallback", value: cachedIPAddress)
+                            DetailRow(label: "IP Address", value: cachedIPAddress)
                         }
                         DetailRow(label: "Share", value: NetworkShare.inferredShareName(from: currentShare.urlString) ?? currentShare.displayName)
                         DetailRow(label: "Mount location", value: currentShare.mountPath)

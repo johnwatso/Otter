@@ -503,9 +503,15 @@ struct ShareEditorView: View {
                 Button {
                     navigate(to: .advanced)
                 } label: {
-                    HStack {
+                    HStack(spacing: 12) {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 22)
+
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Advanced")
+                                .font(.body.weight(.medium))
                             Text(advancedSummary)
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
@@ -515,7 +521,10 @@ struct ShareEditorView: View {
 
                         rowChevron
                     }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityHint("Open advanced share settings")
             }
 
             if isEditing && appliesToShareCount == nil {

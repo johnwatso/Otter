@@ -39,6 +39,7 @@ Otters are small, quick, and famously good at not letting important things drift
 - 🔗 Includes richer Shortcuts actions for mounting, pausing, status, reliability, and credential recovery
 - 🏢 Supports versioned configuration transfer, protected backups, and managed deployment through MDM ([configuration reference](docs/managed-deployment.md))
 - 🍎 Runs as a lightweight native menu bar app with launch-at-login and automatic updates
+- ⌨️ Includes `otterctl` for local shell automation: status, mount, disconnect, pause, resume, and redacted diagnostic export
 
 No scripts. No daemons. No fuss.
 
@@ -75,6 +76,18 @@ Run the tests with:
 
 ```sh
 xcodebuild test -project Otter.xcodeproj -scheme Otter -destination 'platform=macOS'
+```
+
+## Command line
+
+The built app contains a local automation command at `Otter.app/Contents/MacOS/otterctl`. It talks only to the running Otter app through macOS distributed notifications; it does not open a network port.
+
+```sh
+OTTERCTL="/Applications/Otter.app/Contents/MacOS/otterctl"
+"$OTTERCTL" status
+"$OTTERCTL" mount "Media"
+"$OTTERCTL" pause
+"$OTTERCTL" export-diagnostics ~/Desktop/otter-support.ottersupport
 ```
 
 ## License

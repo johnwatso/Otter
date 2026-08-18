@@ -2304,6 +2304,27 @@ final class SupportPackageTests: XCTestCase {
         XCTAssertFalse(json.contains("10.77.0.0/16"))
         XCTAssertFalse(json.contains("203.0.113.77"))
         XCTAssertFalse(json.contains("NeedleEvent"))
+
+        let exportData = try SupportDiagnosticsExporter.makeData(
+            settings: appModel.settings,
+            eventLog: appModel.eventLog,
+            monitor: appModel.monitor,
+            networkService: appModel.networkService,
+            notificationService: appModel.notificationService,
+            loginItemService: appModel.loginItemService
+        )
+        let exportedJSON = String(decoding: exportData, as: UTF8.self)
+        XCTAssertFalse(exportedJSON.contains("needle-server"))
+        XCTAssertFalse(exportedJSON.contains("NeedleEvent"))
+    }
+
+    @MainActor
+    func testSupportExportFilenameUsesUTCAndTheSupportExtension() {
+        let date = Date(timeIntervalSince1970: 0)
+        XCTAssertEqual(
+            SupportDiagnosticsExporter.defaultFilename(for: date),
+            "Otter-support-1970-01-01-000000.ottersupport"
+        )
     }
 }
 
@@ -2355,6 +2376,16 @@ final class AppPreferencesTests: XCTestCase {
             XCTAssertTrue(mode.shouldShowDockIcon(duringOnboarding: true))
             XCTAssertTrue(mode.shouldShowMenuBarIcon(duringOnboarding: true))
         }
+
+        XCTAssertTrue(AppPresenceMode.menuBarOnly.shouldShowDockIcon(
+            duringOnboarding: false,
+            duringShareEditing: true
+        ))
+        XCTAssertTrue(AppPresenceMode.menuBarOnly.shouldShowDockIcon(
+            duringOnboarding: false,
+            duringPreferencesOpen: true
+        ))
+        XCTAssertFalse(AppPresenceMode.menuBarOnly.shouldShowDockIcon(duringOnboarding: false))
     }
 
     func testPauseStateExpiresAtItsResumeDate() {

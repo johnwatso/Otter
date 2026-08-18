@@ -35,8 +35,8 @@
 		1A2B3C4D5E6F70010000001A /* ShareDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000011A /* ShareDetailView.swift */; };
 		1A2B3C4D5E6F70010000001B /* ShareEditorModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000011B /* ShareEditorModels.swift */; };
 		1A2B3C4D5E6F70010000001C /* VPNServiceDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000011C /* VPNServiceDiscovery.swift */; };
-		1A2B3C4D5E6F70010000001D /* otter-icon-light.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000011D /* otter-icon-light.png */; };
-		1A2B3C4D5E6F70010000001E /* otter-icon-dark.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000011E /* otter-icon-dark.png */; };
+		1A2B3C4D5E6F70010000001D /* website/assets/otter-icon-light.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000011D /* website/assets/otter-icon-light.png */; };
+		1A2B3C4D5E6F70010000001E /* website/assets/otter-icon-dark.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F70010000011E /* website/assets/otter-icon-dark.png */; };
 		1A2B3C4D5E6F700100000024 /* MountHealthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000120 /* MountHealthService.swift */; };
 		1A2B3C4D5E6F700100000025 /* ConnectionDoctor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000121 /* ConnectionDoctor.swift */; };
 		1A2B3C4D5E6F700100000026 /* SMBDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000122 /* SMBDiscoveryService.swift */; };
@@ -45,12 +45,34 @@
 		1A2B3C4D5E6F700100000029 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000125 /* OnboardingView.swift */; };
 		1A2B3C4D5E6F70010000002A /* OtterShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000126 /* OtterShortcuts.swift */; };
 		1A2B3C4D5E6F70010000002B /* NewShareDetectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000127 /* NewShareDetectionService.swift */; };
+		1A2B3C4D5E6F70010000002C /* SupportDiagnosticsExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000128 /* SupportDiagnosticsExporter.swift */; };
+		1A2B3C4D5E6F70010000002D /* OtterCommandService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000129 /* OtterCommandService.swift */; };
+		1A2B3C4D5E6F70010000002E /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000130 /* main.swift */; };
+		1A2B3C4D5E6F70010000002F /* otterctl in Copy Files */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000021 /* otterctl */; };
 		1A2B3C4D5E6F700100000202 /* OtterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000203 /* OtterTests.swift */; };
 		1A2B3C4D5E6F700100000302 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F700100000301 /* Sparkle */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		1A2B3C4D5E6F700100000231 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1A2B3C4D5E6F700100000061 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1A2B3C4D5E6F700100000060;
+			remoteInfo = Otter;
+		};
+		1A2B3C4D5E6F700100000233 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1A2B3C4D5E6F700100000061 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1A2B3C4D5E6F700100000206;
+			remoteInfo = otterctl;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		1A2B3C4D5E6F700100000020 /* Otter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Otter.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A2B3C4D5E6F700100000021 /* otterctl */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = otterctl; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A2B3C4D5E6F700100000100 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000101 /* OtterApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtterApp.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000102 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
@@ -80,8 +102,8 @@
 		1A2B3C4D5E6F70010000011A /* ShareDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareDetailView.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F70010000011B /* ShareEditorModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareEditorModels.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F70010000011C /* VPNServiceDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VPNServiceDiscovery.swift; sourceTree = "<group>"; };
-		1A2B3C4D5E6F70010000011D /* otter-icon-light.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "website/assets/otter-icon-light.png"; sourceTree = SOURCE_ROOT; };
-		1A2B3C4D5E6F70010000011E /* otter-icon-dark.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "website/assets/otter-icon-dark.png"; sourceTree = SOURCE_ROOT; };
+		1A2B3C4D5E6F70010000011D /* website/assets/otter-icon-light.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "website/assets/otter-icon-light.png"; sourceTree = SOURCE_ROOT; };
+		1A2B3C4D5E6F70010000011E /* website/assets/otter-icon-dark.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "website/assets/otter-icon-dark.png"; sourceTree = SOURCE_ROOT; };
 		1A2B3C4D5E6F700100000120 /* MountHealthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MountHealthService.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000121 /* ConnectionDoctor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionDoctor.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000122 /* SMBDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBDiscoveryService.swift; sourceTree = "<group>"; };
@@ -90,6 +112,9 @@
 		1A2B3C4D5E6F700100000125 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000126 /* OtterShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtterShortcuts.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000127 /* NewShareDetectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewShareDetectionService.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000128 /* SupportDiagnosticsExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupportDiagnosticsExporter.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000129 /* OtterCommandService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtterCommandService.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000130 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000201 /* OtterTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OtterTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A2B3C4D5E6F700100000203 /* OtterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtterTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -105,15 +130,30 @@
 		};
 /* End PBXFrameworksBuildPhase section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		1A2B3C4D5E6F700100000072 /* Copy otterctl */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 6;
+			files = (
+				1A2B3C4D5E6F70010000002F /* otterctl in Copy Files */,
+			);
+			name = "Copy otterctl";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXGroup section */
 		1A2B3C4D5E6F700100000040 = {
 			isa = PBXGroup;
 			children = (
 				1A2B3C4D5E6F700100000041 /* Otter */,
+				1A2B3C4D5E6F700100000046 /* OtterCLI */,
 				1A2B3C4D5E6F700100000205 /* OtterTests */,
 				1A2B3C4D5E6F70010000010F /* Otter.icon */,
-				1A2B3C4D5E6F70010000011D /* otter-icon-light.png */,
-				1A2B3C4D5E6F70010000011E /* otter-icon-dark.png */,
+				1A2B3C4D5E6F70010000011D /* website/assets/otter-icon-light.png */,
+				1A2B3C4D5E6F70010000011E /* website/assets/otter-icon-dark.png */,
 				1A2B3C4D5E6F700100000050 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -161,6 +201,8 @@
 				1A2B3C4D5E6F700100000108 /* NetworkReachabilityService.swift */,
 				1A2B3C4D5E6F700100000110 /* NotificationService.swift */,
 				1A2B3C4D5E6F700100000127 /* NewShareDetectionService.swift */,
+				1A2B3C4D5E6F700100000128 /* SupportDiagnosticsExporter.swift */,
+				1A2B3C4D5E6F700100000129 /* OtterCommandService.swift */,
 				1A2B3C4D5E6F700100000109 /* LoginItemService.swift */,
 				1A2B3C4D5E6F700100000115 /* ReconnectPolicy.swift */,
 				1A2B3C4D5E6F700100000114 /* ShareEventLog.swift */,
@@ -175,6 +217,14 @@
 				1A2B3C4D5E6F700100000123 /* ConfigurationTransferService.swift */,
 			);
 			path = Services;
+			sourceTree = "<group>";
+		};
+		1A2B3C4D5E6F700100000046 /* OtterCLI */ = {
+			isa = PBXGroup;
+			children = (
+				1A2B3C4D5E6F700100000130 /* main.swift */,
+			);
+			path = OtterCLI;
 			sourceTree = "<group>";
 		};
 		1A2B3C4D5E6F700100000045 /* Views */ = {
@@ -197,6 +247,7 @@
 			isa = PBXGroup;
 			children = (
 				1A2B3C4D5E6F700100000020 /* Otter.app */,
+				1A2B3C4D5E6F700100000021 /* otterctl */,
 				1A2B3C4D5E6F700100000201 /* OtterTests.xctest */,
 			);
 			name = Products;
@@ -220,10 +271,12 @@
 				1A2B3C4D5E6F700100000070 /* Sources */,
 				1A2B3C4D5E6F700100000030 /* Frameworks */,
 				1A2B3C4D5E6F700100000071 /* Resources */,
+				1A2B3C4D5E6F700100000072 /* Copy otterctl */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				1A2B3C4D5E6F700100000232 /* PBXTargetDependency */,
 			);
 			name = Otter;
 			packageProductDependencies = (
@@ -232,6 +285,21 @@
 			productName = Otter;
 			productReference = 1A2B3C4D5E6F700100000020 /* Otter.app */;
 			productType = "com.apple.product-type.application";
+		};
+		1A2B3C4D5E6F700100000206 /* otterctl */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A2B3C4D5E6F700100000280 /* Build configuration list for PBXNativeTarget "otterctl" */;
+			buildPhases = (
+				1A2B3C4D5E6F700100000221 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = otterctl;
+			productName = otterctl;
+			productReference = 1A2B3C4D5E6F700100000021 /* otterctl */;
+			productType = "com.apple.product-type.tool";
 		};
 		1A2B3C4D5E6F700100000200 /* OtterTests */ = {
 			isa = PBXNativeTarget;
@@ -251,24 +319,6 @@
 		};
 /* End PBXNativeTarget section */
 
-/* Begin PBXTargetDependency section */
-		1A2B3C4D5E6F700100000230 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 1A2B3C4D5E6F700100000060 /* Otter */;
-			targetProxy = 1A2B3C4D5E6F700100000231 /* PBXContainerItemProxy */;
-		};
-/* End PBXTargetDependency section */
-
-/* Begin PBXContainerItemProxy section */
-		1A2B3C4D5E6F700100000231 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 1A2B3C4D5E6F700100000061 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 1A2B3C4D5E6F700100000060;
-			remoteInfo = Otter;
-		};
-/* End PBXContainerItemProxy section */
-
 /* Begin PBXProject section */
 		1A2B3C4D5E6F700100000061 /* Project object */ = {
 			isa = PBXProject;
@@ -276,10 +326,13 @@
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2660;
 				LastUpgradeCheck = 2660;
-				TargetAttributes = {
+			TargetAttributes = {
 					1A2B3C4D5E6F700100000060 = {
-						CreatedOnToolsVersion = 26.6;
-					};
+					CreatedOnToolsVersion = 26.6;
+				};
+				1A2B3C4D5E6F700100000206 = {
+					CreatedOnToolsVersion = 26.6;
+				};
 				};
 			};
 			buildConfigurationList = 1A2B3C4D5E6F700100000081 /* Build configuration list for PBXProject "Otter" */;
@@ -299,6 +352,7 @@
 			projectRoot = "";
 			targets = (
 				1A2B3C4D5E6F700100000060 /* Otter */,
+				1A2B3C4D5E6F700100000206 /* otterctl */,
 				1A2B3C4D5E6F700100000200 /* OtterTests */,
 			);
 		};
@@ -311,8 +365,8 @@
 			files = (
 				1A2B3C4D5E6F70010000000E /* Assets.xcassets in Resources */,
 				1A2B3C4D5E6F70010000000F /* Otter.icon in Resources */,
-				1A2B3C4D5E6F70010000001D /* otter-icon-light.png in Resources */,
-				1A2B3C4D5E6F70010000001E /* otter-icon-dark.png in Resources */,
+				1A2B3C4D5E6F70010000001D /* website/assets/otter-icon-light.png in Resources */,
+				1A2B3C4D5E6F70010000001E /* website/assets/otter-icon-dark.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -338,6 +392,8 @@
 				1A2B3C4D5E6F70010000000D /* ShareEditorView.swift in Sources */,
 				1A2B3C4D5E6F700100000010 /* NotificationService.swift in Sources */,
 				1A2B3C4D5E6F70010000002B /* NewShareDetectionService.swift in Sources */,
+				1A2B3C4D5E6F70010000002C /* SupportDiagnosticsExporter.swift in Sources */,
+				1A2B3C4D5E6F70010000002D /* OtterCommandService.swift in Sources */,
 				1A2B3C4D5E6F700100000011 /* UpdaterViewModel.swift in Sources */,
 				1A2B3C4D5E6F700100000012 /* WakeOnLANService.swift in Sources */,
 				1A2B3C4D5E6F700100000013 /* ActionButtonStyles.swift in Sources */,
@@ -368,7 +424,28 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		1A2B3C4D5E6F700100000221 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A2B3C4D5E6F70010000002E /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		1A2B3C4D5E6F700100000230 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1A2B3C4D5E6F700100000060 /* Otter */;
+			targetProxy = 1A2B3C4D5E6F700100000231 /* PBXContainerItemProxy */;
+		};
+		1A2B3C4D5E6F700100000232 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1A2B3C4D5E6F700100000206 /* otterctl */;
+			targetProxy = 1A2B3C4D5E6F700100000233 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		1A2B3C4D5E6F700100000090 /* Debug */ = {
@@ -489,7 +566,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 2026081414;
 				DEVELOPMENT_ASSET_PATHS = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -499,7 +576,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 0.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.johnwatso.Otter;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = macosx;
@@ -518,7 +595,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 2026081414;
 				DEVELOPMENT_ASSET_PATHS = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -528,13 +605,39 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 0.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.johnwatso.Otter;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = macosx;
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		1A2B3C4D5E6F700100000213 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		1A2B3C4D5E6F700100000214 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
 			};
@@ -588,6 +691,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		1A2B3C4D5E6F700100000081 /* Build configuration list for PBXProject "Otter" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A2B3C4D5E6F700100000090 /* Debug */,
+				1A2B3C4D5E6F700100000091 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		1A2B3C4D5E6F700100000210 /* Build configuration list for PBXNativeTarget "OtterTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -597,11 +709,11 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		1A2B3C4D5E6F700100000081 /* Build configuration list for PBXProject "Otter" */ = {
+		1A2B3C4D5E6F700100000280 /* Build configuration list for PBXNativeTarget "otterctl" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				1A2B3C4D5E6F700100000090 /* Debug */,
-				1A2B3C4D5E6F700100000091 /* Release */,
+				1A2B3C4D5E6F700100000213 /* Debug */,
+				1A2B3C4D5E6F700100000214 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

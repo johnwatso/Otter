@@ -71,8 +71,12 @@ enum AppPresenceMode: String, Codable, CaseIterable, Equatable, Identifiable {
         self != .dockOnly
     }
 
-    func shouldShowDockIcon(duringOnboarding: Bool) -> Bool {
-        duringOnboarding || showsDockIcon
+    func shouldShowDockIcon(
+        duringOnboarding: Bool,
+        duringShareEditing: Bool = false,
+        duringPreferencesOpen: Bool = false
+    ) -> Bool {
+        duringOnboarding || duringShareEditing || duringPreferencesOpen || showsDockIcon
     }
 
     func shouldShowMenuBarIcon(duringOnboarding: Bool) -> Bool {

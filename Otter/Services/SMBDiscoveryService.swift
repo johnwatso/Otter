@@ -32,12 +32,25 @@ enum SMBDiscoveryState: Equatable, Sendable {
     case failed(String)
 }
 
+enum LocalNetworkAuthorizationStatus: Equatable, Sendable {
+    case checking
+    case allowed
+    case denied
+    case unknown
+
+    var isAllowed: Bool {
+        self == .allowed
+    }
+}
+
 @MainActor
 final class SMBDiscoveryService: ObservableObject {
     @Published private(set) var servers: [DiscoveredSMBServer] = []
     @Published private(set) var state: SMBDiscoveryState = .idle
+    @Published private(set) var localNetworkAuthorizationStatus: LocalNetworkAuthorizationStatus = .unknown
 
     private var browser: NWBrowser?
+    private var authorizationBrowser: NWBrowser?
     private let queue = DispatchQueue(label: "Otter.SMBDiscovery", qos: .utility)
 
     func start() {
@@ -87,6 +100,48 @@ final class SMBDiscoveryService: ObservableObject {
     func restart() {
         stop()
         start()
+    }
+
+    /// Browsing for the declared SMB Bonjour service is the public Network
+    /// framework mechanism that macOS uses to evaluate Local Network access.
+    /// A policy-denied DNS-SD error means the switch in System Settings is off.
+    func checkLocalNetworkAuthorization() {
+        guard authorizationBrowser == nil else { return }
+
+        localNetworkAuthorizationStatus = .checking
+
+        let browser = NWBrowser(
+            for: .bonjour(type: "_smb._tcp", domain: nil),
+            using: .tcp
+        )
+        authorizationBrowser = browser
+
+        browser.stateUpdateHandler = { [weak self, weak browser] state in
+            let status: LocalNetworkAuthorizationStatus?
+            switch state {
+            case .ready:
+                status = .allowed
+            case let .failed(error):
+                if case let .dns(code) = error, code == -65_570 {
+                    status = .denied
+                } else {
+                    status = .unknown
+                }
+            case .cancelled, .setup, .waiting:
+                status = nil
+            @unknown default:
+                status = .unknown
+            }
+
+            guard let status else { return }
+            Task { @MainActor [weak self, weak browser] in
+                self?.localNetworkAuthorizationStatus = status
+                browser?.cancel()
+                self?.authorizationBrowser = nil
+            }
+        }
+
+        browser.start(queue: queue)
     }
 
     func stop() {

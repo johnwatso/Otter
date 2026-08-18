@@ -49,9 +49,9 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
     var authorizationStatusTitle: String {
         switch authorizationStatus {
         case .notDetermined:
-            "Not asked yet"
+            "Not requested"
         case .denied:
-            "Off"
+            "Disabled in macOS"
         case .authorized:
             "Allowed"
         case .provisional:
