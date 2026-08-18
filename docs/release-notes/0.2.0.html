@@ -3,50 +3,65 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Tighten new-share detection edges - Release Notes</title>
+  <title>Otter 0.2.0 - Release Notes</title>
+  <meta name="description" content="Release notes for Otter 0.2.0: more reliable new-share detection, flexible VPN handling, and a smoother setup flow.">
+  <link rel="canonical" href="https://www.get-otter.com/release-notes/0.2.0.html">
+  <link rel="icon" type="image/png" href="/assets/otter-icon.png">
   <style>
     :root { color-scheme: light dark; }
-    body {
-      margin: 0;
-      padding: 32px 20px 48px;
-      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f4f6f8;
-      color: #0f1720;
-    }
-    main {
-      max-width: 760px;
-      margin: 0 auto;
-      padding: 28px;
-      border-radius: 22px;
-      background: rgba(255, 255, 255, 0.86);
-      box-shadow: 0 20px 60px rgba(15, 23, 32, 0.10);
-    }
+    body { margin: 0; padding: 32px 20px 48px; font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f6f8; color: #0f1720; }
+    main { max-width: 760px; margin: 0 auto; padding: 28px; border-radius: 22px; background: rgba(255, 255, 255, .86); box-shadow: 0 20px 60px rgba(15, 23, 32, .10); border: 1px solid rgba(82, 96, 109, .12); }
     h1 { margin: 0 0 6px; font-size: 30px; line-height: 1.15; }
-    .meta { margin: 0 0 24px; color: #52606d; font-size: 14px; }
-    p { margin: 0 0 16px; }
+    .meta, .summary { color: #52606d; font-size: 14px; }
+    .intro { margin: 0 0 24px; color: #384454; }
+    section { margin: 18px 0 0; padding: 18px 18px 14px; border: 1px solid rgba(82, 96, 109, .18); border-radius: 16px; border-left: 5px solid #1685c5; background: rgba(255, 255, 255, .42); }
+    h2 { margin: 0 0 4px; color: #1685c5; font-size: 18px; }
+    ul { margin: 12px 0 0; padding-left: 22px; }
+    li { margin: 0 0 8px; }
+    li:last-child { margin-bottom: 0; }
     a { color: #0a67a3; text-decoration: none; }
     a:hover { text-decoration: underline; }
-    @media (prefers-color-scheme: dark) {
-      body { background: #0b1015; color: #edf2f7; }
-      main {
-        background: rgba(15, 23, 32, 0.88);
-        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
-      }
-      .meta { color: #9fb0c2; }
-      a { color: #73c3ff; }
-    }
+    @media (prefers-color-scheme: dark) { body { background: #0b1015; color: #edf2f7; } main { background: rgba(15, 23, 32, .88); border-color: rgba(159, 176, 194, .14); } .meta, .summary { color: #9fb0c2; } .intro { color: #c8d3df; } section { border-color: rgba(159, 176, 194, .18); background: rgba(255, 255, 255, .04); } a { color: #73c3ff; } }
   </style>
 </head>
 <body>
   <main>
-    <h1>Tighten new-share detection edges</h1>
-    <p class="meta">Version 0.2.0</p>
-    <p>Tighten new-share detection edges</p>
-<p>Coalesce the announcement across debounced volume events. A mount<br>immediately followed by an unmount elsewhere took the last event's<br>announcing flag, which silently recorded the new share as known and<br>never offered it.</p>
-<p>Deliver the workspace notifications on the posting thread instead of<br>through OperationQueue, since the handler only hops to the main actor<br>to schedule the scan.</p>
-<p>Wait for the shares window to report that it appeared before presenting<br>the prefilled editor, replacing a fixed 250ms delay that guessed at how<br>long the window takes to open.</p>
-<p>Drop the time-sensitive interruption level: the app ships without the<br>entitlement for it, so the system downgrades it anyway. The notification<br>already persists through the .list presentation option and having no<br>expiry.</p>
-    <p><strong>Commit:</strong> <a href="https://github.com/johnwatso/Otter/commit/16022e665a07cc1f25d94bf78958754109a4698b">16022e6</a></p>
+    <h1>Otter 0.2.0</h1>
+    <p class="meta">Version 0.2.0 &middot; Build 2</p>
+    <p class="intro">A reliability-focused release that makes it easier to bring existing shares into Otter and safer to respond when a new one appears.</p>
+
+    <section>
+      <h2>&#128064; Manage newly mounted shares</h2>
+      <p class="summary">Otter can now notice a Finder-mounted share and offer to take care of it for you.</p>
+      <ul>
+        <li>Detects new mounted shares and offers to add them to Otter.</li>
+        <li>Keeps the offer available in the menu bar until it is answered, rather than losing it with a notification.</li>
+        <li>Coalesces rapid mount and unmount events so a new share is not silently missed.</li>
+        <li>Waits for Manage Shares to be ready before opening the prefilled editor.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>&#128274; More flexible VPN paths</h2>
+      <p class="summary">A share can now use the most appropriate route without being overly strict about the path you are currently on.</p>
+      <ul>
+        <li>Adds a manual VPN connection mode alongside automatic connection.</li>
+        <li>Lets a share connect from its registered local network or through its configured VPN path.</li>
+        <li>Improves the VPN state surfaced in the menu bar, setup screens, and connection guidance.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>&#128276; Quieter, more dependable notifications</h2>
+      <p class="summary">The app now works with macOS&rsquo;s notification model rather than asking for a delivery mode it cannot use.</p>
+      <ul>
+        <li>Uses standard persistent notification delivery for new-share offers.</li>
+        <li>Delivers workspace notifications on the posting thread so scanning remains correctly scheduled.</li>
+        <li>Updates the website and Sparkle update-feed deployment to serve release information from the right paths.</li>
+      </ul>
+    </section>
+
+    <p class="meta"><a href="./index.html">All release notes</a></p>
   </main>
 </body>
 </html>

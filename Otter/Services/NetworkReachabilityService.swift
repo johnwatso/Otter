@@ -122,6 +122,10 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
         refreshNetworkDetails()
     }
 
+    func refreshLocationAuthorizationStatus() {
+        locationAuthorizationStatus = locationManager.authorizationStatus
+    }
+
     func requestLocationAuthorization() {
         guard canRequestLocationAuthorization else { return }
         locationManager.requestWhenInUseAuthorization()

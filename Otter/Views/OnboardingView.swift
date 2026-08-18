@@ -21,7 +21,6 @@ struct OnboardingView: View {
     @State private var shareBrowserMessage: String?
     @State private var browsingServerID: DiscoveredSMBServer.ID?
     @State private var browsingSavedShareID: SavedSMBShare.ID?
-
     var body: some View {
         VStack(spacing: 0) {
             Group {
@@ -29,8 +28,10 @@ struct OnboardingView: View {
                 case 0:
                     welcomePage
                 case 1:
-                    presencePage
+                    permissionsPage
                 case 2:
+                    presencePage
+                case 3:
                     findSharesPage
                 default:
                     finishPage
@@ -43,7 +44,7 @@ struct OnboardingView: View {
             HStack {
                 if step == 0 {
                     Button("Skip Setup") {
-                        finish(requestNotificationPermission: false)
+                        finish()
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
@@ -53,18 +54,21 @@ struct OnboardingView: View {
                     } label: {
                         Label("Back", systemImage: "chevron.left")
                     }
-                    .tahoeSecondaryActionButton()
+                    .onboardingSecondaryActionButton()
                 }
 
                 Spacer()
 
-                if step < 3 {
+                if step < 4 {
                     Button {
                         switch step {
                         case 0:
                             step = 1
                         case 1:
                             step = 2
+                            requestPermissionsIfNeeded()
+                        case 2:
+                            step = 3
                             beginDiscovery()
                         default:
                             refreshMountedShares(
@@ -72,24 +76,25 @@ struct OnboardingView: View {
                             )
                         }
                     } label: {
-                        Label(step == 0 ? "Get Started" : "Continue", systemImage: "chevron.right")
+                        Text(step == 0 ? "Get Started" : "Continue")
                     }
-                    .tahoePrimaryActionButton()
+                    .onboardingPrimaryActionButton()
                     .keyboardShortcut(.defaultAction)
-                    .disabled(step == 2 && isRefreshingMountedShares)
+                    .disabled(step == 3 && isRefreshingMountedShares)
                 } else {
                     Button {
-                        finish(requestNotificationPermission: true)
+                        finish()
                     } label: {
-                        Label(settings.shares.isEmpty ? "Finish Without a Share" : "Finish", systemImage: "checkmark")
+                        Text(settings.shares.isEmpty ? "Finish Without a Share" : "Finish")
                     }
-                    .tahoePrimaryActionButton()
+                    .onboardingPrimaryActionButton()
                     .keyboardShortcut(.defaultAction)
                 }
             }
-            .padding(18)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 16)
         }
-        .frame(width: 620, height: 540)
+        .frame(width: 620, height: 620)
         .onAppear {
             appModel.onboardingDidBegin()
         }
@@ -147,6 +152,65 @@ struct OnboardingView: View {
         }
         .padding(34)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var permissionsPage: some View {
+        VStack {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Permissions")
+                        .font(.largeTitle.bold())
+                    Text("Choose the optional macOS access Otter can use while it sets up your shares.")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(spacing: 18) {
+                    OnboardingPermissionRow(
+                        symbol: "network",
+                        tint: .cyan,
+                        title: "Local Network",
+                        detail: localNetworkPermissionDetail,
+                        isOn: discovery.localNetworkAuthorizationStatus.isAllowed
+                    )
+
+                    OnboardingPermissionRow(
+                        symbol: "bell.badge.fill",
+                        tint: .blue,
+                        title: "Notifications",
+                        detail: notificationsPermissionDetail,
+                        isOn: notificationService.authorizationStatus == .authorized
+                    )
+
+                    OnboardingPermissionRow(
+                        symbol: "location.fill",
+                        tint: .purple,
+                        title: "Location",
+                        detail: locationPermissionDetail,
+                        isOn: networkService.locationAuthorizationStatus == .authorizedAlways
+                    )
+                }
+
+                Text("Otter checks these macOS permissions when this page opens. You can change them later in System Settings.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(32)
+            .frame(maxWidth: 540, alignment: .leading)
+            .background(.background, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .strokeBorder(.separator.opacity(0.22), lineWidth: 1)
+            }
+        }
+        .padding(32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            discovery.checkLocalNetworkAuthorization()
+            networkService.refreshLocationAuthorizationStatus()
+            Task { await notificationService.refreshAuthorizationStatus() }
+        }
     }
 
     private var findSharesPage: some View {
@@ -399,7 +463,7 @@ struct OnboardingView: View {
 
             isRefreshingMountedShares = false
             if advanceToFinish {
-                step = 3
+                step = 4
             }
         }
     }
@@ -498,16 +562,68 @@ struct OnboardingView: View {
         importedPaths.insert(suggestion.mountPath)
     }
 
-    private func finish(requestNotificationPermission: Bool) {
-        let shouldRequestNotifications = requestNotificationPermission
-            && settings.preferences.notificationsEnabled
-            && notificationService.canAskForAuthorization
+    private func requestPermissionsIfNeeded() {
+        Task {
+            if notificationService.canAskForAuthorization {
+                await notificationService.requestAuthorization()
+            }
+
+            if networkService.canRequestLocationAuthorization {
+                networkService.requestLocationAuthorization()
+            }
+
+            discovery.checkLocalNetworkAuthorization()
+        }
+    }
+
+    private var localNetworkPermissionDetail: String {
+        switch discovery.localNetworkAuthorizationStatus {
+        case .checking:
+            "Checking macOS permission…"
+        case .allowed:
+            "Otter can find nearby SMB servers and communicate with local shares."
+        case .denied:
+            "Disabled in System Settings. Enable Otter under Privacy & Security > Local Network."
+        case .unknown:
+            "MacOS has not confirmed whether Otter can access your local network yet."
+        }
+    }
+
+    private var notificationsPermissionDetail: String {
+        switch notificationService.authorizationStatus {
+        case .authorized:
+            "Otter can alert you about connection changes and problems."
+        case .notDetermined:
+            "MacOS has not asked for notification permission yet."
+        case .denied:
+            "Disabled in System Settings."
+        case .provisional:
+            "Otter can deliver notifications quietly."
+        case .ephemeral:
+            "Otter has temporary notification access."
+        @unknown default:
+            "MacOS has not confirmed notification access."
+        }
+    }
+
+    private var locationPermissionDetail: String {
+        switch networkService.locationAuthorizationStatus {
+        case .authorizedAlways:
+            "Otter can show the Wi-Fi name when you create a network rule for a share."
+        case .notDetermined:
+            "MacOS has not asked for location permission yet."
+        case .denied, .restricted:
+            "Disabled in System Settings."
+        case .authorizedWhenInUse:
+            "Otter has limited location access. Allow it in System Settings to use Wi-Fi network rules."
+        @unknown default:
+            "MacOS has not confirmed location access."
+        }
+    }
+
+    private func finish() {
         settings.completeOnboarding()
         dismiss()
-
-        if shouldRequestNotifications {
-            Task { await notificationService.requestAuthorization() }
-        }
     }
 
     private func presenceChoice(_ mode: AppPresenceMode) -> some View {
@@ -515,6 +631,80 @@ struct OnboardingView: View {
 
         return AppPresenceChoice(mode: mode, isSelected: isSelected) {
             settings.updatePreferences { $0.appPresenceMode = mode }
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func onboardingPrimaryActionButton() -> some View {
+        if #available(macOS 26.0, *) {
+            self
+                .font(.body.weight(.semibold))
+                .buttonStyle(.glassProminent)
+                .buttonBorderShape(.roundedRectangle(radius: 11))
+                .controlSize(.large)
+                .frame(minWidth: 132)
+        } else {
+            self
+                .font(.body.weight(.semibold))
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.roundedRectangle(radius: 11))
+                .controlSize(.large)
+                .frame(minWidth: 132)
+        }
+    }
+
+    @ViewBuilder
+    func onboardingSecondaryActionButton() -> some View {
+        if #available(macOS 26.0, *) {
+            self
+                .font(.body.weight(.medium))
+                .buttonStyle(.glass)
+                .buttonBorderShape(.roundedRectangle(radius: 11))
+                .controlSize(.large)
+        } else {
+            self
+                .font(.body.weight(.medium))
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.roundedRectangle(radius: 11))
+                .controlSize(.large)
+        }
+    }
+}
+
+private struct OnboardingPermissionRow: View {
+    let symbol: String
+    let tint: Color
+    let title: String
+    let detail: String
+    let isOn: Bool
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            Image(systemName: symbol)
+                .font(.title2)
+                .foregroundStyle(tint)
+                .frame(width: 58, height: 58)
+                .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.headline)
+                Text(detail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 12)
+
+            Toggle(title, isOn: .constant(isOn))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .disabled(true)
+                .accessibilityLabel(title)
+                .accessibilityHint(detail)
         }
     }
 }

@@ -40,9 +40,11 @@ final class AppModel: ObservableObject {
     let monitor: ShareMonitor
     let connectionDoctor: ConnectionDoctor
     let newShareDetector: NewShareDetectionService
+    lazy var commandService = OtterCommandService(appModel: self)
 
     @Published var editorRequest: ShareEditorRequest?
     @Published var shouldOpenSharesWindow = false
+    @Published var shouldPresentOnboarding = false
     @Published private(set) var isMenuBarExtraInserted = true
 
     private var isSharesWindowVisible = false
@@ -97,8 +99,13 @@ final class AppModel: ObservableObject {
         shouldOpenSharesWindow = true
     }
 
+    func requestOnboarding() {
+        shouldPresentOnboarding = true
+    }
+
     private var hasStarted = false
     private var isOnboardingPresented = false
+    private var isPreferencesWindowVisible = false
     private var lastAppliedDockIconVisibility: Bool?
     private var cancellables = Set<AnyCancellable>()
 
@@ -174,6 +181,7 @@ final class AppModel: ObservableObject {
         networkService.start()
         monitor.start()
         newShareDetector.start()
+        commandService.start()
         observePreferences()
         refreshDockIconVisibility()
     }
@@ -262,10 +270,12 @@ final class AppModel: ObservableObject {
     }
 
     func preferencesWindowDidAppear() {
+        isPreferencesWindowVisible = true
         refreshDockIconVisibility(activateIfShowing: true)
     }
 
     func preferencesWindowDidDisappear() {
+        isPreferencesWindowVisible = false
         refreshDockIconVisibility()
     }
 
@@ -288,7 +298,11 @@ final class AppModel: ObservableObject {
             isMenuBarExtraInserted = shouldShowMenuBarIcon
         }
 
-        let shouldShowDockIcon = mode.shouldShowDockIcon(duringOnboarding: isOnboardingPresented)
+        let shouldShowDockIcon = mode.shouldShowDockIcon(
+            duringOnboarding: isOnboardingPresented,
+            duringShareEditing: editorRequest != nil,
+            duringPreferencesOpen: isPreferencesWindowVisible
+        )
 
         guard lastAppliedDockIconVisibility != shouldShowDockIcon else { return }
         lastAppliedDockIconVisibility = shouldShowDockIcon
@@ -308,6 +322,7 @@ final class AppModel: ObservableObject {
             .sink { [weak self] request in
                 guard let self else { return }
                 self.newShareDetector.isSuppressed = request != nil || self.isOnboardingPresented
+                self.refreshDockIconVisibility(activateIfShowing: request != nil)
             }
             .store(in: &cancellables)
 
