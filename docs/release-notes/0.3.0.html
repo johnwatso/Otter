@@ -3,78 +3,49 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Otter 0.3.0 - Release Notes</title>
-  <meta name="description" content="Release notes for Otter 0.3.0: guided share setup, stronger connection recovery, and a more capable native macOS experience.">
-  <link rel="canonical" href="https://www.get-otter.com/release-notes/0.3.0.html">
-  <link rel="icon" type="image/png" href="/assets/otter-icon.png">
+  <title>Add otterctl automation and release polish - Release Notes</title>
   <style>
     :root { color-scheme: light dark; }
-    body { margin: 0; padding: 32px 20px 48px; font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f6f8; color: #0f1720; }
-    main { max-width: 760px; margin: 0 auto; padding: 28px; border-radius: 22px; background: rgba(255, 255, 255, .86); box-shadow: 0 20px 60px rgba(15, 23, 32, .10); border: 1px solid rgba(82, 96, 109, .12); }
+    body {
+      margin: 0;
+      padding: 32px 20px 48px;
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f4f6f8;
+      color: #0f1720;
+    }
+    main {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 28px;
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.86);
+      box-shadow: 0 20px 60px rgba(15, 23, 32, 0.10);
+    }
     h1 { margin: 0 0 6px; font-size: 30px; line-height: 1.15; }
-    .meta, .summary { color: #52606d; font-size: 14px; }
-    .intro { margin: 0 0 24px; color: #384454; }
-    section { margin: 18px 0 0; padding: 18px 18px 14px; border: 1px solid rgba(82, 96, 109, .18); border-radius: 16px; border-left: 5px solid #1685c5; background: rgba(255, 255, 255, .42); }
-    h2 { margin: 0 0 4px; color: #1685c5; font-size: 18px; }
-    ul { margin: 12px 0 0; padding-left: 22px; }
-    li { margin: 0 0 8px; }
-    li:last-child { margin-bottom: 0; }
+    .meta { margin: 0 0 24px; color: #52606d; font-size: 14px; }
+    p { margin: 0 0 16px; }
     a { color: #0a67a3; text-decoration: none; }
     a:hover { text-decoration: underline; }
-    @media (prefers-color-scheme: dark) { body { background: #0b1015; color: #edf2f7; } main { background: rgba(15, 23, 32, .88); border-color: rgba(159, 176, 194, .14); } .meta, .summary { color: #9fb0c2; } .intro { color: #c8d3df; } section { border-color: rgba(159, 176, 194, .18); background: rgba(255, 255, 255, .04); } a { color: #73c3ff; } }
+    @media (prefers-color-scheme: dark) {
+      body { background: #0b1015; color: #edf2f7; }
+      main {
+        background: rgba(15, 23, 32, 0.88);
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+      }
+      .meta { color: #9fb0c2; }
+      a { color: #73c3ff; }
+    }
   </style>
 </head>
 <body>
   <main>
-    <h1>Otter 0.3.0</h1>
-    <p class="meta">Version 0.3.0 &middot; Build 2026081414</p>
-    <p class="intro">A more capable, more guided Otter: setup is easier, recovery is clearer, and the menu bar app behaves more like a polished macOS citizen when you need it.</p>
-
-    <section>
-      <h2>&#129517; Guided share setup</h2>
-      <p class="summary">Bring existing and new network shares under Otter&rsquo;s care with less manual entry.</p>
-      <ul>
-        <li>Discover mounted shares, nearby SMB servers, and saved Finder SMB connections while adding a share.</li>
-        <li>Browse a server&rsquo;s available shares using macOS&rsquo;s native authentication and selection flow.</li>
-        <li>Run a Connection Readiness check before saving to catch network, VPN, credential, and service problems early.</li>
-        <li>Offer to manage shares mounted outside Otter, with the suggestion preserved until you answer it.</li>
-        <li>Choose Local Network discovery, notifications, and optional Wi-Fi-name access from a clear Permissions step before setup begins.</li>
-      </ul>
-    </section>
-
-    <section>
-      <h2>&#128268; Stronger connection recovery</h2>
-      <p class="summary">Otter has more ways to keep an important share available without becoming noisy.</p>
-      <ul>
-        <li>Adds Wake-on-LAN support for sleeping servers.</li>
-        <li>Checks mounted-volume health, including responsiveness, write access, and an optional expected file.</li>
-        <li>Learns a local IP address for hostname-based shares and uses it as a fallback when name resolution is unavailable.</li>
-        <li>Improves VPN-aware connection handling, manual VPN control, credential recovery, and reliability reporting.</li>
-      </ul>
-    </section>
-
-    <section>
-      <h2>&#9881;&#65039; Better macOS fit</h2>
-      <p class="summary">Small interface details make Otter easier to reach without giving up its lightweight menu-bar nature.</p>
-      <ul>
-        <li>The Dock icon appears while editing a share or using Preferences, regardless of the selected app-presence mode.</li>
-        <li><kbd>&#8984;,</kbd> now opens Preferences.</li>
-        <li>The About panel includes the Otter website and a small Made in NZ credit.</li>
-        <li>Expands Shortcuts support for mounting, pausing, checking status, reviewing reliability, and recovering credentials.</li>
-      </ul>
-    </section>
-
-    <section>
-      <h2>&#128274; Safer configuration management</h2>
-      <p class="summary">Move and manage configuration with clearer boundaries around credentials and device policy.</p>
-      <ul>
-        <li>Adds versioned configuration transfer with protected backups for eligible SMB credentials.</li>
-        <li>Supports managed deployment controls for shared policies and monitoring settings.</li>
-        <li>Keeps learned fallback addresses out of exported configuration and redacts them from diagnostics.</li>
-      </ul>
-    </section>
-
-    <p class="meta"><a href="./index.html">All release notes</a></p>
+    <h1>Add otterctl automation and release polish</h1>
+    <p class="meta">Version 0.3.0</p>
+    <p>Add otterctl automation and release polish</p>
+<p>Add the bundled otterctl command-line client and its distributed-notification bridge, supporting share status, mounting, disconnecting, pause/resume, and redacted diagnostic export without exposing a network service.</p>
+<p>Improve the macOS experience with a native About panel, standard Preferences command, richer onboarding and preferences flows, more resilient SMB discovery, and dock visibility while modal workflows are open.</p>
+<p>Document the command-line workflow, refresh historic release-note styling, and publish the 0.3.0 release notes and index. Include the new executable target and supporting test coverage.</p>
+    <p><strong>Commit:</strong> <a href="https://github.com/johnwatso/Otter/commit/c34cc9de60cd7325682fd627d1c5ca0de7913084">c34cc9d</a></p>
   </main>
 </body>
 </html>
