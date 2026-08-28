@@ -3,84 +3,46 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Otter 0.4.0 - Release Notes</title>
-  <meta name="description" content="Release notes for Otter 0.4.0: connection modes, duplicate connection cleanup, Keychain fixes, and scheduled updates.">
-  <link rel="canonical" href="https://www.get-otter.com/release-notes/0.4.0.html">
-  <link rel="icon" type="image/png" href="/assets/otter-icon.png">
+  <title>Add 0.4.0 release notes - Release Notes</title>
   <style>
     :root { color-scheme: light dark; }
-    body { margin: 0; padding: 32px 20px 48px; font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f6f8; color: #0f1720; }
-    main { max-width: 760px; margin: 0 auto; padding: 28px; border-radius: 22px; background: rgba(255, 255, 255, .86); box-shadow: 0 20px 60px rgba(15, 23, 32, .10); border: 1px solid rgba(82, 96, 109, .12); }
+    body {
+      margin: 0;
+      padding: 32px 20px 48px;
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f4f6f8;
+      color: #0f1720;
+    }
+    main {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 28px;
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.86);
+      box-shadow: 0 20px 60px rgba(15, 23, 32, 0.10);
+    }
     h1 { margin: 0 0 6px; font-size: 30px; line-height: 1.15; }
-    .meta, .summary { color: #52606d; font-size: 14px; }
-    .intro { margin: 0 0 24px; color: #384454; }
-    section { margin: 18px 0 0; padding: 18px 18px 14px; border: 1px solid rgba(82, 96, 109, .18); border-radius: 16px; border-left: 5px solid #1685c5; background: rgba(255, 255, 255, .42); }
-    h2 { margin: 0 0 4px; color: #1685c5; font-size: 18px; }
-    ul { margin: 12px 0 0; padding-left: 22px; }
-    li { margin: 0 0 8px; }
-    li:last-child { margin-bottom: 0; }
+    .meta { margin: 0 0 24px; color: #52606d; font-size: 14px; }
+    p { margin: 0 0 16px; }
     a { color: #0a67a3; text-decoration: none; }
     a:hover { text-decoration: underline; }
-    @media (prefers-color-scheme: dark) { body { background: #0b1015; color: #edf2f7; } main { background: rgba(15, 23, 32, .88); border-color: rgba(159, 176, 194, .14); } .meta, .summary { color: #9fb0c2; } .intro { color: #c8d3df; } section { border-color: rgba(159, 176, 194, .18); background: rgba(255, 255, 255, .04); } a { color: #73c3ff; } }
+    @media (prefers-color-scheme: dark) {
+      body { background: #0b1015; color: #edf2f7; }
+      main {
+        background: rgba(15, 23, 32, 0.88);
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+      }
+      .meta { color: #9fb0c2; }
+      a { color: #73c3ff; }
+    }
   </style>
 </head>
 <body>
   <main>
-    <h1>Otter 0.4.0</h1>
-    <p class="meta">Version 0.4.0 &middot; Build 2026082816</p>
-    <p class="intro">Otter now follows how you actually want each share treated, tidies up the duplicate server entries macOS leaves in Finder, and stops overlooking the passwords already saved in your Keychain.</p>
-
-    <section>
-      <h2>&#128290; Connection modes</h2>
-      <p class="summary">Each share states what it is for, and Otter&rsquo;s mounting and reporting follow from that.</p>
-      <ul>
-        <li>Choose Keep Connected, Adaptive, Manual, or Connect Once for every share.</li>
-        <li>A mode that promises availability reports an unexpected outage; a manual share stays quiet about simply not being mounted.</li>
-        <li>Connecting a share on demand no longer rewrites the long-term preference you chose for it.</li>
-      </ul>
-    </section>
-
-    <section>
-      <h2>&#129529; Duplicate connections</h2>
-      <p class="summary">One server, one entry &mdash; even when macOS knows it by several names.</p>
-      <ul>
-        <li>Finder lists a server twice when a share is mounted through an alias of its name, such as &ldquo;nas.local&rdquo; rather than the &ldquo;nas&rdquo; it is browsed under. Otter reconnects the share through the browsed name so the pair collapses back into one.</li>
-        <li>Confirms both names lead to the same machine before changing anything, carries the saved password across, and puts the share back exactly as it was if the new address does not work.</li>
-        <li>Unmounts redundant copies of a share that is already mounted, keeping the one your share is configured to use. Busy volumes are never forced.</li>
-        <li>Recognises a share mounted under any name its server answers to, instead of reporting that macOS mounted a volume Otter could not find.</li>
-        <li>Turn the whole behaviour off under Advanced &rsaquo; Monitoring.</li>
-      </ul>
-    </section>
-
-    <section>
-      <h2>&#128273; Keychain</h2>
-      <p class="summary">Saved connections and stored passwords are found where macOS actually puts them.</p>
-      <ul>
-        <li>Saved connections now appear when adding a share. macOS records the default SMB port as zero, and Otter had been discarding every credential that used it.</li>
-        <li>Finds a saved password under any spelling of a server&rsquo;s name. Connecting through Finder files it under the Bonjour service name, and Keychain matches a server exactly, capitalisation included.</li>
-        <li>Share details and the Connection Doctor no longer report missing credentials for a server whose password is saved perfectly well.</li>
-      </ul>
-    </section>
-
-    <section>
-      <h2>&#128260; Reconnection</h2>
-      <p class="summary">A share that was working a moment ago is treated differently from one that was already away.</p>
-      <ul>
-        <li>Retries an unexpected disconnect on a faster schedule, which suits a NAS that reboots briefly.</li>
-        <li>Learns several fallback addresses per share and tries them in your preferred IPv4 or IPv6 order.</li>
-      </ul>
-    </section>
-
-    <section>
-      <h2>&#11015;&#65039; Updates</h2>
-      <p class="summary">Decide when an update that has already downloaded is allowed to install.</p>
-      <ul>
-        <li>Install as soon as it is downloaded, once Otter is idle, or at a set hour of the day.</li>
-        <li>An install waits rather than interrupting a mount or unmount that is partway through.</li>
-      </ul>
-    </section>
-
-    <p class="meta"><a href="./index.html">All release notes</a></p>
+    <h1>Add 0.4.0 release notes</h1>
+    <p class="meta">Version 0.4.0</p>
+    <p>Add 0.4.0 release notes</p>
+    <p><strong>Commit:</strong> <a href="https://github.com/johnwatso/Otter/commit/c2d9ee2671ef74ff5a42fb99d7161689139eff0c">c2d9ee2</a></p>
   </main>
 </body>
 </html>
