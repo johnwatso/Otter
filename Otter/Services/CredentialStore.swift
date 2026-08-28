@@ -57,18 +57,23 @@ struct SavedSMBShare: Identifiable, Hashable, Sendable {
         let normalizedPath = (path ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        // Keychain stores "no particular port" as 0, which is how macOS saves
+        // an ordinary SMB connection. That means the default port, not an
+        // out-of-range one — rejecting it discards every credential Finder has
+        // ever saved.
+        let normalizedPort = port == 0 ? nil : port
 
         guard !normalizedHost.isEmpty,
               !normalizedHost.contains("/"),
               !normalizedHost.contains("@"),
-              port.map({ (1...65_535).contains($0) }) ?? true
+              normalizedPort.map({ (1...65_535).contains($0) }) ?? true
         else {
             return nil
         }
 
         self.host = normalizedHost
         self.path = normalizedPath
-        self.port = port
+        self.port = normalizedPort
     }
 }
 
@@ -111,6 +116,24 @@ extension CredentialStoring {
     // Only the system Keychain implementation can opt into protected backup.
     func exportCredential(for host: String) -> PortableCredential? { nil }
     func importCredential(_ credential: PortableCredential) -> Bool { false }
+}
+
+extension CredentialStoring {
+    /// The spelling this server's SMB password is filed under, if any.
+    ///
+    /// macOS saves the password against whichever name was used at the time —
+    /// connecting through Finder commonly files it under the Bonjour service
+    /// name, "NAS._smb._tcp.local", rather than the address a share is
+    /// configured with — and keychain lookups match a server name exactly,
+    /// capitalization included. Searching only the configured host therefore
+    /// reports "not found" for a server whose password is saved perfectly well.
+    func savedCredentialHost(matching host: String) -> String? {
+        ServerAlias.credentialHostCandidates(for: host).first { hasCredentials(for: $0) }
+    }
+
+    func hasCredentials(forAnyAliasOf host: String) -> Bool {
+        savedCredentialHost(matching: host) != nil
+    }
 }
 
 struct PortableCredential: Codable, Equatable {

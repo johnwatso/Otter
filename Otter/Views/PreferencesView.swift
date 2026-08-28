@@ -15,6 +15,18 @@ struct PreferencesView: View {
                 }
                 .tag(PreferencesTab.general)
 
+            NotificationsPreferencesView()
+                .tabItem {
+                    PreferencesTabItem(tab: .notifications)
+                }
+                .tag(PreferencesTab.notifications)
+
+            AdvancedPreferencesView()
+                .tabItem {
+                    PreferencesTabItem(tab: .advanced)
+                }
+                .tag(PreferencesTab.advanced)
+
             UpdatesPreferencesView()
                 .tabItem {
                     PreferencesTabItem(tab: .updates)
@@ -22,7 +34,10 @@ struct PreferencesView: View {
                 .tag(PreferencesTab.updates)
         }
         .padding(.top, -2)
+        // Tabs differ a lot in height; a floor keeps the window from snapping
+        // small when switching from Advanced back to General.
         .frame(width: 520)
+        .frame(minHeight: 420, alignment: .top)
         .onAppear {
             if !didRegisterWindowAppearance {
                 didRegisterWindowAppearance = true
@@ -476,9 +491,7 @@ struct ShareManagementView: View {
 
         for shareID in editingServerShareIDs where shareID != source.id {
             settings.updateShare(id: shareID) { share in
-                share.keepMounted = source.keepMounted
-                share.mountAtLaunch = source.mountAtLaunch
-                share.autoConnectWhenReachable = source.autoConnectWhenReachable
+                share.connectionMode = source.connectionMode
                 share.wakeOnLAN = source.wakeOnLAN
                 share.rules = source.rules
                 share.healthCheck = source.healthCheck
@@ -580,6 +593,8 @@ private struct ServerListHeader: View {
 
 private enum PreferencesTab: String, CaseIterable, Hashable, Identifiable {
     case general
+    case notifications
+    case advanced
     case updates
 
     var id: String { rawValue }
@@ -588,6 +603,10 @@ private enum PreferencesTab: String, CaseIterable, Hashable, Identifiable {
         switch self {
         case .general:
             "General"
+        case .notifications:
+            "Notifications"
+        case .advanced:
+            "Advanced"
         case .updates:
             "Updates"
         }
@@ -597,6 +616,10 @@ private enum PreferencesTab: String, CaseIterable, Hashable, Identifiable {
         switch self {
         case .general:
             "gearshape"
+        case .notifications:
+            "bell"
+        case .advanced:
+            "wrench.and.screwdriver"
         case .updates:
             "arrow.clockwise.circle"
         }
@@ -624,15 +647,10 @@ private struct PreferencesTabItem: View {
 }
 
 private struct GeneralPreferencesView: View {
-    @Environment(\.openWindow) private var openWindow
     @EnvironmentObject private var appModel: AppModel
     @EnvironmentObject private var settings: SettingsStore
-    @EnvironmentObject private var networkService: NetworkReachabilityService
-    @EnvironmentObject private var notificationService: NotificationService
     @EnvironmentObject private var loginItemService: LoginItemService
     @EnvironmentObject private var newShareDetector: NewShareDetectionService
-    @State private var configurationMessage: String?
-    @State private var supportPackageMessage: String?
 
     var body: some View {
         Form {
@@ -668,33 +686,128 @@ private struct GeneralPreferencesView: View {
             }
 
             Section {
+                Toggle("Offer to manage newly mounted shares", isOn: detectNewSharesBinding)
+                SettingsSecondaryText("When a share is mounted outside Otter while Otter is running, Otter offers to keep it connected. The offer waits in the menu bar until you answer it.")
+
+                if newShareDetector.ignoredShareCount > 0 {
+                    Button {
+                        newShareDetector.resetIgnoredShares()
+                    } label: {
+                        Label(
+                            "Offer Ignored Shares Again (\(newShareDetector.ignoredShareCount))",
+                            systemImage: "bell.badge"
+                        )
+                    }
+                    .tahoeSecondaryActionButton()
+                }
+            } header: {
+                Text("New Shares")
+            }
+        }
+        .compactPreferencesForm()
+    }
+
+    private var appPresenceBinding: Binding<AppPresenceMode> {
+        Binding {
+            settings.preferences.appPresenceMode
+        } set: { mode in
+            settings.updatePreferences { preferences in
+                preferences.appPresenceMode = mode
+            }
+            appModel.refreshDockIconVisibility(activateIfShowing: true)
+        }
+    }
+
+    private var detectNewSharesBinding: Binding<Bool> {
+        Binding {
+            settings.preferences.detectNewShares
+        } set: { newValue in
+            settings.updatePreferences { preferences in
+                preferences.detectNewShares = newValue
+            }
+        }
+    }
+}
+
+private struct NotificationsPreferencesView: View {
+    @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var notificationService: NotificationService
+
+    var body: some View {
+        Form {
+            Section {
                 Toggle("Notifications", isOn: notificationsEnabledBinding)
                 SettingsSecondaryText("Uses temporary banners by default.")
 
                 if settings.preferences.notificationsEnabled {
-                    Toggle("Connection changes", isOn: notificationPreferenceBinding(\.notifyConnectionChanges))
-                    Toggle("Problems", isOn: notificationPreferenceBinding(\.notifyProblems))
-                    Toggle("Play sound", isOn: notificationPreferenceBinding(\.notificationSoundsEnabled))
-
-                    LabeledContent("macOS notifications", value: notificationService.authorizationStatusTitle)
-
-                    if notificationService.authorizationStatus == .denied {
-                        SettingsSecondaryText("Enable Otter in System Settings → Notifications to receive alerts.")
-                    }
-
-                    if notificationService.canAskForAuthorization {
-                        Button {
-                            Task { await notificationService.requestAuthorization() }
-                        } label: {
-                            Label("Allow Notifications", systemImage: "bell.badge")
-                        }
-                        .tahoeSecondaryActionButton()
-                    }
+                    Toggle("Connection changes", isOn: preferenceBinding(\.notifyConnectionChanges))
+                    Toggle("Problems", isOn: preferenceBinding(\.notifyProblems))
+                    Toggle("Play sound", isOn: preferenceBinding(\.notificationSoundsEnabled))
                 }
             } header: {
                 Text("Notifications")
             }
 
+            Section {
+                LabeledContent("macOS notifications", value: notificationService.authorizationStatusTitle)
+
+                if notificationService.authorizationStatus == .denied {
+                    SettingsSecondaryText("Enable Otter in System Settings → Notifications to receive alerts.")
+                }
+
+                if notificationService.canAskForAuthorization {
+                    Button {
+                        Task { await notificationService.requestAuthorization() }
+                    } label: {
+                        Label("Allow Notifications", systemImage: "bell.badge")
+                    }
+                    .tahoeSecondaryActionButton()
+                }
+            } header: {
+                Text("Permission")
+            }
+        }
+        .compactPreferencesForm()
+        .onAppear {
+            Task { await notificationService.refreshAuthorizationStatus() }
+        }
+    }
+
+    private var notificationsEnabledBinding: Binding<Bool> {
+        Binding {
+            settings.preferences.notificationsEnabled
+        } set: { enabled in
+            settings.updatePreferences { preferences in
+                preferences.notificationsEnabled = enabled
+            }
+
+            if enabled {
+                Task { await notificationService.requestAuthorization() }
+            }
+        }
+    }
+
+    private func preferenceBinding(_ keyPath: WritableKeyPath<AppPreferences, Bool>) -> Binding<Bool> {
+        Binding {
+            settings.preferences[keyPath: keyPath]
+        } set: { newValue in
+            settings.updatePreferences { preferences in
+                preferences[keyPath: keyPath] = newValue
+            }
+        }
+    }
+}
+
+private struct AdvancedPreferencesView: View {
+    @Environment(\.openWindow) private var openWindow
+    @EnvironmentObject private var appModel: AppModel
+    @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var networkService: NetworkReachabilityService
+    @State private var configurationMessage: String?
+    @State private var supportPackageMessage: String?
+
+    var body: some View {
+        Form {
             Section {
                 Stepper(value: fallbackIntervalBinding, in: 15...3600, step: 15) {
                     Text("Fallback check: \(fallbackIntervalLabel(settings.preferences.fallbackCheckInterval))")
@@ -711,6 +824,15 @@ private struct GeneralPreferencesView: View {
                 .disabled(settings.hasManagedMonitoringSettings)
                 SettingsSecondaryText("Uses a time-limited helper probe and only attempts a normal unmount. Otter never force-unmounts a busy volume.")
 
+                Toggle("Clean up duplicate connections", isOn: Binding(
+                    get: { settings.preferences.deduplicateConnections },
+                    set: { enabled in
+                        settings.updatePreferences { $0.deduplicateConnections = enabled }
+                    }
+                ))
+                .disabled(settings.hasManagedMonitoringSettings)
+                SettingsSecondaryText("Finder lists a server twice when a share is mounted through an alias of its name, such as “nas.local” instead of “nas”. Otter reconnects the share through the browsed name and unmounts any second copy of a share it already has mounted.")
+
                 if settings.hasManagedMonitoringSettings {
                     Label("These monitoring settings are managed by your organization.", systemImage: "checkmark.shield")
                         .font(.caption)
@@ -721,22 +843,65 @@ private struct GeneralPreferencesView: View {
             }
 
             Section {
-                Toggle("Offer to manage newly mounted shares", isOn: notificationPreferenceBinding(\.detectNewShares))
-                SettingsSecondaryText("When a share is mounted outside Otter while Otter is running, Otter offers to keep it connected. The offer waits in the menu bar until you answer it.")
+                LabeledContent("Current Wi-Fi", value: networkService.currentWiFiNetworkName ?? "Unavailable")
 
-                if newShareDetector.ignoredShareCount > 0 {
+                if networkService.wifiNameRequiresLocationPermission {
+                    Label("macOS requires Location Services access to show the Wi-Fi network name.", systemImage: "location.slash")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
                     Button {
-                        newShareDetector.resetIgnoredShares()
+                        if networkService.canRequestLocationAuthorization {
+                            networkService.requestLocationAuthorization()
+                        } else {
+                            openLocationPrivacySettings()
+                        }
                     } label: {
                         Label(
-                            "Offer Ignored Shares Again (\(newShareDetector.ignoredShareCount))",
-                            systemImage: "bell.badge"
+                            networkService.canRequestLocationAuthorization ? "Allow Location Access" : "Open Location Settings",
+                            systemImage: "location"
                         )
                     }
                     .tahoeSecondaryActionButton()
                 }
+
+                LabeledContent("Active VPN", value: activeVPNLabel)
+
+                if networkService.isVPNNameUnavailable {
+                    Label("An unidentified tunnel is active. It does not satisfy VPN share rules.", systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if networkService.knownVPNNames.isEmpty {
+                    Label("No VPNs found", systemImage: "lock.slash")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    LabeledContent("VPNs in System Settings") {
+                        VStack(alignment: .trailing, spacing: 4) {
+                            ForEach(networkService.knownVPNNames, id: \.self) { vpnName in
+                                HStack(spacing: 5) {
+                                    Text(vpnName)
+                                    if !networkService.canControlVPN(named: vpnName) {
+                                        Text("Manual")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Button {
+                    networkService.refreshNetworkDetails()
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .tahoeSecondaryActionButton()
             } header: {
-                Text("New Shares")
+                Text("Network")
             }
 
             Section {
@@ -802,68 +967,6 @@ private struct GeneralPreferencesView: View {
                 Text("Support")
             }
 
-            Section {
-                LabeledContent("Current Wi-Fi", value: networkService.currentWiFiNetworkName ?? "Unavailable")
-
-                if networkService.wifiNameRequiresLocationPermission {
-                    Label("macOS requires Location Services access to show the Wi-Fi network name.", systemImage: "location.slash")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Button {
-                        if networkService.canRequestLocationAuthorization {
-                            networkService.requestLocationAuthorization()
-                        } else {
-                            openLocationPrivacySettings()
-                        }
-                    } label: {
-                        Label(
-                            networkService.canRequestLocationAuthorization ? "Allow Location Access" : "Open Location Settings",
-                            systemImage: "location"
-                        )
-                    }
-                    .tahoeSecondaryActionButton()
-                }
-
-                LabeledContent("Active VPN", value: activeVPNLabel)
-
-                if networkService.isVPNNameUnavailable {
-                    Label("An unidentified tunnel is active. It does not satisfy VPN share rules.", systemImage: "info.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                if networkService.knownVPNNames.isEmpty {
-                    Label("No VPNs found", systemImage: "lock.slash")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    LabeledContent("VPNs in System Settings") {
-                        VStack(alignment: .trailing, spacing: 4) {
-                            ForEach(networkService.knownVPNNames, id: \.self) { vpnName in
-                                HStack(spacing: 5) {
-                                    Text(vpnName)
-                                    if !networkService.canControlVPN(named: vpnName) {
-                                        Text("Manual")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Button {
-                    networkService.refreshNetworkDetails()
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-                .tahoeSecondaryActionButton()
-            } header: {
-                Text("Network")
-            }
-
 #if DEBUG
             Section {
                 Toggle("Show demo shares", isOn: Binding(
@@ -889,18 +992,6 @@ private struct GeneralPreferencesView: View {
         .compactPreferencesForm()
         .onAppear {
             networkService.refreshNetworkDetails()
-            Task { await notificationService.refreshAuthorizationStatus() }
-        }
-    }
-
-    private var appPresenceBinding: Binding<AppPresenceMode> {
-        Binding {
-            settings.preferences.appPresenceMode
-        } set: { mode in
-            settings.updatePreferences { preferences in
-                preferences.appPresenceMode = mode
-            }
-            appModel.refreshDockIconVisibility(activateIfShowing: true)
         }
     }
 
@@ -910,30 +1001,6 @@ private struct GeneralPreferencesView: View {
         } set: { newValue in
             settings.updatePreferences { preferences in
                 preferences.fallbackCheckInterval = newValue
-            }
-        }
-    }
-
-    private var notificationsEnabledBinding: Binding<Bool> {
-        Binding {
-            settings.preferences.notificationsEnabled
-        } set: { enabled in
-            settings.updatePreferences { preferences in
-                preferences.notificationsEnabled = enabled
-            }
-
-            if enabled {
-                Task { await notificationService.requestAuthorization() }
-            }
-        }
-    }
-
-    private func notificationPreferenceBinding(_ keyPath: WritableKeyPath<AppPreferences, Bool>) -> Binding<Bool> {
-        Binding {
-            settings.preferences[keyPath: keyPath]
-        } set: { newValue in
-            settings.updatePreferences { preferences in
-                preferences[keyPath: keyPath] = newValue
             }
         }
     }
@@ -967,14 +1034,7 @@ private struct GeneralPreferencesView: View {
 
     private func exportSupportPackage() {
         Task { @MainActor in
-            switch await SupportDiagnosticsExporter.presentSavePanel(
-                settings: settings,
-                eventLog: appModel.eventLog,
-                monitor: appModel.monitor,
-                networkService: networkService,
-                notificationService: notificationService,
-                loginItemService: loginItemService
-            ) {
+            switch await appModel.exportSupportPackage() {
             case .success(.some):
                 supportPackageMessage = "Support package exported with identifying details removed."
             case .success(.none):
@@ -1112,8 +1172,10 @@ private struct GeneralPreferencesView: View {
     }
 }
 
+
 private struct UpdatesPreferencesView: View {
     @EnvironmentObject private var updaterViewModel: UpdaterViewModel
+    @EnvironmentObject private var settings: SettingsStore
 
     var body: some View {
         Form {
@@ -1126,6 +1188,12 @@ private struct UpdatesPreferencesView: View {
 
             Section {
                 Toggle("Check for updates automatically", isOn: automaticChecksBinding)
+                    .disabled(!updaterViewModel.isConfigured)
+                SettingsSecondaryText("Checks in the background and prompts when an update is available.")
+
+                Toggle("Install updates unattended", isOn: automaticDownloadsBinding)
+                    .disabled(!updaterViewModel.isConfigured || !updaterViewModel.automaticallyChecksForUpdates)
+                SettingsSecondaryText("Downloads and installs in the background without asking, whenever macOS does not require authorization.")
 
                 if let lastUpdateCheckDate = updaterViewModel.lastUpdateCheckDate {
                     LabeledContent("Last checked", value: lastUpdateCheckDate, format: .dateTime.day().month().hour().minute())
@@ -1140,11 +1208,61 @@ private struct UpdatesPreferencesView: View {
                 .disabled(!updaterViewModel.canCheckForUpdates)
 
                 SettingsSecondaryText("Updates are delivered by Sparkle and installed in place.")
+
+                if !updaterViewModel.isConfigured {
+                    Label("This build has no update feed or signing key, so updates are unavailable.", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             } header: {
                 Text("Updates")
             }
+
+            if updaterViewModel.automaticallyDownloadsUpdates {
+                Section {
+                    Picker("Install", selection: installPolicyBinding) {
+                        ForEach(AutoUpdateInstallPolicy.allCases) { policy in
+                            Text(policy.label).tag(policy)
+                        }
+                    }
+
+                    if settings.preferences.autoUpdateInstallPolicy == .scheduled {
+                        Picker("At", selection: installHourBinding) {
+                            ForEach(0..<24, id: \.self) { hour in
+                                Text(Self.hourLabel(hour)).tag(hour)
+                            }
+                        }
+                    }
+
+                    SettingsSecondaryText(installPolicyDetail)
+
+                    if let pendingInstallDescription = updaterViewModel.pendingInstallDescription {
+                        Label(pendingInstallDescription, systemImage: "clock.arrow.circlepath")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Install Timing")
+                }
+            }
         }
         .compactPreferencesForm()
+    }
+
+    private var installPolicyDetail: String {
+        switch settings.preferences.autoUpdateInstallPolicy {
+        case .immediate:
+            "Otter installs the update and relaunches as soon as the download finishes."
+        case .whenIdle:
+            "Otter waits until no share check is in flight, so a relaunch cannot interrupt a mount. Installs within 24 hours regardless."
+        case .scheduled:
+            "Otter downloads silently, then installs and relaunches at \(Self.hourLabel(settings.preferences.autoUpdateInstallHour))."
+        }
+    }
+
+    private static func hourLabel(_ hour: Int) -> String {
+        let date = Calendar.current.date(from: DateComponents(hour: hour, minute: 0)) ?? Date()
+        return date.formatted(date: .omitted, time: .shortened)
     }
 
     private var automaticChecksBinding: Binding<Bool> {
@@ -1154,7 +1272,32 @@ private struct UpdatesPreferencesView: View {
             updaterViewModel.automaticallyChecksForUpdates = enabled
         }
     }
+
+    private var automaticDownloadsBinding: Binding<Bool> {
+        Binding {
+            updaterViewModel.automaticallyDownloadsUpdates
+        } set: { enabled in
+            updaterViewModel.automaticallyDownloadsUpdates = enabled
+        }
+    }
+
+    private var installPolicyBinding: Binding<AutoUpdateInstallPolicy> {
+        Binding {
+            settings.preferences.autoUpdateInstallPolicy
+        } set: { policy in
+            settings.updatePreferences { $0.autoUpdateInstallPolicy = policy }
+        }
+    }
+
+    private var installHourBinding: Binding<Int> {
+        Binding {
+            settings.preferences.autoUpdateInstallHour
+        } set: { hour in
+            settings.updatePreferences { $0.autoUpdateInstallHour = hour }
+        }
+    }
 }
+
 
 private struct EmptyShareDetailView: View {
     @EnvironmentObject private var appModel: AppModel

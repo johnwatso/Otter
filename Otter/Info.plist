@@ -33,7 +33,7 @@
 	<key>SUFeedURL</key>
 	<string>https://www.get-otter.com/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>GBAjwr9V2I0gl3t5oFXPrxNqXbIDs72J1gsKEZiseZ0=</string>
+	<string>rxaJsfCpTKtpqRubSfkJwKnztT5S8RHsdAueuT+jKck=</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>NSSupportsAutomaticTermination</key>

@@ -69,7 +69,12 @@ actor MountService {
            let originalHost = share.url?.host(percentEncoded: false),
            let fallbackHost = urlOverride.host(percentEncoded: false),
            originalHost != fallbackHost {
-            _ = credentialStore.syncCredentials(fromHost: originalHost, toHost: fallbackHost)
+            // macOS files an SMB password under whichever spelling of the
+            // server name was used when it was saved, so the fallback address
+            // looks for it under every alias of the configured host.
+            if let savedHost = credentialStore.savedCredentialHost(matching: originalHost) {
+                _ = credentialStore.syncCredentials(fromHost: savedHost, toHost: fallbackHost)
+            }
         }
 
         if url.user(percentEncoded: false) != nil || url.password(percentEncoded: false) != nil {
@@ -155,12 +160,13 @@ actor MountService {
             locations.append(location)
         }
 
-        if let cachedIPAddress = share.cachedIPAddress,
-           let url = share.url,
-           var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
-            components.host = cachedIPAddress
-            if let location = NetworkShareLocation(url: components.url), !locations.contains(location) {
-                locations.append(location)
+        if let url = share.url {
+            for cachedIPAddress in share.orderedCachedIPAddresses {
+                guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { continue }
+                components.host = NetworkShare.urlComponentsHost(forIPAddress: cachedIPAddress)
+                if let location = NetworkShareLocation(url: components.url), !locations.contains(location) {
+                    locations.append(location)
+                }
             }
         }
 
@@ -196,7 +202,12 @@ struct NetworkShareLocation: Equatable {
         guard !pathParts.isEmpty else { return nil }
 
         self.scheme = scheme
-        self.host = host
+        // One server answers to several names: "nas", "nas.local" and the
+        // Bonjour service form all reach the same machine. Identifying it by
+        // the stripped name keeps a volume mounted through one spelling from
+        // looking like a different share than the same volume mounted through
+        // another.
+        self.host = ServerAlias.identity(for: host) ?? host
         self.port = components.port ?? Self.defaultPort(for: scheme)
         // Network filesystems are mounted at their exported root. A deeper URL
         // path is normally a folder within that volume, so match its first path

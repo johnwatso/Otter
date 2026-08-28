@@ -123,7 +123,10 @@ final class ConnectionDoctor {
             status: networkService.isOnline ? .passed : .failed
         ))
 
-        var ruleEvaluation = share.rules.evaluate(
+        // Keep Connected preserves its remote access settings without using
+        // them, so the doctor judges the share the same way the monitor does.
+        let shareRules = share.activeRules
+        var ruleEvaluation = shareRules.evaluate(
             currentWiFiNetworkName: networkService.currentWiFiNetworkName,
             isVPNConnected: networkService.isVPNConnected,
             activeVPNNames: networkService.activeVPNNames,
@@ -134,18 +137,18 @@ final class ConnectionDoctor {
            !ruleEvaluation.allowsConnection,
            effectivePauseState == nil,
            networkService.isOnline,
-           share.rules.hasVPNRule,
-           share.rules.requiredVPNName != nil {
+           shareRules.hasVPNRule,
+           shareRules.requiredVPNName != nil {
             await monitor.retry(share)
             await networkService.refreshNetworkDetailsNow()
-            ruleEvaluation = share.rules.evaluate(
+            ruleEvaluation = shareRules.evaluate(
                 currentWiFiNetworkName: networkService.currentWiFiNetworkName,
                 isVPNConnected: networkService.isVPNConnected,
                 activeVPNNames: networkService.activeVPNNames,
                 currentIPv4Subnets: networkService.currentIPv4Subnets
             )
         }
-        let directNetworkEvaluation = share.rules.evaluate(
+        let directNetworkEvaluation = shareRules.evaluate(
             currentWiFiNetworkName: networkService.currentWiFiNetworkName,
             isVPNConnected: false,
             activeVPNNames: [],
@@ -153,10 +156,10 @@ final class ConnectionDoctor {
         )
         let connectionConditionsDetail: String
         if ruleEvaluation.allowsConnection,
-           share.rules.hasVPNRule,
+           shareRules.hasVPNRule,
            networkService.isVPNConnected,
            !directNetworkEvaluation.allowsConnection {
-            let selectedName = share.rules.requiredVPNName
+            let selectedName = shareRules.requiredVPNName
             let selectedVPNIsIdentified = !networkService.hasUnidentifiedTunnel && (selectedName.map { requiredName in
                 networkService.activeVPNNames.contains {
                     $0.localizedCaseInsensitiveCompare(requiredName) == .orderedSame
@@ -189,11 +192,11 @@ final class ConnectionDoctor {
             && effectivePauseState == nil
             && networkService.isOnline
             && (ruleEvaluation.allowsConnection
-                || (share.rules.hasVPNRule && share.rules.requiredVPNName != nil))
+                || (shareRules.hasVPNRule && shareRules.requiredVPNName != nil))
 
         let originalHost = url.host(percentEncoded: false) ?? ""
         let hasCredentials = settings.hasCredentials(for: originalHost)
-            || share.cachedIPAddress.map(settings.hasCredentials(for:)) == true
+            || share.cachedIPAddresses.contains(where: settings.hasCredentials(for:))
         steps.append(.init(
             title: "Keychain credentials",
             detail: hasCredentials
@@ -221,15 +224,17 @@ final class ConnectionDoctor {
         var usedFallbackAddress = false
         if !reachable,
            networkService.isVPNConnected,
-           let cachedIPAddress = observedShare.cachedIPAddress,
-           !NetworkShare.isIPAddress(originalHost),
-           var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
-            components.host = cachedIPAddress
-            if let fallbackURL = components.url,
-               await networkService.canReachServer(for: fallbackURL, timeout: 3) {
-                reachable = true
-                reachableURL = fallbackURL
-                usedFallbackAddress = true
+            !NetworkShare.isIPAddress(originalHost) {
+            for cachedIPAddress in observedShare.orderedCachedIPAddresses {
+                guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { continue }
+                components.host = NetworkShare.urlComponentsHost(forIPAddress: cachedIPAddress)
+                if let fallbackURL = components.url,
+                   await networkService.canReachServer(for: fallbackURL, timeout: 3) {
+                    reachable = true
+                    reachableURL = fallbackURL
+                    usedFallbackAddress = true
+                    break
+                }
             }
         }
 
@@ -296,7 +301,7 @@ final class ConnectionDoctor {
                     detail: "The hostname resolved over VPN. Otter left the LAN fallback cache unchanged.",
                     status: .information
                 )
-            } else if observedShare.cachedIPAddress != nil {
+            } else if !observedShare.cachedIPAddresses.isEmpty {
                 stabilityStep = .init(
                     title: "LAN address stability",
                     detail: "Otter retained the previously learned LAN address as a fallback. The hostname remains primary.",
@@ -359,8 +364,7 @@ final class ConnectionDoctor {
                 case .disconnected, .waitingForAllowedNetwork, .waitingForVPN, .waitingForAccess, .paused:
                     statusSuggestsConnectionShouldExist = false
                 }
-                let shareExpectsConnection = share.keepMounted
-                    || (share.autoConnectWhenReachable && reachable)
+                let shareExpectsConnection = share.maintainsConnection
                     || statusSuggestsConnectionShouldExist
                 hasRepairableItems = canSafelyAttemptRepair && shareExpectsConnection
             }
@@ -418,15 +422,16 @@ final class ConnectionDoctor {
             )
         }
 
-        let ruleEvaluation = currentShare.rules.evaluate(
+        let currentShareRules = currentShare.activeRules
+        let ruleEvaluation = currentShareRules.evaluate(
             currentWiFiNetworkName: networkService.currentWiFiNetworkName,
             isVPNConnected: networkService.isVPNConnected,
             activeVPNNames: networkService.activeVPNNames,
             currentIPv4Subnets: networkService.currentIPv4Subnets
         )
         if !ruleEvaluation.allowsConnection,
-           currentShare.rules.hasVPNRule,
-           currentShare.rules.requiredVPNName != nil {
+           currentShareRules.hasVPNRule,
+           currentShareRules.requiredVPNName != nil {
             await monitor.retry(currentShare, resumeAutomaticMounting: true)
             return repairResult(
                 status: monitor.status(for: currentShare),

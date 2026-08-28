@@ -57,10 +57,19 @@ final class ShareMonitor: ObservableObject {
     private var retryTasks: [NetworkShare.ID: Task<Void, Never>] = [:]
     private var pauseResumeTask: Task<Void, Never>?
     private var lastWakePacketDates: [NetworkShare.ID: Date] = [:]
+    private var unexpectedDisconnectRecoveries = Set<NetworkShare.ID>()
     private var activeChecks = Set<NetworkShare.ID>()
     private var pendingChecks: [NetworkShare.ID: (reason: MonitorReason, force: Bool)] = [:]
     private var hasStarted = false
+    // Shares whose current evaluation is one the user asked for, or the single
+    // automatic attempt a Connect Once share is entitled to. Modes that stay
+    // quiet in the background still report failures from these attempts.
+    private var requestedAttempts = Set<NetworkShare.ID>()
     private var lastEvaluatedShares: [NetworkShare.ID: NetworkShare] = [:]
+    // Shares Otter is unmounting only to mount again straight away, so the
+    // deduplication pass can move a share to another address without reporting
+    // a disconnection the user never experienced.
+    private var maintenanceRemounts = Set<NetworkShare.ID>()
     private var persistedConnectionTimes: [String: PersistedConnectionTimes] = [:]
 
     private static let connectionTimesKey = "shareConnectionTimes"
@@ -156,9 +165,11 @@ final class ShareMonitor: ObservableObject {
         return states[share.id] ?? ShareRuntimeState()
     }
 
+    // Connects everything now. This is a request, not a reconfiguration: a
+    // share's connection mode is the user's choice and mounting on demand
+    // never rewrites it.
     func mountAll() async {
         settings.resumeAll(clearSharePauses: true)
-        settings.setAllKeepMounted(true)
         await evaluateAll(reason: .manual, force: true)
     }
 
@@ -168,7 +179,6 @@ final class ShareMonitor: ObservableObject {
 
     func mount(_ share: NetworkShare) async {
         settings.resumeShare(id: share.id)
-        settings.updateShare(id: share.id) { $0.keepMounted = true }
         let updatedShare = settings.share(id: share.id) ?? share
         await evaluate(updatedShare, reason: .manual, force: true)
     }
@@ -202,6 +212,30 @@ final class ShareMonitor: ObservableObject {
         } catch {
             updateFailure(error.localizedDescription, for: share.id)
         }
+    }
+
+    /// Unmounts a share and immediately reconnects it, without reporting the
+    /// disconnection in between. Pass the share as it is mounted right now: the
+    /// unmount matches on its current address, while the reconnection uses
+    /// whatever is saved by the time it runs.
+    ///
+    /// Returns false when the volume could not be unmounted — a busy volume is
+    /// left mounted rather than forced.
+    @discardableResult
+    func remountForMaintenance(_ share: NetworkShare) async -> Bool {
+        cancelRetry(for: share.id)
+        maintenanceRemounts.insert(share.id)
+        defer { maintenanceRemounts.remove(share.id) }
+
+        do {
+            try await mountService.unmount(share)
+        } catch {
+            return false
+        }
+
+        let updatedShare = settings.share(id: share.id) ?? share
+        await evaluate(updatedShare, reason: .manual, force: true)
+        return true
     }
 
     func pauseAll(until resumeAt: Date?, disconnect: Bool = false) async {
@@ -391,11 +425,29 @@ final class ShareMonitor: ObservableObject {
             return
         }
 
+        let mode = share.connectionMode
+        // Modes that do not maintain the connection still act on the trigger
+        // they were configured for: the user pressing Connect, and — for
+        // Connect Once — the one automatic attempt it makes at launch.
+        let isRequestedAttempt = force || (reason == .launch && mode == .connectOnce)
+        // Whether Otter is expected to have this share mounted right now. This
+        // separates a persistent mode from one that only acts on a trigger.
+        let wantsConnectionNow = force
+            || mode.maintainsConnection
+            || (reason == .launch && mode.connectsAutomatically)
+        // Keep Connected is not location aware, so its saved VPN configuration
+        // is preserved but never evaluated.
+        let rules = share.activeRules
+
         activeChecks.insert(share.id)
         isChecking = true
+        if isRequestedAttempt {
+            requestedAttempts.insert(share.id)
+        }
         defer {
             activeChecks.remove(share.id)
             isChecking = !activeChecks.isEmpty
+            requestedAttempts.remove(share.id)
 
             if let pending = pendingChecks.removeValue(forKey: share.id) {
                 Task { [weak self] in
@@ -407,6 +459,7 @@ final class ShareMonitor: ObservableObject {
         var state = states[share.id] ?? ShareRuntimeState()
 
         if force || reason.resetsRetryBudget {
+            unexpectedDisconnectRecoveries.remove(share.id)
             state.failureCount = 0
             state.nextRetryDate = nil
             state.needsCredentials = false
@@ -415,6 +468,7 @@ final class ShareMonitor: ObservableObject {
 
         let oldShare = lastEvaluatedShares[share.id]
         if let oldShare, oldShare != share {
+            unexpectedDisconnectRecoveries.remove(share.id)
             state.failureCount = 0
             state.nextRetryDate = nil
             state.needsCredentials = false
@@ -432,6 +486,7 @@ final class ShareMonitor: ObservableObject {
         let isMounted = mountedURL != nil
 
         if !force, let pauseState = settings.effectivePauseState(for: share, at: now()) {
+            unexpectedDisconnectRecoveries.remove(share.id)
             cancelRetry(for: share.id)
             state.status = isMounted ? .connected : .paused(pauseState.resumeAt)
             state.failureCount = 0
@@ -441,7 +496,7 @@ final class ShareMonitor: ObservableObject {
             return
         }
 
-        var ruleEvaluation = share.rules.evaluate(
+        var ruleEvaluation = rules.evaluate(
             currentWiFiNetworkName: networkService.currentWiFiNetworkName,
             isVPNConnected: networkService.isVPNConnected,
             activeVPNNames: networkService.activeVPNNames,
@@ -453,10 +508,13 @@ final class ShareMonitor: ObservableObject {
         // the rule remains blocked until a live tunnel appears. Any live tunnel
         // allows a server check because app-managed VPNs don't always expose
         // their exact profile name to other apps.
+        // Manual and Connect Once only bring up a VPN for the attempt they were
+        // asked to make, never in the background.
         if !ruleEvaluation.allowsConnection,
-           share.rules.hasVPNRule,
-           share.rules.shouldConnectVPNAutomatically,
-           let requiredVPNName = share.rules.requiredVPNName,
+           wantsConnectionNow,
+           rules.hasVPNRule,
+           rules.shouldConnectVPNAutomatically,
+           let requiredVPNName = rules.requiredVPNName,
            networkService.isOnline {
             if !force, !RetryBackoff.shouldRetry(afterFailures: state.failureCount) {
                 if case .failed = state.status {
@@ -488,7 +546,7 @@ final class ShareMonitor: ObservableObject {
                 // connected service is visible before moving on to SMB.
                 for refreshAttempt in 0..<5 {
                     await networkService.refreshNetworkDetailsNow()
-                    ruleEvaluation = share.rules.evaluate(
+                    ruleEvaluation = rules.evaluate(
                         currentWiFiNetworkName: networkService.currentWiFiNetworkName,
                         isVPNConnected: networkService.isVPNConnected,
                         activeVPNNames: networkService.activeVPNNames,
@@ -545,8 +603,12 @@ final class ShareMonitor: ObservableObject {
         }
 
         if !ruleEvaluation.allowsConnection {
+            unexpectedDisconnectRecoveries.remove(share.id)
             cancelRetry(for: share.id)
-            state.status = ruleEvaluation.blockedStatus ?? .disconnected
+            // A share Otter isn't trying to connect right now is simply
+            // disconnected; only an expected connection is "waiting" for
+            // something.
+            state.status = wantsConnectionNow ? (ruleEvaluation.blockedStatus ?? .disconnected) : .disconnected
             state.failureCount = 0
             state.nextRetryDate = nil
             state.needsCredentials = false
@@ -588,6 +650,9 @@ final class ShareMonitor: ObservableObject {
                             state.status = .reconnecting
                             state.failureCount = 0
                             state.nextRetryDate = nil
+                            if mode.maintainsConnection {
+                                unexpectedDisconnectRecoveries.insert(share.id)
+                            }
                             saveState(state, for: share)
                             scheduleCheck(reason: .manual, delay: 1)
                         } else {
@@ -616,9 +681,28 @@ final class ShareMonitor: ObservableObject {
             state.nextRetryDate = nil
             state.needsCredentials = false
             saveState(state, for: share)
+            unexpectedDisconnectRecoveries.remove(share.id)
             cancelRetry(for: share.id)
             resolveAndCacheIPAddress(for: share)
             return
+        }
+
+        // A volume notification (or the fallback timer if macOS misses that
+        // notification) can reveal that a previously connected, managed share
+        // vanished while the local network stayed put. Enter a persistent,
+        // faster recovery mode so a NAS reboot does not hit the ordinary retry
+        // ceiling and remain disconnected until another external event occurs.
+        // Connect Once and Manual deliberately let a mount go: losing one is
+        // not a fault to recover from.
+        let lostExpectedMount = state.status == .connected
+            && mode.maintainsConnection
+            && (reason == .volumeChanged || reason == .timer)
+        if lostExpectedMount {
+            unexpectedDisconnectRecoveries.insert(share.id)
+            state.failureCount = 0
+            state.nextRetryDate = nil
+            state.needsCredentials = false
+            cancelRetry(for: share.id)
         }
 
         // A tunnel whose profile cannot be confirmed is useful positive
@@ -626,19 +710,19 @@ final class ShareMonitor: ObservableObject {
         // simply be connected to a different client's VPN. Probe quietly
         // unless this share was already connected or the user explicitly
         // requested a connection.
-        let directNetworkEvaluation = share.rules.evaluate(
+        let directNetworkEvaluation = rules.evaluate(
             currentWiFiNetworkName: networkService.currentWiFiNetworkName,
             isVPNConnected: false,
             activeVPNNames: [],
             currentIPv4Subnets: networkService.currentIPv4Subnets
         )
         let selectedVPNIsConfirmed = !networkService.hasUnidentifiedTunnel
-            && (share.rules.requiredVPNName.map { requiredName in
+            && (rules.requiredVPNName.map { requiredName in
                 networkService.activeVPNNames.contains {
                     $0.localizedCaseInsensitiveCompare(requiredName) == .orderedSame
                 }
             } ?? false)
-        let isUnconfirmedVPNPath = share.rules.hasVPNRule
+        let isUnconfirmedVPNPath = rules.hasVPNRule
             && networkService.isVPNConnected
             && !directNetworkEvaluation.allowsConnection
             && !selectedVPNIsConfirmed
@@ -653,17 +737,19 @@ final class ShareMonitor: ObservableObject {
             cancelRetry(for: share.id)
         }
 
-        let shouldAttemptMount = force
-            || share.keepMounted
-            || (reason == .launch && share.mountAtLaunch)
-            || ruleEvaluation.shouldAttemptMount
+        let shouldAttemptMount = wantsConnectionNow
 
-        // Opportunistic shares mount whenever their server answers, but an
-        // unreachable server is a normal condition for them, not an error.
-        let isOpportunistic = !shouldAttemptMount && share.autoConnectWhenReachable
-
-        guard shouldAttemptMount || isOpportunistic else {
-            state.status = .disconnected
+        guard shouldAttemptMount else {
+            unexpectedDisconnectRecoveries.remove(share.id)
+            // A failure from an attempt Otter was asked to make stays on
+            // screen until something that could plausibly fix it happens —
+            // waking, a network change, or an edit — rather than quietly
+            // reverting to "disconnected" on the next timer tick.
+            if case .failed = state.status, !reason.resetsRetryBudget {
+                // Keep the reported failure.
+            } else {
+                state.status = .disconnected
+            }
             state.nextRetryDate = nil
             saveState(state, for: share)
             cancelRetry(for: share.id)
@@ -671,17 +757,18 @@ final class ShareMonitor: ObservableObject {
         }
 
         guard networkService.isOnline else {
-            state.status = isOpportunistic ? .disconnected : .waitingForNetwork
+            unexpectedDisconnectRecoveries.remove(share.id)
+            state.status = .waitingForNetwork
             saveState(state, for: share)
             return
         }
 
-        guard force || RetryBackoff.shouldRetry(afterFailures: state.failureCount) else {
+        guard force || shouldRetryAutomatically(shareID: share.id, afterFailures: state.failureCount) else {
             if case .failed = state.status {
                 // Keep the underlying mount/reachability error that exhausted
                 // the retry budget instead of replacing it on every timer tick.
             } else {
-                if share.rules.hasVPNRule && networkService.isVPNConnected {
+                if rules.hasVPNRule && networkService.isVPNConnected {
                     state.status = .failed("\(vpnServerUnavailableMessage()) \(retryLimitMessage())")
                 } else {
                     state.status = .failed(retryLimitMessage())
@@ -703,7 +790,7 @@ final class ShareMonitor: ObservableObject {
             return
         }
 
-        if !isOpportunistic && !shouldProbeVPNQuietly {
+        if !shouldProbeVPNQuietly {
             state.status = .reconnecting
             saveState(state, for: share)
         }
@@ -711,13 +798,14 @@ final class ShareMonitor: ObservableObject {
         var reachable = await networkService.canReachServer(for: url)
         var fallbackURL: URL? = nil
 
-        if !reachable, networkService.isVPNConnected, let cachedIP = share.cachedIPAddress {
+        if !reachable, networkService.isVPNConnected {
             if let host = url.host(percentEncoded: false), !NetworkShare.isIPAddress(host) {
-                var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-                components?.host = cachedIP
-                if let resolvedURL = components?.url {
-                    let ipReachable = await networkService.canReachServer(for: resolvedURL)
-                    if ipReachable {
+                for cachedIP in share.orderedCachedIPAddresses {
+                    guard !reachable else { break }
+                    var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+                    components?.host = NetworkShare.urlComponentsHost(forIPAddress: cachedIP)
+                    if let resolvedURL = components?.url,
+                       await networkService.canReachServer(for: resolvedURL) {
                         reachable = true
                         fallbackURL = resolvedURL
                     }
@@ -726,12 +814,7 @@ final class ShareMonitor: ObservableObject {
         }
 
         guard reachable else {
-            if isOpportunistic {
-                state.status = .disconnected
-                state.nextRetryDate = nil
-                saveState(state, for: share)
-                cancelRetry(for: share.id)
-            } else if shouldProbeVPNQuietly {
+            if shouldProbeVPNQuietly {
                 state.status = .waitingForAccess
                 state.failureCount = 0
                 state.nextRetryDate = nil
@@ -748,18 +831,37 @@ final class ShareMonitor: ObservableObject {
                 }
 
                 state = states[share.id] ?? state
-                state.failureCount += 1
-                if RetryBackoff.shouldRetry(afterFailures: state.failureCount) {
+
+                // A one-shot or user-initiated attempt reports what it found
+                // and stops there; only the persistent modes keep retrying.
+                guard mode.maintainsConnection else {
+                    state.failureCount = 0
+                    state.needsCredentials = false
+                    state.nextRetryDate = nil
                     if wakePacketSent {
                         state.status = .wakePacketSent
-                    } else if share.rules.hasVPNRule && networkService.isVPNConnected {
+                    } else if rules.hasVPNRule && networkService.isVPNConnected {
+                        state.status = .failed(vpnServerUnavailableMessage())
+                    } else {
+                        state.status = .failed(serverUnavailableMessage())
+                    }
+                    saveState(state, for: share)
+                    cancelRetry(for: share.id)
+                    return
+                }
+
+                state.failureCount += 1
+                if shouldRetryAutomatically(shareID: share.id, afterFailures: state.failureCount) {
+                    if wakePacketSent {
+                        state.status = .wakePacketSent
+                    } else if rules.hasVPNRule && networkService.isVPNConnected {
                         state.status = .waitingForServerOnVPN
                     } else {
                         state.status = .waitingForNetwork
                     }
-                    state.nextRetryDate = nextRetryDate(afterFailures: state.failureCount)
+                    state.nextRetryDate = nextRetryDate(afterFailures: state.failureCount, for: share.id)
                 } else {
-                    let message = share.rules.hasVPNRule && networkService.isVPNConnected
+                    let message = rules.hasVPNRule && networkService.isVPNConnected
                         ? "\(vpnServerUnavailableMessage()) \(retryLimitMessage())"
                         : retryLimitMessage()
                     state.status = .failed(message)
@@ -778,6 +880,7 @@ final class ShareMonitor: ObservableObject {
                 state.failureCount = 0
                 state.nextRetryDate = nil
                 saveState(state, for: share)
+                unexpectedDisconnectRecoveries.remove(share.id)
                 cancelRetry(for: share.id)
                 resolveAndCacheIPAddress(for: share)
             } else {
@@ -825,12 +928,31 @@ final class ShareMonitor: ObservableObject {
 
     private func registerFailure(_ message: String, for shareID: NetworkShare.ID, needsCredentials: Bool = false) {
         var state = states[shareID] ?? ShareRuntimeState()
-        state.failureCount += 1
         state.lastCheckedAt = now()
         state.needsCredentials = needsCredentials
-        if RetryBackoff.shouldRetry(afterFailures: state.failureCount) {
+
+        // Manual and Connect Once report the failure of the attempt they were
+        // asked to make, then stop. Only the persistent modes back off and
+        // keep trying.
+        let mode = settings.share(id: shareID)?.connectionMode ?? .keepConnected
+        guard mode.maintainsConnection else {
             state.status = .failed(message)
-            state.nextRetryDate = nextRetryDate(afterFailures: state.failureCount)
+            state.nextRetryDate = nil
+            unexpectedDisconnectRecoveries.remove(shareID)
+            saveState(state, for: shareID)
+            cancelRetry(for: shareID)
+            return
+        }
+
+        state.failureCount += 1
+        // Credential failures require user action and should not create an
+        // unbounded stream of authentication attempts.
+        if needsCredentials {
+            unexpectedDisconnectRecoveries.remove(shareID)
+        }
+        if shouldRetryAutomatically(shareID: shareID, afterFailures: state.failureCount) {
+            state.status = .failed(message)
+            state.nextRetryDate = nextRetryDate(afterFailures: state.failureCount, for: shareID)
         } else {
             state.status = .failed("\(message) \(retryLimitMessage())")
             state.nextRetryDate = nil
@@ -841,6 +963,10 @@ final class ShareMonitor: ObservableObject {
 
     private func retryLimitMessage() -> String {
         "Automatic reconnect paused after \(RetryBackoff.maxAutomaticAttempts) attempts. It will resume after the Mac wakes, the network or settings change, or you mount manually."
+    }
+
+    private func serverUnavailableMessage() -> String {
+        "The server isn’t responding on the current network."
     }
 
     private func vpnServerUnavailableMessage() -> String {
@@ -880,8 +1006,18 @@ final class ShareMonitor: ObservableObject {
 
         states[share.id] = updatedState
         persistConnectionTimes(for: share.id, state: updatedState)
+
+        // A maintenance remount reports itself once it knows whether it worked,
+        // rather than logging a disconnection and a reconnection in between.
+        guard !maintenanceRemounts.contains(share.id) else { return }
+
         recordEvent(for: share, previous: previousStatus, current: updatedState.status)
-        notificationService.notifyStatusChange(for: share, previous: previousStatus, current: updatedState.status)
+        notificationService.notifyStatusChange(
+            for: share,
+            previous: previousStatus,
+            current: updatedState.status,
+            isRequestedAttempt: requestedAttempts.contains(share.id)
+        )
     }
 
     private func recordEvent(for share: NetworkShare, previous: ShareStatus, current: ShareStatus) {
@@ -954,8 +1090,16 @@ final class ShareMonitor: ObservableObject {
         }
     }
 
-    private func nextRetryDate(afterFailures failures: Int) -> Date {
-        now().addingTimeInterval(RetryBackoff.delayWithJitter(afterFailures: failures))
+    private func shouldRetryAutomatically(shareID: NetworkShare.ID, afterFailures failures: Int) -> Bool {
+        unexpectedDisconnectRecoveries.contains(shareID)
+            || RetryBackoff.shouldRetry(afterFailures: failures)
+    }
+
+    private func nextRetryDate(afterFailures failures: Int, for shareID: NetworkShare.ID) -> Date {
+        let delay = unexpectedDisconnectRecoveries.contains(shareID)
+            ? UnexpectedDisconnectRetryPolicy.delayWithJitter(afterFailures: failures)
+            : RetryBackoff.delayWithJitter(afterFailures: failures)
+        return now().addingTimeInterval(delay)
     }
 
     private func scheduleRetry(for shareID: NetworkShare.ID, at date: Date?) {
@@ -1002,6 +1146,7 @@ final class ShareMonitor: ObservableObject {
 
         states = states.filter { shareIDs.contains($0.key) }
         lastWakePacketDates = lastWakePacketDates.filter { shareIDs.contains($0.key) }
+        unexpectedDisconnectRecoveries.formIntersection(shareIDs)
         pendingChecks = pendingChecks.filter { shareIDs.contains($0.key) }
         lastEvaluatedShares = lastEvaluatedShares.filter { shareIDs.contains($0.key) }
 

@@ -196,6 +196,8 @@ private extension ShareEventKind {
             "Health check failed"
         case .credentialsRequired:
             "Credentials need attention"
+        case .duplicateResolved:
+            "Duplicate connection cleaned up"
         }
     }
 
@@ -221,6 +223,8 @@ private extension ShareEventKind {
             "heart.text.square.fill"
         case .credentialsRequired:
             "key.fill"
+        case .duplicateResolved:
+            "rectangle.on.rectangle.slash"
         }
     }
 
@@ -246,6 +250,8 @@ private extension ShareEventKind {
             .orange
         case .credentialsRequired:
             .orange
+        case .duplicateResolved:
+            .blue
         }
     }
 }

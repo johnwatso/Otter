@@ -36,7 +36,10 @@ final class NetworkShareTests: XCTestCase {
     func testSavedSMBShareRejectsInvalidAddresses() {
         XCTAssertNil(SavedSMBShare(host: ""))
         XCTAssertNil(SavedSMBShare(host: "server.local/path"))
-        XCTAssertNil(SavedSMBShare(host: "server.local", port: 0))
+        XCTAssertNil(SavedSMBShare(host: "server.local", port: 70_000))
+        // Port 0 is how Keychain records the default SMB port, so it is a
+        // valid saved connection rather than an invalid address.
+        XCTAssertNotNil(SavedSMBShare(host: "server.local", port: 0))
     }
 
     func testMountedSuggestionMatchesBonjourDiscoveryIdentity() {
@@ -211,14 +214,38 @@ final class NetworkShareTests: XCTestCase {
         """
 
         let share = try JSONDecoder().decode(NetworkShare.self, from: Data(json.utf8))
-        XCTAssertFalse(share.autoConnectWhenReachable)
+        XCTAssertEqual(share.connectionMode, .keepConnected)
         XCTAssertEqual(share.pauseState, .inactive)
         XCTAssertFalse(share.wakeOnLAN.isEnabled)
         XCTAssertEqual(share.wakeOnLAN.broadcastAddress, WakeOnLANConfiguration.defaultBroadcastAddress)
         XCTAssertEqual(share.wakeOnLAN.port, WakeOnLANConfiguration.defaultPort)
         XCTAssertFalse(share.rules.hasVPNRule)
         XCTAssertFalse(share.rules.hasWiFiNetworkRule)
+        XCTAssertTrue(share.prefersIPv4)
+        XCTAssertTrue(share.cachedIPAddresses.isEmpty)
         XCTAssertTrue(share.ipAddressChangeObservations.isEmpty)
+    }
+
+    func testLegacySingleAddressMigratesIntoDualStackCache() throws {
+        let json = """
+        {
+            "id": "00000000-0000-0000-0000-000000000001",
+            "displayName": "Dawn",
+            "urlString": "smb://server.local/Dawn",
+            "mountPath": "/Volumes/Dawn",
+            "keepMounted": true,
+            "mountAtLaunch": true,
+            "cachedIPAddress": "192.168.1.20",
+            "createdAt": 0,
+            "updatedAt": 0
+        }
+        """
+
+        let share = try JSONDecoder().decode(NetworkShare.self, from: Data(json.utf8))
+
+        XCTAssertTrue(share.prefersIPv4)
+        XCTAssertEqual(share.cachedIPAddresses, ["192.168.1.20"])
+        XCTAssertEqual(share.cachedIPAddress, "192.168.1.20")
     }
 
     func testIPAddressIdentification() {
@@ -230,6 +257,27 @@ final class NetworkShareTests: XCTestCase {
         XCTAssertFalse(NetworkShare.isIPAddress("localhost"))
         XCTAssertFalse(NetworkShare.isIPAddress("my-nas.local"))
         XCTAssertFalse(NetworkShare.isIPAddress("apple.com"))
+    }
+
+    func testDualStackCacheDefaultsToIPv4AndCanPreferIPv6() {
+        var share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            cachedIPAddresses: ["fd00::20", "192.168.1.20"]
+        )
+
+        XCTAssertEqual(share.orderedCachedIPAddresses, ["192.168.1.20", "fd00::20"])
+        XCTAssertEqual(share.cachedIPAddress, "192.168.1.20")
+
+        share.prefersIPv4 = false
+        XCTAssertEqual(share.orderedCachedIPAddresses, ["fd00::20", "192.168.1.20"])
+        XCTAssertEqual(share.cachedIPAddress, "fd00::20")
+    }
+
+    func testScopedIPv6AddressIsRecognized() {
+        XCTAssertTrue(NetworkShare.isIPv6Address("fe80::1%en0"))
+        XCTAssertFalse(NetworkShare.isIPv4Address("fe80::1%en0"))
     }
 
     func testDNSResolutionUsesInjectedResolver() async {
@@ -338,6 +386,7 @@ final class NetworkShareTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://server.local/Media",
             mountPath: "/Volumes/Media",
+            connectionMode: .adaptive,
             rules: ShareRules(wifiNetworkName: "Home")
         )
         let networkDraft = DraftShare(share: networkOnlyShare)
@@ -350,6 +399,7 @@ final class NetworkShareTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://server.local/Media",
             mountPath: "/Volumes/Media",
+            connectionMode: .adaptive,
             rules: ShareRules(
                 vpnRuleEnabled: true,
                 vpnName: "Work VPN",
@@ -369,6 +419,7 @@ final class NetworkShareTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://server.local/Media",
             mountPath: "/Volumes/Media",
+            connectionMode: .adaptive,
             rules: ShareRules(
                 wifiNetworkName: "Home",
                 vpnRuleEnabled: true,
@@ -383,20 +434,33 @@ final class NetworkShareTests: XCTestCase {
         XCTAssertFalse(draft.rules.hasVPNRule)
     }
 
-    func testEditorDraftMapsConnectionChoicesToExistingSettings() {
+    func testEditorDraftDefaultsToKeepConnectedAndHidesRemoteAccessForIt() {
         var draft = DraftShare(share: nil)
 
-        XCTAssertEqual(draft.automaticConnectionMode, .keepConnected)
+        XCTAssertEqual(draft.connectionMode, .keepConnected)
+        XCTAssertFalse(draft.showsRemoteAccess)
 
-        draft.automaticConnectionMode = .whenAvailable
-        XCTAssertFalse(draft.keepMounted)
-        XCTAssertTrue(draft.autoConnectWhenReachable)
-        XCTAssertFalse(draft.mountAtLaunch)
+        for mode in [ConnectionMode.adaptive, .manual, .connectOnce] {
+            draft.connectionMode = mode
+            XCTAssertTrue(draft.showsRemoteAccess, "\(mode) configures its route")
+        }
+    }
 
-        draft.automaticConnectionMode = .manual
-        XCTAssertFalse(draft.keepMounted)
-        XCTAssertFalse(draft.autoConnectWhenReachable)
-        XCTAssertFalse(draft.mountAtLaunch)
+    func testEditorDraftKeepsVPNConfigurationWhileKeepConnectedHidesIt() {
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            connectionMode: .adaptive,
+            rules: ShareRules(vpnRuleEnabled: true, vpnName: "Work VPN")
+        )
+        var draft = DraftShare(share: share)
+
+        draft.connectionMode = .keepConnected
+
+        XCTAssertFalse(draft.showsRemoteAccess)
+        XCTAssertTrue(draft.usesVPNRule)
+        XCTAssertEqual(draft.rules.requiredVPNName, "Work VPN")
     }
 }
 
@@ -732,6 +796,16 @@ final class RetryBackoffTests: XCTestCase {
         XCTAssertFalse(RetryBackoff.shouldRetry(afterFailures: RetryBackoff.maxAutomaticAttempts))
         XCTAssertFalse(RetryBackoff.shouldRetry(afterFailures: RetryBackoff.maxAutomaticAttempts + 1))
     }
+
+    func testUnexpectedDisconnectRecoveryStaysFastAndClampsAtThirtySeconds() {
+        XCTAssertEqual(UnexpectedDisconnectRetryPolicy.delay(afterFailures: 0), 2)
+        XCTAssertEqual(UnexpectedDisconnectRetryPolicy.delay(afterFailures: 1), 2)
+        XCTAssertEqual(UnexpectedDisconnectRetryPolicy.delay(afterFailures: 2), 5)
+        XCTAssertEqual(UnexpectedDisconnectRetryPolicy.delay(afterFailures: 3), 10)
+        XCTAssertEqual(UnexpectedDisconnectRetryPolicy.delay(afterFailures: 4), 15)
+        XCTAssertEqual(UnexpectedDisconnectRetryPolicy.delay(afterFailures: 5), 30)
+        XCTAssertEqual(UnexpectedDisconnectRetryPolicy.delay(afterFailures: 100), 30)
+    }
 }
 
 final class ShareMonitorRetryTests: XCTestCase {
@@ -767,7 +841,7 @@ final class ShareMonitorRetryTests: XCTestCase {
         XCTAssertEqual(monitor.status(for: share), .paused(resumeAt))
         XCTAssertEqual(network.canReachCallCount, 0)
         XCTAssertEqual(mountCallCount, 0)
-        XCTAssertTrue(settings.share(id: share.id)?.keepMounted == true)
+        XCTAssertTrue(settings.share(id: share.id)?.connectionMode == .keepConnected)
     }
 
     @MainActor
@@ -780,7 +854,7 @@ final class ShareMonitorRetryTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://server.local/Media",
             mountPath: "/Volumes/Media",
-            keepMounted: true
+            connectionMode: .keepConnected
         )
         settings.addShare(share)
         let monitor = ShareMonitor(
@@ -797,7 +871,7 @@ final class ShareMonitorRetryTests: XCTestCase {
 
         XCTAssertEqual(monitor.status(for: share), .paused(nil))
         XCTAssertEqual(settings.share(id: share.id)?.pauseState, .paused())
-        XCTAssertTrue(settings.share(id: share.id)?.keepMounted == true)
+        XCTAssertTrue(settings.share(id: share.id)?.connectionMode == .keepConnected)
     }
 
     @MainActor
@@ -912,6 +986,102 @@ final class ShareMonitorRetryTests: XCTestCase {
     }
 
     @MainActor
+    func testUnexpectedUnmountRetriesQuicklyPastNormalBudgetUntilNetworkChanges() async {
+        let suiteName = "OtterTests.ShareMonitorRetryTests.UnexpectedUnmount"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://192.0.2.10/Media",
+            mountPath: "/Volumes/Media",
+            connectionMode: .keepConnected
+        )
+        settings.addShare(share)
+        let mountedURL = URL(fileURLWithPath: "/Volumes/Media", isDirectory: true)
+        let mountService = StubMountService(
+            mountedURL: mountedURL,
+            mountedURLReadsBeforeMissing: 1
+        )
+        let network = StubNetworkReachability(isOnline: true, isReachable: false)
+        var currentDate = Date()
+        let monitor = ShareMonitor(
+            settings: settings,
+            mountService: mountService,
+            mountHealthService: StubMountHealthService(result: .healthy),
+            wakeOnLANService: StubWakeOnLANService(),
+            networkService: network,
+            notificationService: RecordingNotificationService(),
+            eventLog: ShareEventLog(defaults: defaults),
+            defaults: defaults,
+            now: { currentDate }
+        )
+
+        await monitor.evaluate(share, reason: .timer)
+        XCTAssertEqual(monitor.status(for: share), .connected)
+
+        await monitor.evaluate(share, reason: .volumeChanged)
+        var state = monitor.runtimeState(for: share)
+        XCTAssertEqual(state.failureCount, 1)
+        XCTAssertGreaterThanOrEqual(state.nextRetryDate ?? .distantPast, currentDate.addingTimeInterval(1.8))
+        XCTAssertLessThanOrEqual(state.nextRetryDate ?? .distantFuture, currentDate.addingTimeInterval(2.2))
+
+        for expectedFailureCount in 2...(RetryBackoff.maxAutomaticAttempts + 2) {
+            currentDate = currentDate.addingTimeInterval(1_000)
+            await monitor.evaluate(share, reason: .retry)
+            state = monitor.runtimeState(for: share)
+            XCTAssertEqual(state.failureCount, expectedFailureCount)
+            XCTAssertNotNil(state.nextRetryDate)
+        }
+
+        currentDate = currentDate.addingTimeInterval(1_000)
+        await monitor.evaluate(share, reason: .networkChanged)
+        state = monitor.runtimeState(for: share)
+        XCTAssertEqual(state.failureCount, 1)
+        XCTAssertGreaterThanOrEqual(state.nextRetryDate ?? .distantPast, currentDate.addingTimeInterval(9))
+        XCTAssertLessThanOrEqual(state.nextRetryDate ?? .distantFuture, currentDate.addingTimeInterval(11))
+    }
+
+    @MainActor
+    func testVPNFallbackTriesIPv4ThenIPv6AndMountsWithReachableAddress() async {
+        let suiteName = "OtterTests.ShareMonitorRetryTests.DualStackFallback"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            cachedIPAddresses: ["fd00::20", "192.168.1.20"]
+        )
+        settings.addShare(share)
+        let mountedURL = URL(fileURLWithPath: "/Volumes/Media", isDirectory: true)
+        let mountService = StubMountService(mountResult: mountedURL)
+        let network = StubNetworkReachability(
+            isOnline: true,
+            isReachable: false,
+            isVPNConnected: true,
+            reachableHosts: ["fd00::20"]
+        )
+        let monitor = ShareMonitor(
+            settings: settings,
+            mountService: mountService,
+            wakeOnLANService: StubWakeOnLANService(),
+            networkService: network,
+            notificationService: RecordingNotificationService(),
+            eventLog: ShareEventLog(defaults: defaults),
+            defaults: defaults
+        )
+
+        await monitor.evaluate(share, reason: .timer)
+        let overrides = await mountService.mountURLOverrides
+
+        XCTAssertEqual(network.reachedHosts, ["server.local", "192.168.1.20", "fd00::20"])
+        XCTAssertEqual(overrides.first.flatMap { $0 }?.host(percentEncoded: false), "fd00::20")
+        XCTAssertEqual(monitor.status(for: share), .connected)
+    }
+
+    @MainActor
     func testNamedVPNConnectsBeforeMountingShare() async {
         let suiteName = "OtterTests.ShareMonitorRetryTests.VPNSuccess"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -921,6 +1091,7 @@ final class ShareMonitorRetryTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://server.local/Media",
             mountPath: "/Volumes/Media",
+            connectionMode: .adaptive,
             rules: ShareRules(
                 vpnRuleEnabled: true,
                 vpnName: "Work VPN",
@@ -966,6 +1137,7 @@ final class ShareMonitorRetryTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://server.local/Media",
             mountPath: "/Volumes/Media",
+            connectionMode: .adaptive,
             rules: ShareRules(
                 vpnRuleEnabled: true,
                 vpnName: "Tunnel to Work",
@@ -1014,6 +1186,7 @@ final class ShareMonitorRetryTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://server.local/Media",
             mountPath: "/Volumes/Media",
+            connectionMode: .adaptive,
             rules: ShareRules(
                 vpnRuleEnabled: true,
                 vpnName: "Tunnel to Work",
@@ -1055,6 +1228,7 @@ final class ShareMonitorRetryTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://server.local/Media",
             mountPath: "/Volumes/Media",
+            connectionMode: .adaptive,
             rules: ShareRules(vpnRuleEnabled: true, vpnName: "Tunnel to Work")
         )
         settings.addShare(share)
@@ -1107,6 +1281,7 @@ final class ShareMonitorRetryTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://server.local/Media",
             mountPath: "/Volumes/Media",
+            connectionMode: .adaptive,
             rules: ShareRules(vpnRuleEnabled: true, vpnName: "Tunnel to Work")
         )
         settings.addShare(share)
@@ -1144,6 +1319,7 @@ final class ShareMonitorRetryTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://server.local/Media",
             mountPath: "/Volumes/Media",
+            connectionMode: .adaptive,
             rules: ShareRules(vpnRuleEnabled: true, vpnName: "Tunnel to Work")
         )
         settings.addShare(share)
@@ -1179,6 +1355,7 @@ final class ShareMonitorRetryTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://server.local/Media",
             mountPath: "/Volumes/Media",
+            connectionMode: .adaptive,
             rules: ShareRules(vpnRuleEnabled: true)
         )
         settings.addShare(share)
@@ -1217,6 +1394,7 @@ final class ShareMonitorRetryTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://server.local/Media",
             mountPath: "/Volumes/Media",
+            connectionMode: .adaptive,
             rules: ShareRules(vpnRuleEnabled: true, vpnName: "Missing VPN")
         )
         settings.addShare(share)
@@ -1255,6 +1433,7 @@ final class ShareMonitorRetryTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://server.local/Media",
             mountPath: "/Volumes/Media",
+            connectionMode: .adaptive,
             rules: ShareRules(vpnRuleEnabled: true, vpnName: "Tunnel to Work")
         )
         settings.addShare(share)
@@ -1370,6 +1549,7 @@ final class ConnectionDoctorTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://192.0.2.10/Media",
             mountPath: "/Volumes/Media",
+            connectionMode: .adaptive,
             rules: ShareRules(vpnRuleEnabled: true, vpnName: "Tunnel to Work")
         )
         settings.addShare(share)
@@ -1506,7 +1686,7 @@ final class ConnectionDoctorTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://server.local/Media",
             mountPath: "/Volumes/Media",
-            keepMounted: true
+            connectionMode: .keepConnected
         )
         settings.addShare(share)
         let mountService = StubMountService()
@@ -1647,7 +1827,7 @@ final class ConnectionDoctorTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://server.local/Media",
             mountPath: "/Volumes/Media",
-            keepMounted: false,
+            connectionMode: .manual,
             pauseState: .paused()
         )
         settings.addShare(share)
@@ -1675,7 +1855,7 @@ final class ConnectionDoctorTests: XCTestCase {
         XCTAssertEqual(mountCallCount, 1)
         XCTAssertEqual(monitor.status(for: share), .connected)
         XCTAssertEqual(settings.share(id: share.id)?.pauseState, .inactive)
-        XCTAssertFalse(settings.share(id: share.id)?.keepMounted == true)
+        XCTAssertFalse(settings.share(id: share.id)?.connectionMode == .keepConnected)
     }
 
     @MainActor
@@ -1933,14 +2113,18 @@ final class SettingsStoreTests: XCTestCase {
         store.addShare(share)
 
         XCTAssertEqual(
-            store.recordResolvedIPAddresses(["192.168.1.20", "192.168.1.21"], for: share.id),
+            store.recordResolvedIPAddresses(["fd00::20", "192.168.1.20", "192.168.1.21"], for: share.id),
             .initial
         )
         XCTAssertEqual(
-            store.recordResolvedIPAddresses(["192.168.1.21", "192.168.1.20"], for: share.id),
+            store.recordResolvedIPAddresses(["192.168.1.21", "fd00::20", "192.168.1.20"], for: share.id),
             .unchanged
         )
         XCTAssertEqual(store.share(id: share.id)?.cachedIPAddress, "192.168.1.20")
+        XCTAssertEqual(
+            store.share(id: share.id)?.orderedCachedIPAddresses,
+            ["192.168.1.20", "192.168.1.21", "fd00::20"]
+        )
         XCTAssertTrue(store.share(id: share.id)?.ipAddressChangeObservations.isEmpty == true)
     }
 
@@ -2058,13 +2242,13 @@ final class SettingsStoreTests: XCTestCase {
             displayName: "Media",
             urlString: "smb://server.local/Media",
             mountPath: "/Volumes/Media",
-            keepMounted: true
+            connectionMode: .keepConnected
         )
         store.addShare(share)
 
         store.pauseShare(id: share.id, until: nil)
 
-        XCTAssertTrue(store.share(id: share.id)?.keepMounted == true)
+        XCTAssertTrue(store.share(id: share.id)?.connectionMode == .keepConnected)
         XCTAssertEqual(store.share(id: share.id)?.pauseState, .paused())
     }
 
@@ -2079,6 +2263,7 @@ final class SettingsStoreTests: XCTestCase {
             urlString: "smb://private-user:private-password@server.local/Media",
             mountPath: "/Volumes/Media",
             pauseState: .paused(until: Date().addingTimeInterval(3_600)),
+            prefersIPv4: false,
             cachedIPAddress: "203.0.113.42",
             ipAddressChangeObservations: [
                 IPAddressChangeObservation(
@@ -2097,6 +2282,7 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(decoded.shares.count, 1)
         XCTAssertEqual(decoded.shares[0].displayName, "Media")
         XCTAssertEqual(decoded.shares[0].urlString, "smb://server.local/Media")
+        XCTAssertFalse(decoded.shares[0].prefersIPv4)
         XCTAssertFalse(json.contains("cachedIPAddress"))
         XCTAssertFalse(json.contains("ipAddressChangeObservations"))
         XCTAssertFalse(json.contains("203.0.113.42"))
@@ -2170,7 +2356,7 @@ final class SettingsStoreTests: XCTestCase {
             displayName: "New Name",
             urlString: "smb://SERVER.local:445/Media/",
             mountPath: "/Volumes/Renamed Media",
-            keepMounted: false
+            connectionMode: .manual
         )
         let archive = ConfigurationTransferService.archive(
             shares: [incoming],
@@ -2186,7 +2372,7 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(merged.cachedIPAddress, "192.0.2.10")
         XCTAssertEqual(merged.ipAddressChangeObservations, existing.ipAddressChangeObservations)
         XCTAssertEqual(merged.pauseState, .paused(until: resumeAt))
-        XCTAssertFalse(merged.keepMounted)
+        XCTAssertEqual(merged.connectionMode, .manual)
         XCTAssertEqual(store.preferences.fallbackCheckInterval, 120)
         XCTAssertTrue(store.preferences.recoverUnresponsiveMounts)
     }
@@ -2207,7 +2393,7 @@ final class SettingsStoreTests: XCTestCase {
             displayName: "Managed Media",
             urlString: "smb://managed.example/Media",
             mountPath: "/Volumes/Media",
-            keepMounted: true,
+            connectionMode: .keepConnected,
             rules: ShareRules(vpnRuleEnabled: true, vpnName: "Managed VPN")
         )
         let payload = ManagedConfigurationPayload(
@@ -2230,7 +2416,7 @@ final class SettingsStoreTests: XCTestCase {
 
         var editedShare = try XCTUnwrap(store.share(id: managedShare.id))
         editedShare.displayName = "User Override"
-        editedShare.keepMounted = false
+        editedShare.connectionMode = .manual
         store.updateShare(editedShare)
         store.updatePreferences {
             $0.fallbackCheckInterval = 15
@@ -2241,7 +2427,7 @@ final class SettingsStoreTests: XCTestCase {
 
         let retainedShare = try XCTUnwrap(store.share(id: managedShare.id))
         XCTAssertEqual(retainedShare.displayName, "Managed Media")
-        XCTAssertTrue(retainedShare.keepMounted)
+        XCTAssertEqual(retainedShare.connectionMode, .keepConnected)
         XCTAssertEqual(retainedShare.pauseState, .paused())
         XCTAssertEqual(store.preferences.fallbackCheckInterval, 120)
         XCTAssertTrue(store.preferences.recoverUnresponsiveMounts)
@@ -2265,6 +2451,7 @@ final class SupportPackageTests: XCTestCase {
             displayName: "AcmeVault",
             urlString: "smb://needle-server.example/AcmeFiles",
             mountPath: "/Volumes/AcmeFiles",
+            connectionMode: .adaptive,
             rules: ShareRules(
                 wifiNetworkName: "Needle Wi-Fi",
                 registeredSubnets: ["10.77.0.0/16"],
@@ -2385,7 +2572,39 @@ final class AppPreferencesTests: XCTestCase {
             duringOnboarding: false,
             duringPreferencesOpen: true
         ))
+        XCTAssertTrue(AppPresenceMode.menuBarOnly.shouldShowDockIcon(
+            duringOnboarding: false,
+            duringSharesWindowOpen: true
+        ))
         XCTAssertFalse(AppPresenceMode.menuBarOnly.shouldShowDockIcon(duringOnboarding: false))
+    }
+
+    func testAutoUpdateInstallPreferencesRoundTripAndClamp() throws {
+        var preferences = AppPreferences()
+        XCTAssertEqual(preferences.autoUpdateInstallPolicy, .whenIdle)
+        XCTAssertEqual(preferences.autoUpdateInstallHour, 3)
+
+        preferences.autoUpdateInstallPolicy = .scheduled
+        preferences.autoUpdateInstallHour = 22
+
+        let data = try JSONEncoder().encode(preferences)
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: data)
+        XCTAssertEqual(decoded.autoUpdateInstallPolicy, .scheduled)
+        XCTAssertEqual(decoded.autoUpdateInstallHour, 22)
+
+        // Out-of-range hours are clamped rather than rejected.
+        XCTAssertEqual(AppPreferences(autoUpdateInstallHour: 99).autoUpdateInstallHour, 23)
+        XCTAssertEqual(AppPreferences(autoUpdateInstallHour: -4).autoUpdateInstallHour, 0)
+    }
+
+    func testAutoUpdateInstallPreferencesDefaultForOlderConfigurations() throws {
+        let json = """
+        { "fallbackCheckInterval": 60 }
+        """
+
+        let preferences = try JSONDecoder().decode(AppPreferences.self, from: Data(json.utf8))
+        XCTAssertEqual(preferences.autoUpdateInstallPolicy, .whenIdle)
+        XCTAssertEqual(preferences.autoUpdateInstallHour, 3)
     }
 
     func testPauseStateExpiresAtItsResumeDate() {
@@ -2401,10 +2620,18 @@ final class AppPreferencesTests: XCTestCase {
 }
 
 private struct StubHostResolver: HostResolving {
-    let result: String?
+    let results: [String]
+
+    init(result: String?) {
+        results = result.map { [$0] } ?? []
+    }
+
+    init(results: [String]) {
+        self.results = results
+    }
 
     func resolveIPAddresses(for hostname: String) async -> [String] {
-        result.map { [$0] } ?? []
+        results
     }
 }
 
@@ -2426,6 +2653,7 @@ private final class RecordingCredentialStore: CredentialStoring, @unchecked Send
 
 private actor StubMountService: MountServicing {
     private(set) var mountCallCount = 0
+    private(set) var mountURLOverrides: [URL?] = []
     private let mountedURLValue: URL?
     private let mountResult: URL?
     private let mountedURLReadsBeforeMissing: Int?
@@ -2452,6 +2680,7 @@ private actor StubMountService: MountServicing {
 
     func mount(_ share: NetworkShare, urlOverride: URL?) async throws -> URL? {
         mountCallCount += 1
+        mountURLOverrides.append(urlOverride)
         return mountResult
     }
 
@@ -2509,6 +2738,8 @@ private final class StubNetworkReachability: NetworkReachabilityProviding {
     var onPathChange: (() -> Void)?
     let isReachable: Bool
     private(set) var canReachCallCount = 0
+    private(set) var reachedHosts: [String] = []
+    private let reachableHosts: Set<String>?
     private let vpnNameToActivateOnRefresh: String?
 
     init(
@@ -2519,7 +2750,8 @@ private final class StubNetworkReachability: NetworkReachabilityProviding {
         currentIPv4Subnets: [String] = [],
         activeVPNNames: [String] = [],
         hasUnidentifiedTunnel: Bool? = nil,
-        vpnNameToActivateOnRefresh: String? = nil
+        vpnNameToActivateOnRefresh: String? = nil,
+        reachableHosts: Set<String>? = nil
     ) {
         self.isOnline = isOnline
         self.isReachable = isReachable
@@ -2530,11 +2762,14 @@ private final class StubNetworkReachability: NetworkReachabilityProviding {
         self.hasUnidentifiedTunnel = hasUnidentifiedTunnel
             ?? (isVPNConnected && activeVPNNames.isEmpty)
         self.vpnNameToActivateOnRefresh = vpnNameToActivateOnRefresh
+        self.reachableHosts = reachableHosts
     }
 
     func canReachServer(for url: URL, timeout: TimeInterval) async -> Bool {
         canReachCallCount += 1
-        return isReachable
+        let host = url.host(percentEncoded: false) ?? ""
+        reachedHosts.append(host)
+        return reachableHosts?.contains(host) ?? isReachable
     }
 
     func refreshNetworkDetailsIfStale(maxAge: TimeInterval) async {}
@@ -2550,9 +2785,16 @@ private final class StubNetworkReachability: NetworkReachabilityProviding {
 @MainActor
 private final class RecordingNotificationService: ShareNotificationProviding {
     private(set) var transitions: [(previous: ShareStatus, current: ShareStatus)] = []
+    private(set) var requestedAttemptFlags: [Bool] = []
 
-    func notifyStatusChange(for share: NetworkShare, previous: ShareStatus, current: ShareStatus) {
+    func notifyStatusChange(
+        for share: NetworkShare,
+        previous: ShareStatus,
+        current: ShareStatus,
+        isRequestedAttempt: Bool
+    ) {
         transitions.append((previous, current))
+        requestedAttemptFlags.append(isRequestedAttempt)
     }
 }
 
@@ -2777,7 +3019,7 @@ final class NewShareDetectionTests: XCTestCase {
 
         XCTAssertNotNil(added)
         XCTAssertEqual(settings.shares.map(\.urlString), ["smb://homenas.local/Media"])
-        XCTAssertTrue(settings.shares.first?.keepMounted == true)
+        XCTAssertTrue(settings.shares.first?.connectionMode == .keepConnected)
         XCTAssertTrue(detector.pendingSuggestions.isEmpty)
         XCTAssertEqual(notifier.withdrawn.count, 1)
     }
@@ -2897,5 +3139,998 @@ private final class RecordingDetectedShareNotifier: DetectedShareNotifying {
 
     func withdrawDetectedShareNotification(for suggestion: MountedShareSuggestion) {
         withdrawn.append(suggestion)
+    }
+}
+
+final class ConnectionModePersistenceTests: XCTestCase {
+    private func legacyShareJSON(
+        keepMounted: Bool,
+        mountAtLaunch: Bool,
+        autoConnectWhenReachable: Bool,
+        rules: String = ""
+    ) -> Data {
+        let json = """
+        {
+            "id": "00000000-0000-0000-0000-000000000001",
+            "displayName": "Dawn",
+            "urlString": "smb://server.local/Dawn",
+            "mountPath": "/Volumes/Dawn",
+            "keepMounted": \(keepMounted),
+            "mountAtLaunch": \(mountAtLaunch),
+            "autoConnectWhenReachable": \(autoConnectWhenReachable),
+            \(rules)
+            "createdAt": 0,
+            "updatedAt": 0
+        }
+        """
+        return Data(json.utf8)
+    }
+
+    func testEveryModeSurvivesASaveAndReload() throws {
+        for mode in ConnectionMode.allCases {
+            let share = NetworkShare(
+                displayName: "Media",
+                urlString: "smb://server.local/Media",
+                mountPath: "/Volumes/Media",
+                connectionMode: mode,
+                rules: ShareRules(vpnRuleEnabled: true, vpnName: "Work VPN")
+            )
+
+            let reloaded = try JSONDecoder().decode(
+                NetworkShare.self,
+                from: try JSONEncoder().encode(share)
+            )
+
+            XCTAssertEqual(reloaded.connectionMode, mode)
+            // The VPN selection is configuration, not a mode detail: it comes
+            // back untouched even for the mode that hides it.
+            XCTAssertEqual(reloaded.rules.requiredVPNName, "Work VPN")
+        }
+    }
+
+    func testExistingKeepConnectedSharesStayKeepConnected() throws {
+        let share = try JSONDecoder().decode(
+            NetworkShare.self,
+            from: legacyShareJSON(keepMounted: true, mountAtLaunch: true, autoConnectWhenReachable: false)
+        )
+
+        XCTAssertEqual(share.connectionMode, .keepConnected)
+    }
+
+    func testExistingKeepConnectedShareThatDependedOnAVPNBecomesAdaptive() throws {
+        let share = try JSONDecoder().decode(
+            NetworkShare.self,
+            from: legacyShareJSON(
+                keepMounted: true,
+                mountAtLaunch: true,
+                autoConnectWhenReachable: false,
+                rules: """
+                "rules": { "vpnRuleEnabled": true, "vpnName": "Work VPN" },
+                """
+            )
+        )
+
+        // Keep Connected is not location aware, so a share that was reaching
+        // its server over a VPN keeps that route by becoming Adaptive.
+        XCTAssertEqual(share.connectionMode, .adaptive)
+        XCTAssertEqual(share.rules.requiredVPNName, "Work VPN")
+    }
+
+    func testExistingConnectWhenAvailableSharesBecomeAdaptive() throws {
+        let share = try JSONDecoder().decode(
+            NetworkShare.self,
+            from: legacyShareJSON(keepMounted: false, mountAtLaunch: false, autoConnectWhenReachable: true)
+        )
+
+        XCTAssertEqual(share.connectionMode, .adaptive)
+    }
+
+    func testExistingManualSharesStayManual() throws {
+        let share = try JSONDecoder().decode(
+            NetworkShare.self,
+            from: legacyShareJSON(keepMounted: false, mountAtLaunch: false, autoConnectWhenReachable: false)
+        )
+
+        XCTAssertEqual(share.connectionMode, .manual)
+    }
+
+    func testExistingManualShareThatMountedAtLaunchBecomesConnectOnce() throws {
+        let share = try JSONDecoder().decode(
+            NetworkShare.self,
+            from: legacyShareJSON(keepMounted: false, mountAtLaunch: true, autoConnectWhenReachable: false)
+        )
+
+        XCTAssertEqual(share.connectionMode, .connectOnce)
+    }
+
+    func testSavedSharesStillCarryTheLegacySwitchesForOlderBuilds() throws {
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            connectionMode: .connectOnce
+        )
+
+        let encoded = try JSONSerialization.jsonObject(
+            with: try JSONEncoder().encode(share)
+        ) as? [String: Any]
+
+        XCTAssertEqual(encoded?["connectionMode"] as? String, "connectOnce")
+        XCTAssertEqual(encoded?["keepMounted"] as? Bool, false)
+        XCTAssertEqual(encoded?["mountAtLaunch"] as? Bool, true)
+        XCTAssertEqual(encoded?["autoConnectWhenReachable"] as? Bool, false)
+    }
+
+    func testTransferredConfigurationsMigrateAndRoundTripTheMode() throws {
+        let legacyPayload = """
+        {
+            "id": "00000000-0000-0000-0000-000000000009",
+            "displayName": "Media",
+            "urlString": "smb://server.local/Media",
+            "mountPath": "/Volumes/Media",
+            "keepMounted": false,
+            "mountAtLaunch": false,
+            "autoConnectWhenReachable": true,
+            "wakeOnLAN": { "isEnabled": false, "macAddress": "", "broadcastAddress": "255.255.255.255", "port": 9 },
+            "rules": { "vpnRuleEnabled": true, "vpnName": "Work VPN" },
+            "healthCheck": { "isEnabled": true, "requiresWritableVolume": false, "sentinelRelativePath": "" }
+        }
+        """
+        let migrated = try JSONDecoder().decode(
+            PortableShareConfiguration.self,
+            from: Data(legacyPayload.utf8)
+        )
+
+        XCTAssertEqual(migrated.connectionMode, .adaptive)
+        XCTAssertEqual(migrated.makeNetworkShare().connectionMode, .adaptive)
+
+        let reencoded = try JSONSerialization.jsonObject(
+            with: try JSONEncoder().encode(migrated)
+        ) as? [String: Any]
+        XCTAssertEqual(reencoded?["connectionMode"] as? String, "adaptive")
+        XCTAssertEqual(reencoded?["keepMounted"] as? Bool, true)
+    }
+}
+
+final class ConnectionModeBehaviorTests: XCTestCase {
+    @MainActor
+    private func makeMonitor(
+        _ name: String,
+        share: NetworkShare,
+        network: StubNetworkReachability,
+        mountService: StubMountService,
+        vpnConnectionService: StubVPNConnectionService = StubVPNConnectionService()
+    ) -> (ShareMonitor, SettingsStore, RecordingNotificationService) {
+        let notifier = RecordingNotificationService()
+        let suiteName = "OtterTests.ConnectionMode.\(name)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        settings.addShare(share)
+        let monitor = ShareMonitor(
+            settings: settings,
+            mountService: mountService,
+            wakeOnLANService: StubWakeOnLANService(),
+            vpnConnectionService: vpnConnectionService,
+            networkService: network,
+            notificationService: notifier,
+            eventLog: ShareEventLog(defaults: defaults),
+            defaults: defaults
+        )
+        return (monitor, settings, notifier)
+    }
+
+    private func share(
+        _ mode: ConnectionMode,
+        rules: ShareRules = ShareRules()
+    ) -> NetworkShare {
+        NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            connectionMode: mode,
+            rules: rules
+        )
+    }
+
+    // MARK: - Keep Connected
+
+    @MainActor
+    func testKeepConnectedMountsWithoutConsultingASavedVPN() async {
+        let vpnShare = share(
+            .keepConnected,
+            rules: ShareRules(vpnRuleEnabled: true, vpnName: "Work VPN", connectVPNAutomatically: true)
+        )
+        let mountService = StubMountService(mountResult: URL(fileURLWithPath: "/Volumes/Media", isDirectory: true))
+        let vpnConnectionService = StubVPNConnectionService()
+        let (monitor, settings, _) = makeMonitor(
+            "KeepConnectedIgnoresVPN",
+            share: vpnShare,
+            network: StubNetworkReachability(isOnline: true, isReachable: true),
+            mountService: mountService,
+            vpnConnectionService: vpnConnectionService
+        )
+
+        await monitor.evaluate(vpnShare, reason: .timer)
+
+        let vpnConnectionNames = await vpnConnectionService.connectionNames
+        XCTAssertEqual(monitor.status(for: vpnShare), .connected)
+        XCTAssertTrue(vpnConnectionNames.isEmpty)
+        // Hidden, not deleted: switching back to Adaptive must find the VPN.
+        XCTAssertEqual(settings.share(id: vpnShare.id)?.rules.requiredVPNName, "Work VPN")
+    }
+
+    @MainActor
+    func testKeepConnectedKeepsRetryingWhenTheServerGoesAway() async {
+        let keepConnected = share(.keepConnected)
+        let (monitor, _, _) = makeMonitor(
+            "KeepConnectedRetries",
+            share: keepConnected,
+            network: StubNetworkReachability(isOnline: true, isReachable: false),
+            mountService: StubMountService()
+        )
+
+        await monitor.evaluate(keepConnected, reason: .timer)
+        let state = monitor.runtimeState(for: keepConnected)
+
+        XCTAssertEqual(state.status, .waitingForNetwork)
+        XCTAssertEqual(state.failureCount, 1)
+        XCTAssertNotNil(state.nextRetryDate)
+    }
+
+    // MARK: - Adaptive
+
+    @MainActor
+    func testAdaptiveBringsUpTheVPNBeforeMountingAwayFromTheLocalNetwork() async {
+        let adaptive = share(
+            .adaptive,
+            rules: ShareRules(vpnRuleEnabled: true, vpnName: "Work VPN", connectVPNAutomatically: true)
+        )
+        let mountService = StubMountService(mountResult: URL(fileURLWithPath: "/Volumes/Media", isDirectory: true))
+        let vpnConnectionService = StubVPNConnectionService()
+        let (monitor, _, _) = makeMonitor(
+            "AdaptiveConnectsVPN",
+            share: adaptive,
+            network: StubNetworkReachability(
+                isOnline: true,
+                isReachable: true,
+                vpnNameToActivateOnRefresh: "Work VPN"
+            ),
+            mountService: mountService,
+            vpnConnectionService: vpnConnectionService
+        )
+
+        await monitor.evaluate(adaptive, reason: .timer)
+
+        let vpnConnectionNames = await vpnConnectionService.connectionNames
+        let mountCallCount = await mountService.mountCallCount
+        XCTAssertEqual(vpnConnectionNames, ["Work VPN"])
+        XCTAssertEqual(mountCallCount, 1)
+        XCTAssertEqual(monitor.status(for: adaptive), .connected)
+    }
+
+    @MainActor
+    func testAdaptiveKeepsTryingWhenItCannotEstablishTheConnection() async {
+        let adaptive = share(.adaptive)
+        let (monitor, _, _) = makeMonitor(
+            "AdaptiveRetries",
+            share: adaptive,
+            network: StubNetworkReachability(isOnline: true, isReachable: false),
+            mountService: StubMountService()
+        )
+
+        await monitor.evaluate(adaptive, reason: .timer)
+        let state = monitor.runtimeState(for: adaptive)
+
+        XCTAssertEqual(state.status, .waitingForNetwork)
+        XCTAssertNotNil(state.nextRetryDate)
+    }
+
+    // MARK: - Manual
+
+    @MainActor
+    func testManualStaysQuietAndDoesNotStartAVPNInTheBackground() async {
+        let manual = share(
+            .manual,
+            rules: ShareRules(vpnRuleEnabled: true, vpnName: "Work VPN", connectVPNAutomatically: true)
+        )
+        let mountService = StubMountService()
+        let vpnConnectionService = StubVPNConnectionService()
+        let (monitor, _, notifier) = makeMonitor(
+            "ManualQuiet",
+            share: manual,
+            network: StubNetworkReachability(isOnline: true, isReachable: true),
+            mountService: mountService,
+            vpnConnectionService: vpnConnectionService
+        )
+
+        for reason in [MonitorReason.launch, .timer, .networkChanged, .volumeChanged] {
+            await monitor.evaluate(manual, reason: reason)
+        }
+
+        let vpnConnectionNames = await vpnConnectionService.connectionNames
+        let mountCallCount = await mountService.mountCallCount
+        let state = monitor.runtimeState(for: manual)
+
+        XCTAssertEqual(mountCallCount, 0)
+        XCTAssertTrue(vpnConnectionNames.isEmpty)
+        // Not "waiting for VPN": nothing is expected of this share right now.
+        XCTAssertEqual(state.status, .disconnected)
+        XCTAssertNil(state.nextRetryDate)
+        XCTAssertFalse(notifier.transitions.contains { $0.current.needsAttention })
+    }
+
+    @MainActor
+    func testManualConnectsOnRequestAndReportsThatAttemptsFailure() async {
+        let manual = share(.manual)
+        let (monitor, settings, notifier) = makeMonitor(
+            "ManualRequested",
+            share: manual,
+            network: StubNetworkReachability(isOnline: true, isReachable: false),
+            mountService: StubMountService()
+        )
+
+        await monitor.mount(manual)
+        let state = monitor.runtimeState(for: manual)
+
+        guard case .failed = state.status else {
+            return XCTFail("A requested connection should report its failure, got \(state.status)")
+        }
+        // Reported once, not turned into a background retry loop.
+        XCTAssertNil(state.nextRetryDate)
+        XCTAssertEqual(state.failureCount, 0)
+        XCTAssertTrue(notifier.requestedAttemptFlags.allSatisfy { $0 })
+        // Connecting on demand is not a reconfiguration.
+        XCTAssertEqual(settings.share(id: manual.id)?.connectionMode, .manual)
+    }
+
+    @MainActor
+    func testManualStartsTheVPNWhenTheUserAsksToConnect() async {
+        let manual = share(
+            .manual,
+            rules: ShareRules(vpnRuleEnabled: true, vpnName: "Work VPN", connectVPNAutomatically: true)
+        )
+        let mountService = StubMountService(mountResult: URL(fileURLWithPath: "/Volumes/Media", isDirectory: true))
+        let vpnConnectionService = StubVPNConnectionService()
+        let (monitor, _, _) = makeMonitor(
+            "ManualStartsVPN",
+            share: manual,
+            network: StubNetworkReachability(
+                isOnline: true,
+                isReachable: true,
+                vpnNameToActivateOnRefresh: "Work VPN"
+            ),
+            mountService: mountService,
+            vpnConnectionService: vpnConnectionService
+        )
+
+        await monitor.mount(manual)
+
+        let vpnConnectionNames = await vpnConnectionService.connectionNames
+        XCTAssertEqual(vpnConnectionNames, ["Work VPN"])
+        XCTAssertEqual(monitor.status(for: manual), .connected)
+    }
+
+    // MARK: - Connect Once
+
+    @MainActor
+    func testConnectOnceMountsAtLaunchThenStopsMaintainingTheShare() async {
+        let connectOnce = share(.connectOnce)
+        let mountService = StubMountService(mountResult: URL(fileURLWithPath: "/Volumes/Media", isDirectory: true))
+        let (monitor, _, notifier) = makeMonitor(
+            "ConnectOnceLaunch",
+            share: connectOnce,
+            network: StubNetworkReachability(isOnline: true, isReachable: true),
+            mountService: mountService
+        )
+
+        await monitor.evaluate(connectOnce, reason: .launch)
+        XCTAssertEqual(monitor.status(for: connectOnce), .connected)
+
+        // The volume disappears; the stub keeps reporting nothing mounted.
+        await monitor.evaluate(connectOnce, reason: .volumeChanged)
+        await monitor.evaluate(connectOnce, reason: .timer)
+
+        let mountCallCount = await mountService.mountCallCount
+        let state = monitor.runtimeState(for: connectOnce)
+
+        XCTAssertEqual(mountCallCount, 1, "Connect Once must not become Keep Connected")
+        XCTAssertEqual(state.status, .disconnected)
+        XCTAssertNil(state.nextRetryDate)
+        XCTAssertFalse(notifier.transitions.contains { $0.current.needsAttention })
+    }
+
+    @MainActor
+    func testConnectOnceDoesNotRetryAfterItsSingleAttemptFails() async {
+        let connectOnce = share(.connectOnce)
+        let network = StubNetworkReachability(isOnline: true, isReachable: false)
+        let (monitor, _, notifier) = makeMonitor(
+            "ConnectOnceFails",
+            share: connectOnce,
+            network: network,
+            mountService: StubMountService()
+        )
+
+        await monitor.evaluate(connectOnce, reason: .launch)
+        let launchState = monitor.runtimeState(for: connectOnce)
+        let reachChecksAfterLaunch = network.canReachCallCount
+
+        guard case .failed = launchState.status else {
+            return XCTFail("The one attempt should be surfaced, got \(launchState.status)")
+        }
+        XCTAssertNil(launchState.nextRetryDate)
+        // The failure belongs to the attempt Otter was asked to make.
+        XCTAssertTrue(notifier.requestedAttemptFlags.allSatisfy { $0 })
+
+        await monitor.evaluate(connectOnce, reason: .timer)
+        // The reported failure survives an ordinary tick.
+        if case .failed = monitor.runtimeState(for: connectOnce).status {} else {
+            XCTFail("The failure should stay visible between triggers")
+        }
+
+        await monitor.evaluate(connectOnce, reason: .networkChanged)
+
+        XCTAssertEqual(network.canReachCallCount, reachChecksAfterLaunch, "No persistent retrying")
+        XCTAssertEqual(monitor.runtimeState(for: connectOnce).status, .disconnected)
+    }
+
+    @MainActor
+    func testConnectOnceUsesTheConfiguredVPNForItsOneAttempt() async {
+        let connectOnce = share(
+            .connectOnce,
+            rules: ShareRules(vpnRuleEnabled: true, vpnName: "Work VPN", connectVPNAutomatically: true)
+        )
+        let mountService = StubMountService(mountResult: URL(fileURLWithPath: "/Volumes/Media", isDirectory: true))
+        let vpnConnectionService = StubVPNConnectionService()
+        let (monitor, _, _) = makeMonitor(
+            "ConnectOnceVPN",
+            share: connectOnce,
+            network: StubNetworkReachability(
+                isOnline: true,
+                isReachable: true,
+                vpnNameToActivateOnRefresh: "Work VPN"
+            ),
+            mountService: mountService,
+            vpnConnectionService: vpnConnectionService
+        )
+
+        await monitor.evaluate(connectOnce, reason: .launch)
+
+        let vpnConnectionNames = await vpnConnectionService.connectionNames
+        XCTAssertEqual(vpnConnectionNames, ["Work VPN"])
+        XCTAssertEqual(monitor.status(for: connectOnce), .connected)
+    }
+
+    // MARK: - Modes are the user's choice
+
+    @MainActor
+    func testConnectingEverythingDoesNotRewriteConnectionModes() async {
+        let manual = share(.manual)
+        let mountService = StubMountService(mountResult: URL(fileURLWithPath: "/Volumes/Media", isDirectory: true))
+        let (monitor, settings, _) = makeMonitor(
+            "MountAllKeepsModes",
+            share: manual,
+            network: StubNetworkReachability(isOnline: true, isReachable: true),
+            mountService: mountService
+        )
+
+        await monitor.mountAll()
+
+        let mountCallCount = await mountService.mountCallCount
+        XCTAssertEqual(mountCallCount, 1)
+        XCTAssertEqual(monitor.status(for: manual), .connected)
+        XCTAssertEqual(settings.share(id: manual.id)?.connectionMode, .manual)
+    }
+
+    func testOnlyThePersistentModesComplainAboutUnexpectedOutages() {
+        XCTAssertTrue(ConnectionMode.keepConnected.reportsUnexpectedProblems)
+        XCTAssertTrue(ConnectionMode.adaptive.reportsUnexpectedProblems)
+        XCTAssertFalse(ConnectionMode.manual.reportsUnexpectedProblems)
+        XCTAssertFalse(ConnectionMode.connectOnce.reportsUnexpectedProblems)
+
+        XCTAssertFalse(ConnectionMode.keepConnected.usesRemoteAccess)
+        XCTAssertTrue(ConnectionMode.adaptive.usesRemoteAccess)
+        XCTAssertTrue(ConnectionMode.manual.usesRemoteAccess)
+        XCTAssertTrue(ConnectionMode.connectOnce.usesRemoteAccess)
+    }
+}
+
+final class ServerAliasTests: XCTestCase {
+    func testDotLocalHostResolvesToTheBrowsedName() {
+        XCTAssertEqual(ServerAlias.canonicalHost(for: "RoonieNAS-Pro.local"), "roonienas-pro")
+    }
+
+    func testBonjourServiceHostResolvesToTheBrowsedName() {
+        XCTAssertEqual(ServerAlias.canonicalHost(for: "Living Room NAS._smb._tcp.local"), "living room nas")
+    }
+
+    func testAdvertisedSpellingIsPreferredOverTheStrippedName() {
+        XCTAssertEqual(
+            ServerAlias.canonicalHost(for: "RoonieNAS-Pro.local", advertisedNames: ["RoonieNAS-Pro"]),
+            "RoonieNAS-Pro"
+        )
+    }
+
+    func testHostThatIsAlreadyTheBrowsedNameIsNotAnAlias() {
+        XCTAssertNil(ServerAlias.canonicalHost(for: "RoonieNAS-Pro"))
+        XCTAssertNil(ServerAlias.canonicalHost(for: "RoonieNAS-Pro", advertisedNames: ["RoonieNAS-Pro"]))
+    }
+
+    func testOrdinaryDNSNamesAndIPAddressesAreLeftAlone() {
+        XCTAssertNil(ServerAlias.canonicalHost(for: "nas.example.com"))
+        XCTAssertNil(ServerAlias.canonicalHost(for: "192.168.1.20"))
+        XCTAssertNil(ServerAlias.canonicalHost(for: "fe80::1"))
+    }
+
+    func testIdentityCollapsesEveryAliasFormOfOneServer() {
+        let identities = ["nas", "NAS.local", "nas._smb._tcp.local.", "NAS."].map(ServerAlias.identity)
+        XCTAssertEqual(Set(identities.compactMap { $0 }), ["nas"])
+    }
+
+    func testURLKeepsEverythingButTheHost() {
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://nas.local:4450/Media",
+            mountPath: "/Volumes/Media"
+        )
+
+        XCTAssertEqual(ServerAlias.urlString(for: share, replacingHostWith: "nas"), "smb://nas:4450/Media")
+    }
+}
+
+final class SavedSMBShareKeychainTests: XCTestCase {
+    func testKeychainDefaultPortIsAcceptedRatherThanDiscarded() throws {
+        // macOS writes port 0 for an ordinary SMB connection, so this is the
+        // shape of essentially every credential Finder saves.
+        let savedShare = try XCTUnwrap(
+            SavedSMBShare(host: "roonienas-pro", path: "Vault", port: 0)
+        )
+
+        XCTAssertNil(savedShare.port)
+        XCTAssertEqual(savedShare.displayName, "Vault")
+        XCTAssertEqual(savedShare.connectionURL?.absoluteString, "smb://roonienas-pro/Vault")
+    }
+
+    func testServerOnlyCredentialSavedUnderItsBonjourNameOffersTheSharePicker() throws {
+        let savedShare = try XCTUnwrap(
+            SavedSMBShare(host: "RoonieNAS-Pro._smb._tcp.local", path: nil, port: 0)
+        )
+
+        XCTAssertFalse(savedShare.hasSharePath)
+        XCTAssertEqual(savedShare.connectionURL?.absoluteString, "smb://RoonieNAS-Pro._smb._tcp.local/")
+    }
+
+    func testGenuinelyInvalidPortIsStillRejected() {
+        XCTAssertNil(SavedSMBShare(host: "nas.local", path: "Vault", port: 70_000))
+        XCTAssertNil(SavedSMBShare(host: "nas.local", path: "Vault", port: -1))
+        XCTAssertEqual(SavedSMBShare(host: "nas.local", path: "Vault", port: 4_450)?.port, 4_450)
+    }
+}
+
+final class ServerAliasCredentialTests: XCTestCase {
+    func testCandidatesCoverEverySpellingMacOSFilesAnSMBPasswordUnder() {
+        let candidates = ServerAlias.credentialHostCandidates(for: "RoonieNAS-Pro.local")
+
+        // The keychain matches a server name exactly, so the spelling the user
+        // typed has to survive alongside the lowercased forms.
+        XCTAssertTrue(candidates.contains("RoonieNAS-Pro.local"))
+        XCTAssertTrue(candidates.contains("RoonieNAS-Pro"))
+        XCTAssertTrue(candidates.contains("RoonieNAS-Pro._smb._tcp.local"))
+        XCTAssertTrue(candidates.contains("roonienas-pro"))
+        XCTAssertEqual(candidates.count, Set(candidates).count)
+    }
+
+    func testCandidatesForABonjourServiceNameIncludeThePlainAddress() {
+        let candidates = ServerAlias.credentialHostCandidates(for: "RoonieNAS-Pro._smb._tcp.local")
+
+        XCTAssertTrue(candidates.contains("RoonieNAS-Pro"))
+        XCTAssertTrue(candidates.contains("RoonieNAS-Pro.local"))
+    }
+
+    func testOrdinaryDNSNamesAndIPAddressesHaveNoAliasSpellings() {
+        XCTAssertEqual(ServerAlias.credentialHostCandidates(for: "nas.example.com"), ["nas.example.com"])
+        XCTAssertEqual(ServerAlias.credentialHostCandidates(for: "10.11.1.241"), ["10.11.1.241"])
+    }
+
+    func testLookupFindsAPasswordSavedUnderTheBonjourSpelling() {
+        // The share is addressed by the plain name while macOS filed the
+        // password under the Bonjour service name — the case that made Otter
+        // report "no keychain credentials" for a server that had them.
+        let store = AliasCredentialStore(hosts: ["RoonieNAS-Pro._smb._tcp.local"])
+
+        XCTAssertTrue(store.hasCredentials(forAnyAliasOf: "RoonieNAS-Pro"))
+        XCTAssertTrue(store.hasCredentials(forAnyAliasOf: "RoonieNAS-Pro.local"))
+        XCTAssertEqual(
+            store.savedCredentialHost(matching: "RoonieNAS-Pro"),
+            "RoonieNAS-Pro._smb._tcp.local"
+        )
+        XCTAssertFalse(store.hasCredentials(forAnyAliasOf: "OtherNAS"))
+    }
+
+    func testDisplayNameKeepsCapitalization() {
+        XCTAssertEqual(ServerAlias.displayName(for: "RoonieNAS-Pro.local"), "RoonieNAS-Pro")
+        XCTAssertEqual(ServerAlias.displayName(for: "RoonieNAS-Pro._smb._tcp.local"), "RoonieNAS-Pro")
+    }
+}
+
+final class ShareDeduplicationTests: XCTestCase {
+    @MainActor
+    private func makeSettings(_ name: String) -> (SettingsStore, UserDefaults) {
+        let suiteName = "OtterTests.ShareDeduplication.\(name)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        settings.completeOnboarding()
+        return (settings, defaults)
+    }
+
+    @MainActor
+    private func makeMonitor(
+        settings: SettingsStore,
+        defaults: UserDefaults,
+        eventLog: ShareEventLog,
+        mountedURL: URL?
+    ) -> ShareMonitor {
+        ShareMonitor(
+            settings: settings,
+            mountService: StubMountService(mountedURL: mountedURL, mountResult: mountedURL),
+            wakeOnLANService: StubWakeOnLANService(),
+            networkService: StubNetworkReachability(isOnline: true, isReachable: true),
+            notificationService: RecordingNotificationService(),
+            eventLog: eventLog,
+            defaults: defaults
+        )
+    }
+
+    func testVolumesMountedThroughAnAliasOrCachedAddressMatchTheSameShare() {
+        let share = NetworkShare(
+            displayName: "Vault",
+            urlString: "smb://nas.local/Vault",
+            mountPath: "/Volumes/Vault",
+            cachedIPAddresses: ["10.11.1.241"]
+        )
+        let volumes = [
+            MountedShareSuggestion(displayName: "Vault", urlString: "smb://nas.local/Vault", mountPath: "/Volumes/Vault"),
+            MountedShareSuggestion(displayName: "Vault", urlString: "smb://10.11.1.241/Vault", mountPath: "/Volumes/Vault-1"),
+            MountedShareSuggestion(displayName: "Vault", urlString: "smb://nas/Vault", mountPath: "/Volumes/Vault-2"),
+            MountedShareSuggestion(displayName: "Repo", urlString: "smb://nas.local/Repo", mountPath: "/Volumes/Repo")
+        ]
+
+        let matches = ShareDeduplicationService.volumes(volumes, matching: share)
+
+        XCTAssertEqual(matches.map(\.mountPath), ["/Volumes/Vault", "/Volumes/Vault-1", "/Volumes/Vault-2"])
+        XCTAssertEqual(
+            ShareDeduplicationService.preferredVolume(among: matches, for: share)?.mountPath,
+            "/Volumes/Vault"
+        )
+    }
+
+    func testPreferredVolumeFallsBackToTheNameMacOSDidNotRename() {
+        let share = NetworkShare(
+            displayName: "Vault",
+            urlString: "smb://nas.local/Vault",
+            mountPath: "/Volumes/Vault-1",
+            cachedIPAddresses: ["10.11.1.241"]
+        )
+        let matches = [
+            MountedShareSuggestion(displayName: "Vault", urlString: "smb://10.11.1.241/Vault", mountPath: "/Volumes/Vault-1"),
+            MountedShareSuggestion(displayName: "Vault", urlString: "smb://nas/Vault", mountPath: "/Volumes/Vault")
+        ]
+
+        XCTAssertEqual(
+            ShareDeduplicationService.preferredVolume(among: matches, for: share)?.mountPath,
+            "/Volumes/Vault"
+        )
+    }
+
+    @MainActor
+    func testConnectedAliasShareIsReconnectedThroughTheBrowsedName() async {
+        let (settings, defaults) = makeSettings("Canonical")
+        let share = NetworkShare(
+            displayName: "Vault",
+            urlString: "smb://nas.local/Vault",
+            mountPath: "/Volumes/Vault"
+        )
+        settings.addShare(share)
+
+        let eventLog = ShareEventLog(defaults: defaults)
+        let mountedURL = URL(fileURLWithPath: "/Volumes/Vault", isDirectory: true)
+        let monitor = makeMonitor(settings: settings, defaults: defaults, eventLog: eventLog, mountedURL: mountedURL)
+        await monitor.evaluate(share, reason: .manual, force: true)
+        XCTAssertEqual(monitor.status(for: share), .connected)
+
+        let service = ShareDeduplicationService(
+            settings: settings,
+            monitor: monitor,
+            eventLog: eventLog,
+            credentialStore: RecordingCredentialStore(),
+            resolver: StubHostResolver(result: "10.11.1.241"),
+            advertisedServerNames: { ["RoonieNAS-Pro"] },
+            discoverVolumes: { [] },
+            unmountVolume: { _ in true },
+            workspaceNotificationCenter: NotificationCenter(),
+            scanDelay: 0
+        )
+
+        await service.scan()
+
+        XCTAssertEqual(settings.share(id: share.id)?.urlString, "smb://nas/Vault")
+        XCTAssertEqual(monitor.status(for: share), .connected)
+        XCTAssertEqual(eventLog.events(for: share.id).first?.kind, .duplicateResolved)
+        XCTAssertEqual(service.recentResolutions.count, 1)
+
+        // The rewritten address is already the browsed name, so a second pass
+        // has nothing left to do.
+        await service.scan()
+        XCTAssertEqual(service.recentResolutions.count, 1)
+    }
+
+    @MainActor
+    func testAliasIsLeftAloneWhenTheBrowsedNameLeadsSomewhereElse() async {
+        let (settings, defaults) = makeSettings("DifferentServer")
+        let share = NetworkShare(
+            displayName: "Vault",
+            urlString: "smb://nas.local/Vault",
+            mountPath: "/Volumes/Vault"
+        )
+        settings.addShare(share)
+
+        let eventLog = ShareEventLog(defaults: defaults)
+        let mountedURL = URL(fileURLWithPath: "/Volumes/Vault", isDirectory: true)
+        let monitor = makeMonitor(settings: settings, defaults: defaults, eventLog: eventLog, mountedURL: mountedURL)
+        await monitor.evaluate(share, reason: .manual, force: true)
+
+        let service = ShareDeduplicationService(
+            settings: settings,
+            monitor: monitor,
+            eventLog: eventLog,
+            credentialStore: RecordingCredentialStore(),
+            resolver: HostMapResolver(["nas.local": ["10.11.1.241"], "nas": ["10.11.1.99"]]),
+            discoverVolumes: { [] },
+            unmountVolume: { _ in true },
+            workspaceNotificationCenter: NotificationCenter(),
+            scanDelay: 0
+        )
+
+        await service.scan()
+
+        XCTAssertEqual(settings.share(id: share.id)?.urlString, "smb://nas.local/Vault")
+        XCTAssertTrue(service.recentResolutions.isEmpty)
+    }
+
+    @MainActor
+    func testDisconnectedShareIsNotReconnectedJustToChangeItsAddress() async {
+        let (settings, defaults) = makeSettings("Disconnected")
+        let share = NetworkShare(
+            displayName: "Vault",
+            urlString: "smb://nas.local/Vault",
+            mountPath: "/Volumes/Vault"
+        )
+        settings.addShare(share)
+
+        let eventLog = ShareEventLog(defaults: defaults)
+        let monitor = makeMonitor(settings: settings, defaults: defaults, eventLog: eventLog, mountedURL: nil)
+        let service = ShareDeduplicationService(
+            settings: settings,
+            monitor: monitor,
+            eventLog: eventLog,
+            credentialStore: RecordingCredentialStore(),
+            resolver: StubHostResolver(result: "10.11.1.241"),
+            discoverVolumes: { [] },
+            unmountVolume: { _ in true },
+            workspaceNotificationCenter: NotificationCenter(),
+            scanDelay: 0
+        )
+
+        await service.scan()
+
+        XCTAssertEqual(settings.share(id: share.id)?.urlString, "smb://nas.local/Vault")
+        XCTAssertTrue(service.recentResolutions.isEmpty)
+    }
+
+    @MainActor
+    func testSecondCopyOfAMountedShareIsUnmounted() async {
+        let (settings, defaults) = makeSettings("RedundantVolume")
+        let share = NetworkShare(
+            displayName: "Vault",
+            urlString: "smb://nas.local/Vault",
+            mountPath: "/Volumes/Vault",
+            cachedIPAddresses: ["10.11.1.241"]
+        )
+        settings.addShare(share)
+
+        let eventLog = ShareEventLog(defaults: defaults)
+        let monitor = makeMonitor(settings: settings, defaults: defaults, eventLog: eventLog, mountedURL: nil)
+        let unmounted = UnmountRecorder()
+        let service = ShareDeduplicationService(
+            settings: settings,
+            monitor: monitor,
+            eventLog: eventLog,
+            credentialStore: RecordingCredentialStore(),
+            resolver: StubHostResolver(result: "10.11.1.241"),
+            discoverVolumes: {
+                [
+                    MountedShareSuggestion(displayName: "Vault", urlString: "smb://nas.local/Vault", mountPath: "/Volumes/Vault"),
+                    MountedShareSuggestion(displayName: "Vault", urlString: "smb://10.11.1.241/Vault", mountPath: "/Volumes/Vault-1")
+                ]
+            },
+            unmountVolume: { url in await unmounted.record(url) },
+            workspaceNotificationCenter: NotificationCenter(),
+            scanDelay: 0
+        )
+
+        await service.scan()
+
+        let paths = await unmounted.paths
+        XCTAssertEqual(paths, ["/Volumes/Vault-1"])
+        XCTAssertEqual(settings.share(id: share.id)?.mountPath, "/Volumes/Vault")
+        XCTAssertEqual(eventLog.events(for: share.id).first?.kind, .duplicateResolved)
+    }
+
+    @MainActor
+    func testNothingHappensWhileDeduplicationIsTurnedOff() async {
+        let (settings, defaults) = makeSettings("Disabled")
+        settings.updatePreferences { $0.deduplicateConnections = false }
+        let share = NetworkShare(
+            displayName: "Vault",
+            urlString: "smb://nas.local/Vault",
+            mountPath: "/Volumes/Vault"
+        )
+        settings.addShare(share)
+
+        let eventLog = ShareEventLog(defaults: defaults)
+        let mountedURL = URL(fileURLWithPath: "/Volumes/Vault", isDirectory: true)
+        let monitor = makeMonitor(settings: settings, defaults: defaults, eventLog: eventLog, mountedURL: mountedURL)
+        await monitor.evaluate(share, reason: .manual, force: true)
+
+        let unmounted = UnmountRecorder()
+        let service = ShareDeduplicationService(
+            settings: settings,
+            monitor: monitor,
+            eventLog: eventLog,
+            credentialStore: RecordingCredentialStore(),
+            resolver: StubHostResolver(result: "10.11.1.241"),
+            discoverVolumes: {
+                [
+                    MountedShareSuggestion(displayName: "Vault", urlString: "smb://nas.local/Vault", mountPath: "/Volumes/Vault"),
+                    MountedShareSuggestion(displayName: "Vault", urlString: "smb://10.11.1.241/Vault", mountPath: "/Volumes/Vault-1")
+                ]
+            },
+            unmountVolume: { url in await unmounted.record(url) },
+            workspaceNotificationCenter: NotificationCenter(),
+            scanDelay: 0
+        )
+
+        await service.scan()
+
+        let paths = await unmounted.paths
+        XCTAssertTrue(paths.isEmpty)
+        XCTAssertEqual(settings.share(id: share.id)?.urlString, "smb://nas.local/Vault")
+    }
+}
+
+extension ShareDeduplicationTests {
+    @MainActor
+    func testSavedPasswordIsCarriedOverFromTheBonjourSpelling() async {
+        let (settings, defaults) = makeSettings("CredentialCarry")
+        let share = NetworkShare(
+            displayName: "Vault",
+            urlString: "smb://RoonieNAS-Pro.local/Vault",
+            mountPath: "/Volumes/Vault"
+        )
+        settings.addShare(share)
+
+        let eventLog = ShareEventLog(defaults: defaults)
+        let mountedURL = URL(fileURLWithPath: "/Volumes/Vault", isDirectory: true)
+        let monitor = makeMonitor(settings: settings, defaults: defaults, eventLog: eventLog, mountedURL: mountedURL)
+        await monitor.evaluate(share, reason: .manual, force: true)
+
+        // Exactly how macOS files a password saved through Finder.
+        let credentials = AliasCredentialStore(hosts: ["RoonieNAS-Pro._smb._tcp.local"])
+        let service = ShareDeduplicationService(
+            settings: settings,
+            monitor: monitor,
+            eventLog: eventLog,
+            credentialStore: credentials,
+            resolver: StubHostResolver(result: "10.11.1.241"),
+            advertisedServerNames: { ["RoonieNAS-Pro"] },
+            discoverVolumes: { [] },
+            unmountVolume: { _ in true },
+            workspaceNotificationCenter: NotificationCenter(),
+            scanDelay: 0
+        )
+
+        await service.scan()
+
+        XCTAssertEqual(settings.share(id: share.id)?.urlString, "smb://RoonieNAS-Pro/Vault")
+        XCTAssertEqual(credentials.syncedPairs.map(\.to), ["RoonieNAS-Pro"])
+        XCTAssertEqual(credentials.syncedPairs.map(\.from), ["RoonieNAS-Pro._smb._tcp.local"])
+    }
+
+    @MainActor
+    func testShareIsLeftAloneWhenItsPasswordCannotFollowTheNewAddress() async {
+        let (settings, defaults) = makeSettings("CredentialStuck")
+        let share = NetworkShare(
+            displayName: "Vault",
+            urlString: "smb://RoonieNAS-Pro.local/Vault",
+            mountPath: "/Volumes/Vault"
+        )
+        settings.addShare(share)
+
+        let eventLog = ShareEventLog(defaults: defaults)
+        let mountedURL = URL(fileURLWithPath: "/Volumes/Vault", isDirectory: true)
+        let monitor = makeMonitor(settings: settings, defaults: defaults, eventLog: eventLog, mountedURL: mountedURL)
+        await monitor.evaluate(share, reason: .manual, force: true)
+
+        let credentials = AliasCredentialStore(
+            hosts: ["RoonieNAS-Pro._smb._tcp.local"],
+            allowsSync: false
+        )
+        let service = ShareDeduplicationService(
+            settings: settings,
+            monitor: monitor,
+            eventLog: eventLog,
+            credentialStore: credentials,
+            resolver: StubHostResolver(result: "10.11.1.241"),
+            discoverVolumes: { [] },
+            unmountVolume: { _ in true },
+            workspaceNotificationCenter: NotificationCenter(),
+            scanDelay: 0
+        )
+
+        await service.scan()
+
+        // Reconnecting would have put a password prompt in front of the user.
+        XCTAssertEqual(settings.share(id: share.id)?.urlString, "smb://RoonieNAS-Pro.local/Vault")
+        XCTAssertTrue(service.recentResolutions.isEmpty)
+        XCTAssertEqual(monitor.status(for: share), .connected)
+    }
+}
+
+private final class AliasCredentialStore: CredentialStoring, @unchecked Sendable {
+    private var hosts: Set<String>
+    private let allowsSync: Bool
+    private(set) var syncedPairs: [(from: String, to: String)] = []
+
+    init(hosts: Set<String>, allowsSync: Bool = true) {
+        self.hosts = hosts
+        self.allowsSync = allowsSync
+    }
+
+    // Case-sensitive, exactly like the keychain.
+    func hasCredentials(for host: String) -> Bool {
+        hosts.contains(host)
+    }
+
+    func syncCredentials(fromHost: String, toHost: String) -> Bool {
+        guard allowsSync, hosts.contains(fromHost) else { return false }
+        syncedPairs.append((from: fromHost, to: toHost))
+        hosts.insert(toHost)
+        return true
+    }
+
+    func removeFallbackCredentials(for host: String) {
+        hosts.remove(host)
+    }
+}
+
+private struct HostMapResolver: HostResolving {
+    private let addressesByHost: [String: [String]]
+
+    init(_ addressesByHost: [String: [String]]) {
+        self.addressesByHost = addressesByHost
+    }
+
+    func resolveIPAddresses(for hostname: String) async -> [String] {
+        addressesByHost[hostname.lowercased()] ?? []
+    }
+}
+
+private actor UnmountRecorder {
+    private(set) var paths: [String] = []
+
+    func record(_ url: URL) -> Bool {
+        paths.append(url.standardizedFileURL.path)
+        return true
     }
 }

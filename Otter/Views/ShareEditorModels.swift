@@ -151,31 +151,6 @@ enum VPNNameSelection: Hashable {
     case custom
 }
 
-enum AutomaticConnectionMode: String, CaseIterable, Hashable {
-    case keepConnected
-    case whenAvailable
-    case manual
-
-    var title: String {
-        switch self {
-        case .keepConnected: "Keep connected"
-        case .whenAvailable: "Connect when available"
-        case .manual: "Manual"
-        }
-    }
-
-    var detail: String {
-        switch self {
-        case .keepConnected:
-            "Otter reconnects this share whenever it becomes unavailable."
-        case .whenAvailable:
-            "Otter connects when the server responds, without treating an unavailable server as a problem."
-        case .manual:
-            "Otter connects this share only when you ask it to."
-        }
-    }
-}
-
 enum VPNVerificationResult: Equatable {
     case connected(String)
     case differentVPN(required: String, active: [String])
@@ -224,11 +199,10 @@ struct DraftShare {
     var displayName: String
     var urlString: String
     var mountPath: String
-    var keepMounted: Bool
-    var mountAtLaunch: Bool
-    var cachedIPAddress: String?
+    var connectionMode: ConnectionMode
+    var prefersIPv4: Bool
+    var cachedIPAddresses: [String]
     var ipAddressChangeObservations: [IPAddressChangeObservation]
-    var autoConnectWhenReachable: Bool
     var pauseState: PauseState
     var wakeOnLANEnabled: Bool
     var wakeOnLANMACAddress: String
@@ -245,11 +219,10 @@ struct DraftShare {
         displayName = share?.displayName ?? ""
         urlString = share?.urlString ?? ""
         mountPath = share?.mountPath ?? ""
-        keepMounted = share?.keepMounted ?? true
-        mountAtLaunch = share?.mountAtLaunch ?? true
-        cachedIPAddress = share?.cachedIPAddress
+        connectionMode = share?.connectionMode ?? .keepConnected
+        prefersIPv4 = share?.prefersIPv4 ?? true
+        cachedIPAddresses = share?.cachedIPAddresses ?? []
         ipAddressChangeObservations = share?.ipAddressChangeObservations ?? []
-        autoConnectWhenReachable = share?.autoConnectWhenReachable ?? false
         pauseState = share?.pauseState ?? .inactive
         wakeOnLANEnabled = share?.wakeOnLAN.isEnabled ?? false
         wakeOnLANMACAddress = share?.wakeOnLAN.macAddress ?? ""
@@ -265,6 +238,19 @@ struct DraftShare {
         createdAt = share?.createdAt
     }
 
+    var orderedCachedIPAddresses: [String] {
+        let preferred = cachedIPAddresses.filter {
+            prefersIPv4 ? NetworkShare.isIPv4Address($0) : NetworkShare.isIPv6Address($0)
+        }
+        let alternate = cachedIPAddresses.filter {
+            prefersIPv4 ? NetworkShare.isIPv6Address($0) : NetworkShare.isIPv4Address($0)
+        }
+        return preferred + alternate
+    }
+
+    /// Remote access settings are kept on the share whatever the mode, so
+    /// switching to Keep Connected — which hides them — never discards a VPN
+    /// the user may want again in Adaptive or Manual.
     var rules: ShareRules {
         ShareRules(
             wifiNetworkName: "",
@@ -275,6 +261,10 @@ struct DraftShare {
         )
     }
 
+    var showsRemoteAccess: Bool {
+        connectionMode.usesRemoteAccess
+    }
+
     var wakeOnLAN: WakeOnLANConfiguration {
         WakeOnLANConfiguration(
             isEnabled: wakeOnLANEnabled,
@@ -282,30 +272,6 @@ struct DraftShare {
             broadcastAddress: wakeOnLANBroadcastAddress,
             port: wakeOnLANPort
         )
-    }
-
-    var automaticConnectionMode: AutomaticConnectionMode {
-        get {
-            if keepMounted { return .keepConnected }
-            if autoConnectWhenReachable { return .whenAvailable }
-            return .manual
-        }
-        set {
-            switch newValue {
-            case .keepConnected:
-                keepMounted = true
-                autoConnectWhenReachable = false
-                mountAtLaunch = true
-            case .whenAvailable:
-                keepMounted = false
-                autoConnectWhenReachable = true
-                mountAtLaunch = false
-            case .manual:
-                keepMounted = false
-                autoConnectWhenReachable = false
-                mountAtLaunch = false
-            }
-        }
     }
 
 }

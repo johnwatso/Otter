@@ -241,6 +241,24 @@ struct ShareEditorView: View {
         return trimmedURL.isEmpty ? nil : trimmedURL
     }
 
+    /// Animates the mode change itself so the Remote Access section fades in
+    /// and out instead of the sheet snapping to a new height.
+    private var connectionModeSelection: Binding<ConnectionMode> {
+        Binding {
+            draft.connectionMode
+        } set: { mode in
+            withAnimation(.easeInOut(duration: 0.22)) {
+                draft.connectionMode = mode
+            }
+            if !mode.usesRemoteAccess {
+                if validationIssue?.field == .vpn {
+                    validationIssue = nil
+                }
+                vpnVerification = nil
+            }
+        }
+    }
+
     private func navigate(to destination: EditorStage) {
         guard stage != destination else { return }
         withAnimation(.easeInOut(duration: 0.18)) {
@@ -477,26 +495,30 @@ struct ShareEditorView: View {
     private var configureForm: some View {
         Form {
             Section("Connection") {
-                Picker("Connection mode", selection: $draft.automaticConnectionMode) {
-                    ForEach(AutomaticConnectionMode.allCases, id: \.self) { mode in
+                Picker("Connection mode", selection: connectionModeSelection) {
+                    ForEach(ConnectionMode.allCases, id: \.self) { mode in
                         Text(mode.title).tag(mode)
                     }
                 }
                 .pickerStyle(.menu)
 
-                Text(draft.automaticConnectionMode.detail)
+                Text(draft.connectionMode.detail)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-
-                if draft.automaticConnectionMode == .manual {
-                    Toggle("Mount once when Otter starts", isOn: $draft.mountAtLaunch)
-                }
-
+                    .fixedSize(horizontal: false, vertical: true)
+                    .id(draft.connectionMode)
+                    .transition(.opacity)
             }
 
-            Section("Remote Access") {
-                vpnConfiguration
-                    .id(ValidationField.vpn)
+            // Keep Connected expects the server on the current network, so
+            // remote access does not apply to it. The saved configuration is
+            // kept — only the controls go away.
+            if draft.showsRemoteAccess {
+                Section("Remote Access") {
+                    vpnConfiguration
+                        .id(ValidationField.vpn)
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
             Section {
@@ -569,6 +591,31 @@ struct ShareEditorView: View {
                         }
                         .tahoeCompactActionButton()
                         .padding(.vertical, 2)
+                    }
+                }
+
+                Section("Addressing") {
+                    Toggle("Prefer IPv4", isOn: $draft.prefersIPv4)
+                    Text("Otter caches both IPv4 and IPv6 addresses and tries the preferred family first. If it is unavailable, Otter automatically tries the other family.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    // Learned fallbacks are reference material, not something
+                    // to act on, so they live here rather than in the main
+                    // settings screen.
+                    ForEach(draft.orderedCachedIPAddresses, id: \.self) { address in
+                        LabeledContent(
+                            NetworkShare.isIPv4Address(address) ? "IPv4 fallback" : "IPv6 fallback",
+                            value: fallbackURLString(for: address) ?? address
+                        )
+                    }
+
+                    if !draft.orderedCachedIPAddresses.isEmpty,
+                       let host = hostFromURL,
+                       !NetworkShare.isIPAddress(host) {
+                        Text("Otter learns these while you are on the same network and tries them when the hostname does not resolve. Stable addresses improve fallback reliability.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -703,18 +750,6 @@ struct ShareEditorView: View {
                         }
                     }
                     .padding(.vertical, 2)
-                }
-            }
-        }
-
-        if let fallbackURL = fallbackURLString {
-            Section("Fallback Address") {
-                LabeledContent("Fallback IP", value: fallbackURL)
-
-                if let host = hostFromURL, !NetworkShare.isIPAddress(host) {
-                    Text("Otter caches this server's local IP while you are on the same network, then uses it over a VPN where mDNS names don't resolve. Give the server a static IP so the cached address stays valid.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -942,7 +977,7 @@ struct ShareEditorView: View {
         if settings.hasCredentials(for: host) {
             return true
         }
-        if let cachedIP = draft.cachedIPAddress, settings.hasCredentials(for: cachedIP) {
+        if draft.cachedIPAddresses.contains(where: settings.hasCredentials(for:)) {
             return true
         }
         return false
@@ -956,15 +991,14 @@ struct ShareEditorView: View {
         URL(string: draft.urlString.trimmingCharacters(in: .whitespacesAndNewlines))?.host(percentEncoded: false)
     }
 
-    private var fallbackURLString: String? {
-        guard let cachedIP = draft.cachedIPAddress,
-              let url = URL(string: draft.urlString.trimmingCharacters(in: .whitespacesAndNewlines)),
+    private func fallbackURLString(for cachedIP: String) -> String? {
+        guard let url = URL(string: draft.urlString.trimmingCharacters(in: .whitespacesAndNewlines)),
               let host = url.host(percentEncoded: false),
               !NetworkShare.isIPAddress(host)
         else { return nil }
 
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        components?.host = cachedIP
+        components?.host = NetworkShare.urlComponentsHost(forIPAddress: cachedIP)
         return components?.string
     }
 
@@ -1275,14 +1309,13 @@ struct ShareEditorView: View {
                 displayName: displayName,
                 urlString: normalizedURLString
             ),
-            keepMounted: draft.keepMounted,
-            mountAtLaunch: draft.mountAtLaunch,
-            autoConnectWhenReachable: draft.autoConnectWhenReachable,
+            connectionMode: draft.connectionMode,
             pauseState: draft.pauseState,
             wakeOnLAN: draft.wakeOnLAN,
             rules: draft.rules,
             healthCheck: draft.healthCheck,
-            cachedIPAddress: draft.cachedIPAddress,
+            prefersIPv4: draft.prefersIPv4,
+            cachedIPAddresses: draft.cachedIPAddresses,
             ipAddressChangeObservations: draft.ipAddressChangeObservations,
             createdAt: draft.createdAt ?? now,
             updatedAt: now
@@ -1362,7 +1395,10 @@ struct ShareEditorView: View {
             return ValidationIssue(field: .address, message: "Include the share name in the address.")
         }
 
-        if draft.usesVPNRule {
+        // A hidden remote access section cannot be corrected by the user, so
+        // Keep Connected never blocks saving over a stale VPN selection it
+        // preserves but ignores.
+        if draft.usesVPNRule, draft.showsRemoteAccess {
             let vpnName = draft.vpnName.trimmingCharacters(in: .whitespacesAndNewlines)
             if vpnName.isEmpty {
                 return ValidationIssue(

@@ -21,7 +21,6 @@ enum AppRuntime {
 
 @MainActor
 final class AppModel: ObservableObject {
-    static let preferencesWindowID = "preferences"
     static let sharesWindowID = "shares"
 
     let settings: SettingsStore
@@ -40,6 +39,7 @@ final class AppModel: ObservableObject {
     let monitor: ShareMonitor
     let connectionDoctor: ConnectionDoctor
     let newShareDetector: NewShareDetectionService
+    let deduplicationService: ShareDeduplicationService
     lazy var commandService = OtterCommandService(appModel: self)
 
     @Published var editorRequest: ShareEditorRequest?
@@ -149,7 +149,16 @@ final class AppModel: ObservableObject {
         self.wakeOnLANService = wakeOnLANService
         self.notificationService = notificationService
         self.loginItemService = LoginItemService()
-        self.updaterViewModel = UpdaterViewModel(startingUpdater: !isRunningTests)
+        // An in-place update relaunches Otter, so hold it back while a share
+        // check is in flight rather than interrupting a mount or unmount.
+        self.updaterViewModel = UpdaterViewModel(
+            startingUpdater: !isRunningTests,
+            settings: settings,
+            isSafeToInstallNow: { [weak monitor] in
+                guard let monitor else { return true }
+                return !monitor.isChecking
+            }
+        )
         self.eventLog = eventLog
         self.monitor = monitor
         self.connectionDoctor = ConnectionDoctor(
@@ -163,6 +172,17 @@ final class AppModel: ObservableObject {
             settings: settings,
             notificationService: notificationService,
             defaults: defaults
+        )
+        let discoveryService = self.discoveryService
+        self.deduplicationService = ShareDeduplicationService(
+            settings: settings,
+            monitor: monitor,
+            eventLog: eventLog,
+            credentialStore: credentialStore,
+            // Bonjour knows the exact name Finder lists a server under. It is
+            // only browsing while a share editor is open, so deduplication
+            // falls back to the stripped name when nothing is advertised.
+            advertisedServerNames: { discoveryService.servers.map(\.name) }
         )
     }
 
@@ -181,6 +201,7 @@ final class AppModel: ObservableObject {
         networkService.start()
         monitor.start()
         newShareDetector.start()
+        deduplicationService.start()
         commandService.start()
         observePreferences()
         refreshDockIconVisibility()
@@ -253,6 +274,7 @@ final class AppModel: ObservableObject {
 
     func sharesWindowDidAppear() {
         isSharesWindowVisible = true
+        refreshDockIconVisibility(activateIfShowing: true)
 
         guard let request = deferredEditorRequest else { return }
         deferredEditorRequest = nil
@@ -267,6 +289,7 @@ final class AppModel: ObservableObject {
 
     func sharesWindowDidDisappear() {
         isSharesWindowVisible = false
+        refreshDockIconVisibility()
     }
 
     func preferencesWindowDidAppear() {
@@ -291,6 +314,19 @@ final class AppModel: ObservableObject {
         refreshDockIconVisibility()
     }
 
+    // Shared by Preferences → Support and the Help menu so both produce the
+    // same redacted package from the same live services.
+    func exportSupportPackage() async -> Result<URL?, Error> {
+        await SupportDiagnosticsExporter.presentSavePanel(
+            settings: settings,
+            eventLog: eventLog,
+            monitor: monitor,
+            networkService: networkService,
+            notificationService: notificationService,
+            loginItemService: loginItemService
+        )
+    }
+
     func refreshDockIconVisibility(activateIfShowing: Bool = false) {
         let mode = settings.preferences.appPresenceMode
         let shouldShowMenuBarIcon = mode.shouldShowMenuBarIcon(duringOnboarding: isOnboardingPresented)
@@ -301,15 +337,26 @@ final class AppModel: ObservableObject {
         let shouldShowDockIcon = mode.shouldShowDockIcon(
             duringOnboarding: isOnboardingPresented,
             duringShareEditing: editorRequest != nil,
-            duringPreferencesOpen: isPreferencesWindowVisible
+            duringPreferencesOpen: isPreferencesWindowVisible,
+            duringSharesWindowOpen: isSharesWindowVisible
         )
 
-        guard lastAppliedDockIconVisibility != shouldShowDockIcon else { return }
+        // Only the policy switch is expensive enough to guard. Activation is a
+        // separate concern: in Dock + Menu Bar mode the policy is already
+        // .regular, so guarding both together meant opening a window never
+        // brought Otter forward and the menu bar kept showing the other app.
+        let policyChanged = lastAppliedDockIconVisibility != shouldShowDockIcon
         lastAppliedDockIconVisibility = shouldShowDockIcon
+        let shouldActivate = shouldShowDockIcon && activateIfShowing
+
+        guard policyChanged || shouldActivate else { return }
 
         Task { @MainActor in
-            _ = NSApp.setActivationPolicy(shouldShowDockIcon ? .regular : .accessory)
-            if shouldShowDockIcon && activateIfShowing {
+            if policyChanged {
+                _ = NSApp.setActivationPolicy(shouldShowDockIcon ? .regular : .accessory)
+            }
+
+            if shouldActivate {
                 NSApp.activate(ignoringOtherApps: true)
             }
         }
@@ -364,9 +411,7 @@ enum ScreenshotDemo {
             displayName: "Backups",
             urlString: "smb://homenas.local/Backups",
             mountPath: "/Volumes/Backups",
-            keepMounted: false,
-            mountAtLaunch: false,
-            autoConnectWhenReachable: true
+            connectionMode: .adaptive
         ),
         NetworkShare(
             id: projectsID,

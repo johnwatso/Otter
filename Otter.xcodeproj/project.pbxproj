@@ -45,6 +45,7 @@
 		1A2B3C4D5E6F700100000029 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000125 /* OnboardingView.swift */; };
 		1A2B3C4D5E6F70010000002A /* OtterShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000126 /* OtterShortcuts.swift */; };
 		1A2B3C4D5E6F70010000002B /* NewShareDetectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000127 /* NewShareDetectionService.swift */; };
+		1A2B3C4D5E6F700100000094 /* ShareDeduplicationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000131 /* ShareDeduplicationService.swift */; };
 		1A2B3C4D5E6F70010000002C /* SupportDiagnosticsExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000128 /* SupportDiagnosticsExporter.swift */; };
 		1A2B3C4D5E6F70010000002D /* OtterCommandService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000129 /* OtterCommandService.swift */; };
 		1A2B3C4D5E6F70010000002E /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000130 /* main.swift */; };
@@ -112,6 +113,7 @@
 		1A2B3C4D5E6F700100000125 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000126 /* OtterShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtterShortcuts.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000127 /* NewShareDetectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewShareDetectionService.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700100000131 /* ShareDeduplicationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareDeduplicationService.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000128 /* SupportDiagnosticsExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupportDiagnosticsExporter.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000129 /* OtterCommandService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtterCommandService.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000130 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
@@ -201,6 +203,7 @@
 				1A2B3C4D5E6F700100000108 /* NetworkReachabilityService.swift */,
 				1A2B3C4D5E6F700100000110 /* NotificationService.swift */,
 				1A2B3C4D5E6F700100000127 /* NewShareDetectionService.swift */,
+				1A2B3C4D5E6F700100000131 /* ShareDeduplicationService.swift */,
 				1A2B3C4D5E6F700100000128 /* SupportDiagnosticsExporter.swift */,
 				1A2B3C4D5E6F700100000129 /* OtterCommandService.swift */,
 				1A2B3C4D5E6F700100000109 /* LoginItemService.swift */,
@@ -392,6 +395,7 @@
 				1A2B3C4D5E6F70010000000D /* ShareEditorView.swift in Sources */,
 				1A2B3C4D5E6F700100000010 /* NotificationService.swift in Sources */,
 				1A2B3C4D5E6F70010000002B /* NewShareDetectionService.swift in Sources */,
+				1A2B3C4D5E6F700100000094 /* ShareDeduplicationService.swift in Sources */,
 				1A2B3C4D5E6F70010000002C /* SupportDiagnosticsExporter.swift in Sources */,
 				1A2B3C4D5E6F70010000002D /* OtterCommandService.swift in Sources */,
 				1A2B3C4D5E6F700100000011 /* UpdaterViewModel.swift in Sources */,
@@ -566,7 +570,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2026081414;
+				CURRENT_PROJECT_VERSION = 2026082816;
 				DEVELOPMENT_ASSET_PATHS = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -576,7 +580,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.0;
+				MARKETING_VERSION = 0.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.johnwatso.Otter;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = macosx;
@@ -595,7 +599,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2026081414;
+				CURRENT_PROJECT_VERSION = 2026082816;
 				DEVELOPMENT_ASSET_PATHS = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -605,7 +609,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.0;
+				MARKETING_VERSION = 0.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.johnwatso.Otter;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = macosx;

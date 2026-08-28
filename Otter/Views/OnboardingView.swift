@@ -66,7 +66,6 @@ struct OnboardingView: View {
                             step = 1
                         case 1:
                             step = 2
-                            requestPermissionsIfNeeded()
                         case 2:
                             step = 3
                             beginDiscovery()
@@ -171,7 +170,8 @@ struct OnboardingView: View {
                         tint: .cyan,
                         title: "Local Network",
                         detail: localNetworkPermissionDetail,
-                        isOn: discovery.localNetworkAuthorizationStatus.isAllowed
+                        isOn: discovery.localNetworkAuthorizationStatus.isAllowed,
+                        onEnable: enableLocalNetworkAccess
                     )
 
                     OnboardingPermissionRow(
@@ -179,7 +179,8 @@ struct OnboardingView: View {
                         tint: .blue,
                         title: "Notifications",
                         detail: notificationsPermissionDetail,
-                        isOn: notificationService.authorizationStatus == .authorized
+                        isOn: notificationsPermissionIsEnabled,
+                        onEnable: enableNotificationAccess
                     )
 
                     OnboardingPermissionRow(
@@ -187,7 +188,8 @@ struct OnboardingView: View {
                         tint: .purple,
                         title: "Location",
                         detail: locationPermissionDetail,
-                        isOn: networkService.locationAuthorizationStatus == .authorizedAlways
+                        isOn: networkService.locationAuthorizationStatus == .authorizedAlways,
+                        onEnable: enableLocationAccess
                     )
                 }
 
@@ -562,18 +564,40 @@ struct OnboardingView: View {
         importedPaths.insert(suggestion.mountPath)
     }
 
-    private func requestPermissionsIfNeeded() {
-        Task {
-            if notificationService.canAskForAuthorization {
-                await notificationService.requestAuthorization()
-            }
-
-            if networkService.canRequestLocationAuthorization {
-                networkService.requestLocationAuthorization()
-            }
-
+    private func enableLocalNetworkAccess() {
+        if discovery.localNetworkAuthorizationStatus == .denied {
+            openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork")
+        } else {
             discovery.checkLocalNetworkAuthorization()
         }
+    }
+
+    private func enableNotificationAccess() {
+        Task { await notificationService.requestAuthorization() }
+    }
+
+    private func enableLocationAccess() {
+        if networkService.canRequestLocationAuthorization {
+            networkService.requestLocationAuthorization()
+        } else if networkService.locationAuthorizationStatus != .authorizedAlways {
+            openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices")
+        }
+    }
+
+    private var notificationsPermissionIsEnabled: Bool {
+        switch notificationService.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            true
+        case .notDetermined, .denied:
+            false
+        @unknown default:
+            false
+        }
+    }
+
+    private func openSystemSettings(_ urlString: String) {
+        guard let url = URL(string: urlString) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private var localNetworkPermissionDetail: String {
@@ -679,6 +703,7 @@ private struct OnboardingPermissionRow: View {
     let title: String
     let detail: String
     let isOn: Bool
+    let onEnable: () -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
@@ -699,10 +724,16 @@ private struct OnboardingPermissionRow: View {
 
             Spacer(minLength: 12)
 
-            Toggle(title, isOn: .constant(isOn))
+            Toggle(title, isOn: Binding(
+                get: { isOn },
+                set: { enabled in
+                    if enabled {
+                        onEnable()
+                    }
+                }
+            ))
                 .labelsHidden()
                 .toggleStyle(.switch)
-                .disabled(true)
                 .accessibilityLabel(title)
                 .accessibilityHint(detail)
         }

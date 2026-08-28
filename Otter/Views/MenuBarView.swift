@@ -3,6 +3,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
     @EnvironmentObject private var appModel: AppModel
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var monitor: ShareMonitor
@@ -123,8 +124,8 @@ struct MenuBarView: View {
     }
 
     private func showPreferences() {
-        openWindow(id: AppModel.preferencesWindowID)
         NSApp.activate(ignoringOtherApps: true)
+        openSettings()
     }
 
     private func showShares() {

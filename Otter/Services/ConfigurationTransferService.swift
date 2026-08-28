@@ -32,9 +32,8 @@ struct PortableShareConfiguration: Codable, Equatable {
     let displayName: String
     let urlString: String
     let mountPath: String
-    let keepMounted: Bool
-    let mountAtLaunch: Bool
-    let autoConnectWhenReachable: Bool
+    let connectionMode: ConnectionMode
+    let prefersIPv4: Bool
     let wakeOnLAN: WakeOnLANConfiguration
     let rules: ShareRules
     let healthCheck: ShareHealthCheckConfiguration
@@ -50,16 +49,18 @@ struct PortableShareConfiguration: Codable, Equatable {
             urlString = share.urlString
         }
         mountPath = share.mountPath
-        keepMounted = share.keepMounted
-        mountAtLaunch = share.mountAtLaunch
-        autoConnectWhenReachable = share.autoConnectWhenReachable
+        connectionMode = share.connectionMode
+        prefersIPv4 = share.prefersIPv4
         wakeOnLAN = share.wakeOnLAN
         rules = share.rules
         healthCheck = share.healthCheck
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, displayName, urlString, mountPath, keepMounted, mountAtLaunch, autoConnectWhenReachable, wakeOnLAN, rules, healthCheck
+        case id, displayName, urlString, mountPath, connectionMode, prefersIPv4, wakeOnLAN, rules, healthCheck
+        // Read from — and written for — configurations produced before
+        // connection modes replaced the three separate switches.
+        case keepMounted, mountAtLaunch, autoConnectWhenReachable
     }
 
     init(from decoder: Decoder) throws {
@@ -68,12 +69,37 @@ struct PortableShareConfiguration: Codable, Equatable {
         displayName = try container.decode(String.self, forKey: .displayName)
         urlString = try container.decode(String.self, forKey: .urlString)
         mountPath = try container.decode(String.self, forKey: .mountPath)
-        keepMounted = try container.decode(Bool.self, forKey: .keepMounted)
-        mountAtLaunch = try container.decode(Bool.self, forKey: .mountAtLaunch)
-        autoConnectWhenReachable = try container.decodeIfPresent(Bool.self, forKey: .autoConnectWhenReachable) ?? false
+        prefersIPv4 = try container.decodeIfPresent(Bool.self, forKey: .prefersIPv4) ?? true
         wakeOnLAN = try container.decodeIfPresent(WakeOnLANConfiguration.self, forKey: .wakeOnLAN) ?? WakeOnLANConfiguration()
         rules = try container.decodeIfPresent(ShareRules.self, forKey: .rules) ?? ShareRules()
+        if let storedMode = try container.decodeIfPresent(ConnectionMode.self, forKey: .connectionMode) {
+            connectionMode = storedMode
+        } else {
+            connectionMode = NetworkShare.migratedConnectionMode(
+                keepMounted: try container.decodeIfPresent(Bool.self, forKey: .keepMounted) ?? true,
+                mountAtLaunch: try container.decodeIfPresent(Bool.self, forKey: .mountAtLaunch) ?? true,
+                autoConnectWhenReachable: try container.decodeIfPresent(Bool.self, forKey: .autoConnectWhenReachable) ?? false,
+                rules: rules
+            )
+        }
         healthCheck = try container.decodeIfPresent(ShareHealthCheckConfiguration.self, forKey: .healthCheck) ?? ShareHealthCheckConfiguration()
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encode(urlString, forKey: .urlString)
+        try container.encode(mountPath, forKey: .mountPath)
+        try container.encode(connectionMode, forKey: .connectionMode)
+        // Written so a Mac still running an older Otter can import this file.
+        try container.encode(connectionMode.maintainsConnection, forKey: .keepMounted)
+        try container.encode(connectionMode.connectsAutomatically, forKey: .mountAtLaunch)
+        try container.encode(connectionMode == .adaptive, forKey: .autoConnectWhenReachable)
+        try container.encode(prefersIPv4, forKey: .prefersIPv4)
+        try container.encode(wakeOnLAN, forKey: .wakeOnLAN)
+        try container.encode(rules, forKey: .rules)
+        try container.encode(healthCheck, forKey: .healthCheck)
     }
 
     func makeNetworkShare(id: UUID? = nil) -> NetworkShare {
@@ -82,12 +108,11 @@ struct PortableShareConfiguration: Codable, Equatable {
             displayName: displayName,
             urlString: urlString,
             mountPath: mountPath,
-            keepMounted: keepMounted,
-            mountAtLaunch: mountAtLaunch,
-            autoConnectWhenReachable: autoConnectWhenReachable,
+            connectionMode: connectionMode,
             wakeOnLAN: wakeOnLAN,
             rules: rules,
-            healthCheck: healthCheck
+            healthCheck: healthCheck,
+            prefersIPv4: prefersIPv4
         )
     }
 }
@@ -332,9 +357,9 @@ struct SupportShare: Codable, Equatable {
     let hasSavedCredentials: Bool
     let hasCachedFallbackAddress: Bool
     let recentAddressChangeCount: Int
+    let connectionMode: String
     let keepsMounted: Bool
     let mountsAtLogin: Bool
-    let connectsWhenReachable: Bool
     let usesRegisteredNetworkRule: Bool
     let usesNamedVPNRule: Bool
     let startsVPNAutomatically: Bool
@@ -366,18 +391,18 @@ enum SupportPackageService {
         let shares = settings.shares.enumerated().map { index, share in
             let host = share.host ?? ""
             let hasSavedCredentials = !host.isEmpty && settings.hasCredentials(for: host)
-                || share.cachedIPAddress.map(settings.hasCredentials(for:)) == true
+                || share.cachedIPAddresses.contains(where: settings.hasCredentials(for:))
             let requiredVPNName = share.rules.requiredVPNName
 
             return SupportShare(
                 reference: "Share \(index + 1)",
                 status: monitor.status(for: share).label,
                 hasSavedCredentials: hasSavedCredentials,
-                hasCachedFallbackAddress: share.cachedIPAddress != nil,
+                hasCachedFallbackAddress: !share.cachedIPAddresses.isEmpty,
                 recentAddressChangeCount: share.recentIPAddressChangeCount(at: generatedAt),
-                keepsMounted: share.keepMounted,
-                mountsAtLogin: share.mountAtLaunch,
-                connectsWhenReachable: share.autoConnectWhenReachable,
+                connectionMode: share.connectionMode.rawValue,
+                keepsMounted: share.maintainsConnection,
+                mountsAtLogin: share.connectsAutomatically,
                 usesRegisteredNetworkRule: share.rules.hasNetworkRule,
                 usesNamedVPNRule: requiredVPNName != nil,
                 startsVPNAutomatically: share.rules.shouldConnectVPNAutomatically,

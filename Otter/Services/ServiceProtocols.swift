@@ -68,7 +68,16 @@ extension NetworkReachabilityProviding {
 
 @MainActor
 protocol ShareNotificationProviding: AnyObject {
-    func notifyStatusChange(for share: NetworkShare, previous: ShareStatus, current: ShareStatus)
+    /// - Parameter isRequestedAttempt: whether this status came out of a
+    ///   connection the user asked for (or the single automatic attempt a
+    ///   Connect Once share makes). Modes that stay quiet in the background
+    ///   still report problems from those attempts.
+    func notifyStatusChange(
+        for share: NetworkShare,
+        previous: ShareStatus,
+        current: ShareStatus,
+        isRequestedAttempt: Bool
+    )
 }
 
 @MainActor

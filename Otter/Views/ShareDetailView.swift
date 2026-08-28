@@ -79,8 +79,11 @@ struct ShareDetailView: View {
 
                     VStack(spacing: 6) {
                         DetailRow(label: "Server", value: currentShare.host ?? "Unknown")
-                        if let cachedIPAddress = currentShare.cachedIPAddress {
-                            DetailRow(label: "IP Address", value: cachedIPAddress)
+                        ForEach(currentShare.orderedCachedIPAddresses, id: \.self) { address in
+                            DetailRow(
+                                label: NetworkShare.isIPv4Address(address) ? "IPv4 address" : "IPv6 address",
+                                value: address
+                            )
                         }
                         DetailRow(label: "Share", value: NetworkShare.inferredShareName(from: currentShare.urlString) ?? currentShare.displayName)
                         DetailRow(label: "Mount location", value: currentShare.mountPath)
@@ -127,13 +130,18 @@ struct ShareDetailView: View {
                     }
                     
                     VStack(spacing: 6) {
-                        ConfigStatusRow(label: "Reconnect automatically", isEnabled: currentShare.keepMounted)
+                        DetailRow(label: "Connection mode", value: currentShare.connectionMode.title)
                         if let pauseState = settings.effectivePauseState(for: currentShare) {
                             DetailRow(label: "Automatic mounting", value: pauseDescription(pauseState))
                         }
-                        ConfigStatusRow(label: "Connect when server becomes available", isEnabled: currentShare.autoConnectWhenReachable)
-                        ConfigStatusRow(label: "Mount at login", isEnabled: currentShare.mountAtLaunch)
-                        ConfigStatusRow(label: "Wake sleeping server", isEnabled: currentShare.wakeOnLAN.isEnabled)
+                        if currentShare.connectionMode.usesRemoteAccess,
+                           let vpnName = currentShare.rules.requiredVPNName {
+                            DetailRow(label: "Remote access", value: vpnName)
+                        }
+                        if currentShare.wakeOnLAN.isEnabled {
+                            ConfigStatusRow(label: "Wake sleeping server")
+                        }
+                        DetailRow(label: "Address preference", value: currentShare.prefersIPv4 ? "IPv4 first" : "IPv6 first")
                     }
                 }
                 
@@ -258,7 +266,7 @@ struct ShareDetailView: View {
         if settings.hasCredentials(for: host) {
             return true
         }
-        if let cachedIP = currentShare.cachedIPAddress, settings.hasCredentials(for: cachedIP) {
+        if currentShare.cachedIPAddresses.contains(where: settings.hasCredentials(for:)) {
             return true
         }
         return false
@@ -266,18 +274,6 @@ struct ShareDetailView: View {
 
     private var currentShare: NetworkShare {
         settings.share(id: share.id) ?? share
-    }
-
-    private var fallbackURLString: String? {
-        guard let cachedIP = currentShare.cachedIPAddress,
-              let url = currentShare.url,
-              let host = url.host(percentEncoded: false),
-              !NetworkShare.isIPAddress(host)
-        else { return nil }
-
-        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        components?.host = cachedIP
-        return components?.string
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<NetworkShare, Value>) -> Binding<Value> {
@@ -371,21 +367,7 @@ struct ServerDetailView: View {
                         .foregroundStyle(.secondary)
 
                     VStack(spacing: 6) {
-                        ServerConfigSummaryRow(
-                            label: "Reconnect automatically",
-                            enabledCount: currentShares.filter(\.keepMounted).count,
-                            totalCount: currentShares.count
-                        )
-                        ServerConfigSummaryRow(
-                            label: "Connect when server becomes available",
-                            enabledCount: currentShares.filter(\.autoConnectWhenReachable).count,
-                            totalCount: currentShares.count
-                        )
-                        ServerConfigSummaryRow(
-                            label: "Mount at login",
-                            enabledCount: currentShares.filter(\.mountAtLaunch).count,
-                            totalCount: currentShares.count
-                        )
+                        DetailRow(label: "Connection mode", value: connectionModeSummary)
                         ServerConfigSummaryRow(
                             label: "Wake sleeping server",
                             enabledCount: currentShares.filter { $0.wakeOnLAN.isEnabled }.count,
@@ -401,6 +383,12 @@ struct ServerDetailView: View {
 
     private var currentShares: [NetworkShare] {
         group.shares.map { settings.share(id: $0.id) ?? $0 }
+    }
+
+    private var connectionModeSummary: String {
+        let modes = Set(currentShares.map(\.connectionMode))
+        guard let mode = modes.first, modes.count == 1 else { return "Mixed" }
+        return mode.title
     }
 
     private var connectionDropCount: Int {
@@ -562,12 +550,11 @@ private struct DetailRow: View {
 
 private struct ConfigStatusRow: View {
     let label: String
-    let isEnabled: Bool
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: isEnabled ? "checkmark.circle.fill" : "minus.circle")
-                .foregroundStyle(isEnabled ? .green : .secondary)
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
             Text(label)
                 .font(.subheadline)
                 .foregroundStyle(.primary)

@@ -32,6 +32,71 @@ enum NetworkShareProtocol: String, Codable, CaseIterable, Hashable {
     }
 }
 
+/// How Otter is expected to keep a share connected.
+///
+/// The mode is the single source of truth for automatic mounting. Remote
+/// access (VPN) configuration stays saved on every share, but only applies to
+/// the modes that are location aware — see `usesRemoteAccess`.
+enum ConnectionMode: String, Codable, CaseIterable, Hashable, Sendable {
+    /// Persistent and directly reachable: the server is expected to answer on
+    /// the current network, so Otter mounts, monitors and restores the share.
+    case keepConnected
+    /// Persistent and location aware: Otter connects over the local network
+    /// when it can, and brings up the configured VPN when it cannot.
+    case adaptive
+    /// User initiated and location aware: Otter connects only when asked,
+    /// starting the configured VPN first if the share needs it.
+    case manual
+    /// Automatic but not persistent: one attempt at launch, then Otter leaves
+    /// the share alone.
+    case connectOnce
+
+    var title: String {
+        switch self {
+        case .keepConnected: "Keep Connected"
+        case .adaptive: "Adaptive"
+        case .manual: "Manual"
+        case .connectOnce: "Connect Once"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .keepConnected: "Always keep this share mounted."
+        case .adaptive: "Keep this share connected using the local network or VPN."
+        case .manual: "Connect only when requested."
+        case .connectOnce: "Connect automatically once, but don’t reconnect if it drops."
+        }
+    }
+
+    /// Whether the share's VPN configuration participates in connecting it.
+    /// Keep Connected is deliberately not location aware, so its saved remote
+    /// access settings are preserved but inert.
+    var usesRemoteAccess: Bool {
+        self != .keepConnected
+    }
+
+    /// Whether Otter re-mounts the share whenever it is not connected.
+    var maintainsConnection: Bool {
+        switch self {
+        case .keepConnected, .adaptive: true
+        case .manual, .connectOnce: false
+        }
+    }
+
+    /// Whether Otter mounts the share on its own at launch/login.
+    var connectsAutomatically: Bool {
+        self != .manual
+    }
+
+    /// Whether Otter should keep retrying, and complain, when the share is not
+    /// available. Modes that do not maintain the connection stay quiet unless
+    /// the attempt was explicitly requested.
+    var reportsUnexpectedProblems: Bool {
+        maintainsConnection
+    }
+}
+
 struct ShareHealthCheckConfiguration: Codable, Hashable {
     var isEnabled: Bool
     var requiresWritableVolume: Bool
@@ -94,14 +159,13 @@ struct NetworkShare: Identifiable, Codable, Hashable {
     /// Where the share is actually mounted right now. Observed, not chosen —
     /// `ShareMonitor` keeps it in step with reality.
     var mountPath: String
-    var keepMounted: Bool
-    var mountAtLaunch: Bool
-    var autoConnectWhenReachable: Bool
+    var connectionMode: ConnectionMode
     var pauseState: PauseState
     var wakeOnLAN: WakeOnLANConfiguration
     var rules: ShareRules
     var healthCheck: ShareHealthCheckConfiguration
-    var cachedIPAddress: String?
+    var prefersIPv4: Bool
+    var cachedIPAddresses: [String]
     var ipAddressChangeObservations: [IPAddressChangeObservation]
     var createdAt: Date
     var updatedAt: Date
@@ -111,13 +175,13 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         displayName: String,
         urlString: String,
         mountPath: String,
-        keepMounted: Bool = true,
-        mountAtLaunch: Bool = true,
-        autoConnectWhenReachable: Bool = false,
+        connectionMode: ConnectionMode = .keepConnected,
         pauseState: PauseState = .inactive,
         wakeOnLAN: WakeOnLANConfiguration = WakeOnLANConfiguration(),
         rules: ShareRules = ShareRules(),
         healthCheck: ShareHealthCheckConfiguration = ShareHealthCheckConfiguration(),
+        prefersIPv4: Bool = true,
+        cachedIPAddresses: [String] = [],
         cachedIPAddress: String? = nil,
         ipAddressChangeObservations: [IPAddressChangeObservation] = [],
         createdAt: Date = Date(),
@@ -127,14 +191,16 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         self.displayName = displayName
         self.urlString = urlString
         self.mountPath = mountPath
-        self.keepMounted = keepMounted
-        self.mountAtLaunch = mountAtLaunch
-        self.autoConnectWhenReachable = autoConnectWhenReachable
+        self.connectionMode = connectionMode
         self.pauseState = pauseState
         self.wakeOnLAN = wakeOnLAN
         self.rules = rules
         self.healthCheck = healthCheck
-        self.cachedIPAddress = cachedIPAddress
+        self.prefersIPv4 = prefersIPv4
+        self.cachedIPAddresses = cachedIPAddresses
+        if let cachedIPAddress, !self.cachedIPAddresses.contains(cachedIPAddress) {
+            self.cachedIPAddresses.append(cachedIPAddress)
+        }
         self.ipAddressChangeObservations = ipAddressChangeObservations
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -146,6 +212,9 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         case displayName
         case urlString
         case mountPath
+        case connectionMode
+        // Retained for migration from — and downgrades to — releases that
+        // described the connection mode with three independent switches.
         case keepMounted
         case mountAtLaunch
         case autoConnectWhenReachable
@@ -153,6 +222,9 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         case wakeOnLAN
         case rules
         case healthCheck
+        case prefersIPv4
+        case cachedIPAddresses
+        // Kept for migration from releases that stored one fallback address.
         case cachedIPAddress
         case ipAddressChangeObservations
         case createdAt
@@ -165,14 +237,26 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         displayName = try container.decode(String.self, forKey: .displayName)
         urlString = try container.decode(String.self, forKey: .urlString)
         mountPath = try container.decode(String.self, forKey: .mountPath)
-        keepMounted = try container.decode(Bool.self, forKey: .keepMounted)
-        mountAtLaunch = try container.decode(Bool.self, forKey: .mountAtLaunch)
-        autoConnectWhenReachable = try container.decodeIfPresent(Bool.self, forKey: .autoConnectWhenReachable) ?? false
         pauseState = try container.decodeIfPresent(PauseState.self, forKey: .pauseState) ?? .inactive
         wakeOnLAN = try container.decodeIfPresent(WakeOnLANConfiguration.self, forKey: .wakeOnLAN) ?? WakeOnLANConfiguration()
         rules = try container.decodeIfPresent(ShareRules.self, forKey: .rules) ?? ShareRules()
+        if let storedMode = try container.decodeIfPresent(ConnectionMode.self, forKey: .connectionMode) {
+            connectionMode = storedMode
+        } else {
+            connectionMode = Self.migratedConnectionMode(
+                keepMounted: try container.decodeIfPresent(Bool.self, forKey: .keepMounted) ?? true,
+                mountAtLaunch: try container.decodeIfPresent(Bool.self, forKey: .mountAtLaunch) ?? true,
+                autoConnectWhenReachable: try container.decodeIfPresent(Bool.self, forKey: .autoConnectWhenReachable) ?? false,
+                rules: rules
+            )
+        }
         healthCheck = try container.decodeIfPresent(ShareHealthCheckConfiguration.self, forKey: .healthCheck) ?? ShareHealthCheckConfiguration()
-        cachedIPAddress = try container.decodeIfPresent(String.self, forKey: .cachedIPAddress)
+        prefersIPv4 = try container.decodeIfPresent(Bool.self, forKey: .prefersIPv4) ?? true
+        cachedIPAddresses = try container.decodeIfPresent([String].self, forKey: .cachedIPAddresses) ?? []
+        if cachedIPAddresses.isEmpty,
+           let legacyAddress = try container.decodeIfPresent(String.self, forKey: .cachedIPAddress) {
+            cachedIPAddresses = [legacyAddress]
+        }
         ipAddressChangeObservations = try container.decodeIfPresent(
             [IPAddressChangeObservation].self,
             forKey: .ipAddressChangeObservations
@@ -182,8 +266,69 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         normalize()
     }
 
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encode(urlString, forKey: .urlString)
+        try container.encode(mountPath, forKey: .mountPath)
+        try container.encode(connectionMode, forKey: .connectionMode)
+        // Older builds read these three switches. Writing the equivalent values
+        // keeps a downgrade — or a configuration file shared with a Mac that
+        // has not updated yet — behaving the same way.
+        try container.encode(connectionMode.maintainsConnection, forKey: .keepMounted)
+        try container.encode(connectionMode.connectsAutomatically, forKey: .mountAtLaunch)
+        try container.encode(connectionMode == .adaptive, forKey: .autoConnectWhenReachable)
+        try container.encode(pauseState, forKey: .pauseState)
+        try container.encode(wakeOnLAN, forKey: .wakeOnLAN)
+        try container.encode(rules, forKey: .rules)
+        try container.encode(healthCheck, forKey: .healthCheck)
+        try container.encode(prefersIPv4, forKey: .prefersIPv4)
+        try container.encode(cachedIPAddresses, forKey: .cachedIPAddresses)
+        try container.encode(ipAddressChangeObservations, forKey: .ipAddressChangeObservations)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
+    }
+
     var url: URL? {
         URL(string: urlString)
+    }
+
+    /// Otter re-mounts this share whenever it is not connected.
+    var maintainsConnection: Bool {
+        connectionMode.maintainsConnection
+    }
+
+    /// Otter mounts this share on its own at launch.
+    var connectsAutomatically: Bool {
+        connectionMode.connectsAutomatically
+    }
+
+    /// The rules that actually gate a connection attempt. Keep Connected is not
+    /// location aware, so its saved remote access configuration is preserved on
+    /// the share but never evaluated — switching back to Adaptive or Manual
+    /// restores it untouched.
+    var activeRules: ShareRules {
+        connectionMode.usesRemoteAccess ? rules : ShareRules()
+    }
+
+    /// Maps the pre-4-mode representation onto a connection mode. A share that
+    /// was kept mounted while depending on a VPN or a registered network was
+    /// already behaving adaptively, so it keeps that behavior rather than
+    /// silently losing its route.
+    static func migratedConnectionMode(
+        keepMounted: Bool,
+        mountAtLaunch: Bool,
+        autoConnectWhenReachable: Bool,
+        rules: ShareRules
+    ) -> ConnectionMode {
+        if keepMounted {
+            return rules.hasVPNRule || rules.hasNetworkRule ? .adaptive : .keepConnected
+        }
+        if autoConnectWhenReachable {
+            return .adaptive
+        }
+        return mountAtLaunch ? .connectOnce : .manual
     }
 
     var host: String? {
@@ -221,11 +366,7 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         wakeOnLAN.normalize()
         rules.normalize()
         healthCheck.normalize()
-        cachedIPAddress = cachedIPAddress?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if cachedIPAddress?.isEmpty == true {
-            cachedIPAddress = nil
-        }
+        cachedIPAddresses = Self.uniqueValidIPAddresses(cachedIPAddresses)
         ipAddressChangeObservations = Array(
             ipAddressChangeObservations
                 .filter {
@@ -242,26 +383,57 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         url.flatMap { NetworkShareProtocol(urlScheme: $0.scheme) }
     }
 
+    var orderedCachedIPAddresses: [String] {
+        let preferredFamily = cachedIPAddresses.filter {
+            prefersIPv4 ? Self.isIPv4Address($0) : Self.isIPv6Address($0)
+        }
+        let alternateFamily = cachedIPAddresses.filter {
+            prefersIPv4 ? Self.isIPv6Address($0) : Self.isIPv4Address($0)
+        }
+        return preferredFamily + alternateFamily
+    }
+
+    // Source-compatible access for views and older call sites that only need
+    // the first fallback. New connection code should try orderedCachedIPAddresses.
+    var cachedIPAddress: String? {
+        get { orderedCachedIPAddresses.first }
+        set { cachedIPAddresses = newValue.map { [$0] } ?? [] }
+    }
+
     mutating func recordResolvedIPAddress(
         _ address: String,
         observedAt date: Date = Date()
     ) -> CachedIPAddressUpdate {
-        let normalizedAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard Self.isIPAddress(normalizedAddress) else { return .ignored }
+        recordResolvedIPAddresses([address], observedAt: date)
+    }
 
-        if cachedIPAddress?.localizedCaseInsensitiveCompare(normalizedAddress) == .orderedSame {
-            return .unchanged
-        }
+    mutating func recordResolvedIPAddresses(
+        _ addresses: [String],
+        observedAt date: Date = Date()
+    ) -> CachedIPAddressUpdate {
+        var normalizedAddresses = Self.uniqueValidIPAddresses(addresses)
+        guard !normalizedAddresses.isEmpty else { return .ignored }
 
         let previousAddress = cachedIPAddress
-        cachedIPAddress = normalizedAddress
+        if let previousAddress,
+           let previousIndex = normalizedAddresses.firstIndex(where: {
+               $0.localizedCaseInsensitiveCompare(previousAddress) == .orderedSame
+           }) {
+            let retainedAddress = normalizedAddresses.remove(at: previousIndex)
+            normalizedAddresses.insert(retainedAddress, at: 0)
+        }
+        cachedIPAddresses = normalizedAddresses
 
+        guard let currentAddress = cachedIPAddress else { return .ignored }
         guard let previousAddress else { return .initial }
+        guard previousAddress.localizedCaseInsensitiveCompare(currentAddress) != .orderedSame else {
+            return .unchanged
+        }
 
         ipAddressChangeObservations.append(
             IPAddressChangeObservation(
                 previousAddress: previousAddress,
-                currentAddress: normalizedAddress,
+                currentAddress: currentAddress,
                 observedAt: date
             )
         )
@@ -301,10 +473,33 @@ struct NetworkShare: Identifiable, Codable, Hashable {
     }
 
     static func isIPAddress(_ host: String) -> Bool {
+        isIPv4Address(host) || isIPv6Address(host)
+    }
+
+    static func isIPv4Address(_ host: String) -> Bool {
         var sin = in_addr()
-        var sin6 = in6_addr()
         return host.withCString { inet_pton(AF_INET, $0, &sin) } == 1
-            || host.withCString { inet_pton(AF_INET6, $0, &sin6) } == 1
+    }
+
+    static func isIPv6Address(_ host: String) -> Bool {
+        var sin6 = in6_addr()
+        let addressWithoutScope = host.split(separator: "%", maxSplits: 1).first.map(String.init) ?? host
+        return addressWithoutScope.withCString { inet_pton(AF_INET6, $0, &sin6) } == 1
+    }
+
+    static func urlComponentsHost(forIPAddress address: String) -> String {
+        isIPv6Address(address) ? "[\(address)]" : address
+    }
+
+    private static func uniqueValidIPAddresses(_ addresses: [String]) -> [String] {
+        var seen = Set<String>()
+        return addresses.compactMap { address in
+            let normalized = address.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard isIPAddress(normalized) else { return nil }
+            let key = normalized.lowercased()
+            guard seen.insert(key).inserted else { return nil }
+            return normalized
+        }
     }
 
     private static func normalizedServerIdentity(_ host: String) -> String? {

@@ -74,9 +74,14 @@ enum AppPresenceMode: String, Codable, CaseIterable, Equatable, Identifiable {
     func shouldShowDockIcon(
         duringOnboarding: Bool,
         duringShareEditing: Bool = false,
-        duringPreferencesOpen: Bool = false
+        duringPreferencesOpen: Bool = false,
+        duringSharesWindowOpen: Bool = false
     ) -> Bool {
-        duringOnboarding || duringShareEditing || duringPreferencesOpen || showsDockIcon
+        duringOnboarding
+            || duringShareEditing
+            || duringPreferencesOpen
+            || duringSharesWindowOpen
+            || showsDockIcon
     }
 
     func shouldShowMenuBarIcon(duringOnboarding: Bool) -> Bool {
@@ -108,6 +113,30 @@ enum AppPresenceMode: String, Codable, CaseIterable, Equatable, Identifiable {
     }
 }
 
+/// When an unattended update that has already downloaded is allowed to install
+/// and relaunch Otter. Sparkle's own default is "on quit", which never arrives
+/// for a menu-bar app that runs for weeks, so Otter always installs in place
+/// and this decides the moment.
+enum AutoUpdateInstallPolicy: String, Codable, CaseIterable, Identifiable {
+    /// Install as soon as the download finishes.
+    case immediate
+    /// Wait until no share check is in flight, so a relaunch cannot interrupt
+    /// a mount or unmount that is partway through.
+    case whenIdle
+    /// Hold until a fixed hour of the day.
+    case scheduled
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .immediate: "As soon as downloaded"
+        case .whenIdle: "When Otter is idle"
+        case .scheduled: "At a set time"
+        }
+    }
+}
+
 struct AppPreferences: Codable, Equatable {
     static let defaultFallbackCheckInterval: TimeInterval = 60
 
@@ -120,7 +149,13 @@ struct AppPreferences: Codable, Equatable {
     var pauseState: PauseState = .inactive
     var recoverUnresponsiveMounts: Bool = false
     var detectNewShares: Bool = true
+    /// Reconnect a share through the name its server is browsed under, and drop
+    /// the extra copies of a share macOS mounted more than once, so Finder's
+    /// Network list holds one entry per server.
+    var deduplicateConnections: Bool = true
     var hasCompletedOnboarding: Bool = false
+    var autoUpdateInstallPolicy: AutoUpdateInstallPolicy = .whenIdle
+    var autoUpdateInstallHour: Int = 3
 
     init(
         fallbackCheckInterval: TimeInterval = Self.defaultFallbackCheckInterval,
@@ -132,7 +167,10 @@ struct AppPreferences: Codable, Equatable {
         pauseState: PauseState = .inactive,
         recoverUnresponsiveMounts: Bool = false,
         detectNewShares: Bool = true,
-        hasCompletedOnboarding: Bool = false
+        deduplicateConnections: Bool = true,
+        hasCompletedOnboarding: Bool = false,
+        autoUpdateInstallPolicy: AutoUpdateInstallPolicy = .whenIdle,
+        autoUpdateInstallHour: Int = 3
     ) {
         self.fallbackCheckInterval = fallbackCheckInterval
         self.appPresenceMode = appPresenceMode
@@ -143,7 +181,10 @@ struct AppPreferences: Codable, Equatable {
         self.pauseState = pauseState
         self.recoverUnresponsiveMounts = recoverUnresponsiveMounts
         self.detectNewShares = detectNewShares
+        self.deduplicateConnections = deduplicateConnections
         self.hasCompletedOnboarding = hasCompletedOnboarding
+        self.autoUpdateInstallPolicy = autoUpdateInstallPolicy
+        self.autoUpdateInstallHour = autoUpdateInstallHour
         normalize()
     }
 
@@ -157,7 +198,10 @@ struct AppPreferences: Codable, Equatable {
         case pauseState
         case recoverUnresponsiveMounts
         case detectNewShares
+        case deduplicateConnections
         case hasCompletedOnboarding
+        case autoUpdateInstallPolicy
+        case autoUpdateInstallHour
         case showDockIconWhenPreferencesOpen
     }
 
@@ -177,7 +221,10 @@ struct AppPreferences: Codable, Equatable {
         pauseState = try container.decodeIfPresent(PauseState.self, forKey: .pauseState) ?? .inactive
         recoverUnresponsiveMounts = try container.decodeIfPresent(Bool.self, forKey: .recoverUnresponsiveMounts) ?? false
         detectNewShares = try container.decodeIfPresent(Bool.self, forKey: .detectNewShares) ?? true
+        deduplicateConnections = try container.decodeIfPresent(Bool.self, forKey: .deduplicateConnections) ?? true
         hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
+        autoUpdateInstallPolicy = try container.decodeIfPresent(AutoUpdateInstallPolicy.self, forKey: .autoUpdateInstallPolicy) ?? .whenIdle
+        autoUpdateInstallHour = try container.decodeIfPresent(Int.self, forKey: .autoUpdateInstallHour) ?? 3
         normalize()
     }
 
@@ -192,11 +239,15 @@ struct AppPreferences: Codable, Equatable {
         try container.encode(pauseState, forKey: .pauseState)
         try container.encode(recoverUnresponsiveMounts, forKey: .recoverUnresponsiveMounts)
         try container.encode(detectNewShares, forKey: .detectNewShares)
+        try container.encode(deduplicateConnections, forKey: .deduplicateConnections)
         try container.encode(hasCompletedOnboarding, forKey: .hasCompletedOnboarding)
+        try container.encode(autoUpdateInstallPolicy, forKey: .autoUpdateInstallPolicy)
+        try container.encode(autoUpdateInstallHour, forKey: .autoUpdateInstallHour)
     }
 
     mutating func normalize() {
         fallbackCheckInterval = min(max(fallbackCheckInterval, 15), 3600)
+        autoUpdateInstallHour = min(max(autoUpdateInstallHour, 0), 23)
         pauseState.clearIfExpired()
     }
 }

@@ -101,7 +101,12 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
         }
     }
 
-    func notifyStatusChange(for share: NetworkShare, previous: ShareStatus, current: ShareStatus) {
+    func notifyStatusChange(
+        for share: NetworkShare,
+        previous: ShareStatus,
+        current: ShareStatus,
+        isRequestedAttempt: Bool
+    ) {
         guard previous != current else { return }
 
         // Recovery ends the outage even when connection-change notifications are
@@ -113,6 +118,16 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
               settings.preferences.notificationsEnabled,
               let message = notificationMessage(for: share, previous: previous, current: current)
         else {
+            return
+        }
+
+        // Keep Connected and Adaptive expect the share to be available, so an
+        // outage is worth reporting. Manual and Connect Once only speak up
+        // about the attempt they were asked to make — a share that is simply
+        // not mounted is the normal state for them.
+        if message.kind.isProblem,
+           !share.connectionMode.reportsUnexpectedProblems,
+           !isRequestedAttempt {
             return
         }
 
@@ -341,8 +356,11 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
                 body: "The share is available in Finder."
             )
         case .disconnected:
+            // Connect Once makes no promise beyond its first mount, so a later
+            // drop is expected rather than news.
             guard settings.preferences.notifyConnectionChanges,
-                  previous == .connected
+                  previous == .connected,
+                  share.connectionMode != .connectOnce
             else { return nil }
 
             return ShareNotificationMessage(

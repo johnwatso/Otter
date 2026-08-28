@@ -89,13 +89,16 @@ final class SettingsStore: ObservableObject {
     }
 
     func hasCredentials(for host: String) -> Bool {
-        credentialStore.hasCredentials(for: host)
+        credentialStore.hasCredentials(forAnyAliasOf: host)
     }
 
     func portableCredentials() -> [PortableCredential] {
         shares.compactMap { share in
-            guard share.connectionProtocol == .smb, let host = share.host else { return nil }
-            return credentialStore.exportCredential(for: host)
+            guard share.connectionProtocol == .smb,
+                  let host = share.host,
+                  let savedHost = credentialStore.savedCredentialHost(matching: host)
+            else { return nil }
+            return credentialStore.exportCredential(for: savedHost)
         }
     }
 
@@ -132,32 +135,21 @@ final class SettingsStore: ObservableObject {
         let validAddresses = addresses.filter(NetworkShare.isIPAddress)
         guard !validAddresses.isEmpty else { return .ignored }
 
-        // A Bonjour host can advertise several interfaces. Keep the current
-        // fallback when it remains valid so reordered answers do not look like
-        // DHCP churn.
-        let selectedAddress = shares[index].cachedIPAddress.flatMap { cachedAddress in
-            validAddresses.first {
-                $0.localizedCaseInsensitiveCompare(cachedAddress) == .orderedSame
-            }
-        } ?? validAddresses[0]
-
-        let previousCachedIPAddress = shares[index].cachedIPAddress
+        let previousCachedIPAddresses = Set(shares[index].cachedIPAddresses)
         var updatedShare = shares[index]
-        let result = updatedShare.recordResolvedIPAddress(selectedAddress, observedAt: date)
+        let result = updatedShare.recordResolvedIPAddresses(validAddresses, observedAt: date)
 
-        switch result {
-        case .ignored, .unchanged:
-            return result
-        case .initial, .changed:
+        if result != .ignored,
+           updatedShare.cachedIPAddresses != shares[index].cachedIPAddresses {
             // Learned addresses are runtime observations, not user edits, so do
             // not change the configuration's updatedAt timestamp.
             shares[index] = updatedShare
-            removeFallbackCredentialIfUnused(
-                previousCachedIPAddress,
-                replacingWith: updatedShare.cachedIPAddress
+            removeFallbackCredentialsIfUnused(
+                previousCachedIPAddresses,
+                replacingWith: Set(updatedShare.cachedIPAddresses)
             )
-            return result
         }
+        return result
     }
 
     func addShare(_ share: NetworkShare) {
@@ -172,25 +164,25 @@ final class SettingsStore: ObservableObject {
             return
         }
 
-        let previousCachedIPAddress = shares[index].cachedIPAddress
+        let previousCachedIPAddresses = Set(shares[index].cachedIPAddresses)
         var updated = share
         if !Self.hostsMatch(shares[index].host, updated.host) {
-            updated.cachedIPAddress = nil
+            updated.cachedIPAddresses = []
             updated.ipAddressChangeObservations = []
         }
         updated.updatedAt = Date()
         shares[index] = updated
-        removeFallbackCredentialIfUnused(previousCachedIPAddress, replacingWith: updated.cachedIPAddress)
+        removeFallbackCredentialsIfUnused(previousCachedIPAddresses, replacingWith: Set(updated.cachedIPAddresses))
     }
 
     func updateShare(id: NetworkShare.ID, _ update: (inout NetworkShare) -> Void) {
         guard let index = shares.firstIndex(where: { $0.id == id }) else { return }
         var share = shares[index]
-        let previousCachedIPAddress = share.cachedIPAddress
+        let previousCachedIPAddresses = Set(share.cachedIPAddresses)
         let previousHost = share.host
         update(&share)
         if !Self.hostsMatch(previousHost, share.host) {
-            share.cachedIPAddress = nil
+            share.cachedIPAddresses = []
             share.ipAddressChangeObservations = []
         }
         share.updatedAt = Date()
@@ -198,14 +190,14 @@ final class SettingsStore: ObservableObject {
             share = Self.enforceManagedConfiguration(managedTemplate, preservingRuntimeFrom: share)
         }
         shares[index] = share
-        removeFallbackCredentialIfUnused(previousCachedIPAddress, replacingWith: share.cachedIPAddress)
+        removeFallbackCredentialsIfUnused(previousCachedIPAddresses, replacingWith: Set(share.cachedIPAddresses))
     }
 
     func removeShare(id: NetworkShare.ID) {
         guard !isManagedShare(id: id) else { return }
-        let cachedIPAddress = shares.first(where: { $0.id == id })?.cachedIPAddress
+        let cachedIPAddresses = Set(shares.first(where: { $0.id == id })?.cachedIPAddresses ?? [])
         shares.removeAll { $0.id == id }
-        removeFallbackCredentialIfUnused(cachedIPAddress, replacingWith: nil)
+        removeFallbackCredentialsIfUnused(cachedIPAddresses, replacingWith: [])
     }
 
     func isDuplicateShare(urlString: String, excluding shareID: NetworkShare.ID? = nil) -> Bool {
@@ -230,16 +222,6 @@ final class SettingsStore: ObservableObject {
 
         return shares.contains { share in
             share.id != shareID && share.urlString.localizedCaseInsensitiveCompare(normalizedURL) == .orderedSame
-        }
-    }
-
-    func setAllKeepMounted(_ enabled: Bool) {
-        shares = shares.map { share in
-            guard !isManagedShare(id: share.id) else { return share }
-            var updated = share
-            updated.keepMounted = enabled
-            updated.updatedAt = Date()
-            return updated
         }
     }
 
@@ -345,7 +327,7 @@ final class SettingsStore: ObservableObject {
             let retainedManagedShares = shares.filter { isManagedShare(id: $0.id) }
             let userShares = shares.filter { !isManagedShare(id: $0.id) }
             let previousCount = userShares.count
-            let previousFallbackHosts = Set(userShares.compactMap(\.cachedIPAddress))
+            let previousFallbackHosts = Set(userShares.flatMap(\.cachedIPAddresses))
             for host in previousFallbackHosts {
                 credentialStore.removeFallbackCredentials(for: host)
             }
@@ -380,7 +362,7 @@ final class SettingsStore: ObservableObject {
                     let existing = mergedShares[existingIndex]
                     guard !isManagedShare(id: existing.id) else { continue }
                     var replacement = configuration.makeNetworkShare(id: existing.id)
-                    replacement.cachedIPAddress = existing.cachedIPAddress
+                    replacement.cachedIPAddresses = existing.cachedIPAddresses
                     replacement.ipAddressChangeObservations = existing.ipAddressChangeObservations
                     replacement.pauseState = existing.pauseState
                     replacement.createdAt = existing.createdAt
@@ -430,7 +412,7 @@ final class SettingsStore: ObservableObject {
     ) -> NetworkShare {
         var result = managed
         result.pauseState = runtime.pauseState
-        result.cachedIPAddress = runtime.cachedIPAddress
+        result.cachedIPAddresses = runtime.cachedIPAddresses
         result.ipAddressChangeObservations = runtime.ipAddressChangeObservations
         result.createdAt = runtime.createdAt
         result.updatedAt = runtime.updatedAt
@@ -470,15 +452,18 @@ final class SettingsStore: ObservableObject {
         save(persistedPreferences, key: Keys.preferences)
     }
 
-    private func removeFallbackCredentialIfUnused(_ previousHost: String?, replacingWith newHost: String?) {
-        guard let previousHost,
-              previousHost.localizedCaseInsensitiveCompare(newHost ?? "") != .orderedSame,
-              !shares.contains(where: {
-                  $0.cachedIPAddress?.localizedCaseInsensitiveCompare(previousHost) == .orderedSame
-              })
-        else { return }
-
-        credentialStore.removeFallbackCredentials(for: previousHost)
+    private func removeFallbackCredentialsIfUnused(
+        _ previousHosts: Set<String>,
+        replacingWith newHosts: Set<String>
+    ) {
+        for previousHost in previousHosts where !newHosts.contains(previousHost) {
+            guard !shares.contains(where: { share in
+                share.cachedIPAddresses.contains {
+                    $0.localizedCaseInsensitiveCompare(previousHost) == .orderedSame
+                }
+            }) else { continue }
+            credentialStore.removeFallbackCredentials(for: previousHost)
+        }
     }
 
     private func save<T: Encodable>(_ value: T, key: String) {

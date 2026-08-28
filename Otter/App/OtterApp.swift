@@ -50,8 +50,15 @@ struct OtterApp: App {
         // macOS caps a sheet at its parent window's height, so the share
         // editor can only be as tall as this window allows.
         .defaultSize(width: 680, height: 720)
+        .commands {
+            OtterCommands(appModel: appModel)
+        }
 
-        Window("Preferences", id: AppModel.preferencesWindowID) {
+        // The Settings scene, not a plain Window: only this scene gets the
+        // native preferences toolbar, which is what draws each tab's SF Symbol
+        // above its title. In an ordinary window the same TabView collapses to
+        // a segmented control and the icons are dropped.
+        SwiftUI.Settings {
             PreferencesView()
                 .environmentObject(appModel)
                 .environmentObject(appModel.settings)
@@ -60,12 +67,6 @@ struct OtterApp: App {
                 .environmentObject(appModel.loginItemService)
                 .environmentObject(appModel.updaterViewModel)
                 .environmentObject(appModel.newShareDetector)
-        }
-        .defaultSize(width: 520, height: 420)
-        .windowStyle(.titleBar)
-        .windowToolbarStyle(.unified)
-        .commands {
-            OtterCommands()
         }
     }
 
@@ -78,7 +79,7 @@ struct OtterApp: App {
 }
 
 private struct OtterCommands: Commands {
-    @Environment(\.openWindow) private var openWindow
+    let appModel: AppModel
 
     var body: some Commands {
         CommandGroup(replacing: .appInfo) {
@@ -87,14 +88,29 @@ private struct OtterCommands: Commands {
             }
         }
 
-        CommandGroup(replacing: .appSettings) {
-            Button("Preferences…") {
-                openWindow(id: AppModel.preferencesWindowID)
-                NSApp.activate(ignoringOtherApps: true)
+        // No .appSettings override: the Settings scene installs its own
+        // "Settings…" item, and replacing the group removes the responder that
+        // actually opens the window.
+
+        CommandGroup(replacing: .help) {
+            Button("Check for Updates…") {
+                appModel.updaterViewModel.checkForUpdates()
             }
-            .keyboardShortcut(",", modifiers: .command)
+            .disabled(!appModel.updaterViewModel.canCheckForUpdates)
+
+            Button("Export Diagnostics…") {
+                Task { @MainActor in
+                    _ = await appModel.exportSupportPackage()
+                }
+            }
+
+            Divider()
+
+            Link("Otter on GitHub", destination: Self.repositoryURL)
         }
     }
+
+    private static let repositoryURL = URL(string: "https://github.com/johnwatso/Otter")!
 }
 
 @MainActor

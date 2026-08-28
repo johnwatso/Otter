@@ -12,6 +12,7 @@ enum ShareEventKind: String, Codable {
     case recoveryAttempted
     case healthCheckFailed
     case credentialsRequired
+    case duplicateResolved
 }
 
 struct ShareEvent: Identifiable, Codable, Equatable {

@@ -119,15 +119,13 @@ final class SMBDiscoveryService: ObservableObject {
         browser.stateUpdateHandler = { [weak self, weak browser] state in
             let status: LocalNetworkAuthorizationStatus?
             switch state {
-            case .ready:
-                status = .allowed
-            case let .failed(error):
+            case let .waiting(error), let .failed(error):
                 if case let .dns(code) = error, code == -65_570 {
                     status = .denied
                 } else {
                     status = .unknown
                 }
-            case .cancelled, .setup, .waiting:
+            case .cancelled, .setup, .ready:
                 status = nil
             @unknown default:
                 status = .unknown
@@ -141,12 +139,26 @@ final class SMBDiscoveryService: ObservableObject {
             }
         }
 
+        // A browser becoming ready only means the browse operation started;
+        // it is not proof that Local Network access was granted. Receiving a
+        // Bonjour result demonstrates that multicast discovery is working.
+        browser.browseResultsChangedHandler = { [weak self, weak browser] results, _ in
+            guard !results.isEmpty else { return }
+            Task { @MainActor [weak self, weak browser] in
+                self?.localNetworkAuthorizationStatus = .allowed
+                browser?.cancel()
+                self?.authorizationBrowser = nil
+            }
+        }
+
         browser.start(queue: queue)
     }
 
     func stop() {
         browser?.cancel()
         browser = nil
+        authorizationBrowser?.cancel()
+        authorizationBrowser = nil
         state = .idle
     }
 }
