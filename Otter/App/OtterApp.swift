@@ -189,6 +189,21 @@ private struct MenuBarLabel: View {
 class AppDelegate: NSObject, NSApplicationDelegate {
     var appModel: AppModel?
 
+    // Closing Manage Shares or Preferences is not quitting: Otter keeps
+    // monitoring mounts from the menu bar. Without this the app is torn down
+    // with its last window and the menu bar item disappears with it.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Paired with NSSupportsAutomaticTermination = false in Info.plist.
+        // The plist key is what a stale copy of the app in /Applications still
+        // carries, so hold the process open from code as well: a share monitor
+        // that the system is free to quit while it sits idle is no monitor.
+        ProcessInfo.processInfo.disableAutomaticTermination("Otter monitors network shares in the background")
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         appModel?.triggerOpenSharesWindow()
         return true

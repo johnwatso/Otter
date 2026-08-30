@@ -36,8 +36,11 @@
 	<string>rxaJsfCpTKtpqRubSfkJwKnztT5S8RHsdAueuT+jKck=</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
+	<!-- Otter is a resident agent: it keeps monitoring shares with no windows
+	     on screen. Automatic termination would let the system quit it once it
+	     went idle with nothing open, taking the menu bar item with it. -->
 	<key>NSSupportsAutomaticTermination</key>
-	<true/>
+	<false/>
 	<key>NSSupportsSuddenTermination</key>
 	<true/>
 	<key>NSUserNotificationAlertStyle</key>
