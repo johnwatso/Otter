@@ -142,6 +142,9 @@ struct AppPreferences: Codable, Equatable {
 
     var fallbackCheckInterval: TimeInterval = Self.defaultFallbackCheckInterval
     var appPresenceMode: AppPresenceMode = .dockAndMenuBar
+    /// Keep the server level visible in the menu bar even when a server has
+    /// only one configured share.
+    var alwaysShowServerName: Bool = false
     var notificationsEnabled: Bool = true
     var notifyConnectionChanges: Bool = true
     var notifyProblems: Bool = true
@@ -160,6 +163,7 @@ struct AppPreferences: Codable, Equatable {
     init(
         fallbackCheckInterval: TimeInterval = Self.defaultFallbackCheckInterval,
         appPresenceMode: AppPresenceMode = .dockAndMenuBar,
+        alwaysShowServerName: Bool = false,
         notificationsEnabled: Bool = true,
         notifyConnectionChanges: Bool = true,
         notifyProblems: Bool = true,
@@ -174,6 +178,7 @@ struct AppPreferences: Codable, Equatable {
     ) {
         self.fallbackCheckInterval = fallbackCheckInterval
         self.appPresenceMode = appPresenceMode
+        self.alwaysShowServerName = alwaysShowServerName
         self.notificationsEnabled = notificationsEnabled
         self.notifyConnectionChanges = notifyConnectionChanges
         self.notifyProblems = notifyProblems
@@ -191,6 +196,7 @@ struct AppPreferences: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case fallbackCheckInterval
         case appPresenceMode
+        case alwaysShowServerName
         case notificationsEnabled
         case notifyConnectionChanges
         case notifyProblems
@@ -214,6 +220,7 @@ struct AppPreferences: Codable, Equatable {
             let showDockIconWhenPreferencesOpen = try container.decodeIfPresent(Bool.self, forKey: .showDockIconWhenPreferencesOpen) ?? true
             self.appPresenceMode = showDockIconWhenPreferencesOpen ? .dockAndMenuBar : .menuBarOnly
         }
+        alwaysShowServerName = try container.decodeIfPresent(Bool.self, forKey: .alwaysShowServerName) ?? false
         notificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true
         notifyConnectionChanges = try container.decodeIfPresent(Bool.self, forKey: .notifyConnectionChanges) ?? true
         notifyProblems = try container.decodeIfPresent(Bool.self, forKey: .notifyProblems) ?? true
@@ -232,6 +239,7 @@ struct AppPreferences: Codable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(fallbackCheckInterval, forKey: .fallbackCheckInterval)
         try container.encode(appPresenceMode, forKey: .appPresenceMode)
+        try container.encode(alwaysShowServerName, forKey: .alwaysShowServerName)
         try container.encode(notificationsEnabled, forKey: .notificationsEnabled)
         try container.encode(notifyConnectionChanges, forKey: .notifyConnectionChanges)
         try container.encode(notifyProblems, forKey: .notifyProblems)

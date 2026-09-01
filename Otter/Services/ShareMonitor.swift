@@ -108,7 +108,7 @@ final class ShareMonitor: ObservableObject {
     }
 
     var menuBarSystemImage: String {
-        if settings.isGloballyPaused {
+        if settings.isGloballyPaused && settings.shares.contains(where: { $0.connectsAutomatically }) {
             return "pause.circle.fill"
         }
 
@@ -174,7 +174,13 @@ final class ShareMonitor: ObservableObject {
     }
 
     func disconnectAll() async {
-        await pauseAll(until: nil, disconnect: true)
+        if settings.shares.contains(where: { $0.connectsAutomatically }) {
+            await pauseAll(until: nil, disconnect: true)
+        } else {
+            for share in settings.shares {
+                await disconnect(share, pauseAutomaticMounting: false)
+            }
+        }
     }
 
     func mount(_ share: NetworkShare) async {
@@ -195,7 +201,8 @@ final class ShareMonitor: ObservableObject {
     }
 
     func disconnect(_ share: NetworkShare, pauseAutomaticMounting: Bool = true) async {
-        if pauseAutomaticMounting {
+        let currentShare = settings.share(id: share.id) ?? share
+        if pauseAutomaticMounting && currentShare.connectsAutomatically {
             settings.pauseShare(id: share.id, until: nil)
         }
 
@@ -503,11 +510,37 @@ final class ShareMonitor: ObservableObject {
             currentIPv4Subnets: networkService.currentIPv4Subnets
         )
 
+        // A VPN-only rule is a fallback path, not a requirement when the
+        // server already answers directly. Probe before starting (or waiting
+        // for) the saved VPN so Manual, Adaptive and Connect Once use the LAN
+        // whenever it is available. Explicit registered-network rules still
+        // rely on their saved network identity and are never bypassed by this
+        // reachability check.
+        var serverWasReachableDirectly = false
+        if !ruleEvaluation.allowsConnection,
+           wantsConnectionNow,
+           rules.hasVPNRule,
+           !rules.hasNetworkRule,
+           rules.requiredVPNName != nil,
+           networkService.isOnline,
+           let url = share.url {
+            serverWasReachableDirectly = await networkService.canReachServer(for: url)
+            if serverWasReachableDirectly {
+                ruleEvaluation = ShareRuleEvaluation(
+                    allowsConnection: true,
+                    blockedStatus: nil,
+                    shouldDisconnectMountedShare: false,
+                    shouldAttemptMount: true
+                )
+            }
+        }
+
         // The saved VPN name identifies the required connection path. Otter
-        // starts it only when automatic VPN connection is enabled; otherwise
-        // the rule remains blocked until a live tunnel appears. Any live tunnel
-        // allows a server check because app-managed VPNs don't always expose
-        // their exact profile name to other apps.
+        // starts it only when the server is not directly reachable and
+        // automatic VPN connection is enabled; otherwise the rule remains
+        // blocked until a live tunnel appears. Any live tunnel allows a server
+        // check because app-managed VPNs don't always expose their exact
+        // profile name to other apps.
         // Manual and Connect Once only bring up a VPN for the attempt they were
         // asked to make, never in the background.
         if !ruleEvaluation.allowsConnection,
@@ -795,7 +828,10 @@ final class ShareMonitor: ObservableObject {
             saveState(state, for: share)
         }
 
-        var reachable = await networkService.canReachServer(for: url)
+        var reachable = serverWasReachableDirectly
+        if !reachable {
+            reachable = await networkService.canReachServer(for: url)
+        }
         var fallbackURL: URL? = nil
 
         if !reachable, networkService.isVPNConnected {

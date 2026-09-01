@@ -230,6 +230,10 @@ final class SettingsStore: ObservableObject {
     }
 
     func effectivePauseState(for share: NetworkShare, at date: Date = Date()) -> PauseState? {
+        // Pauses control unattended mounting. A Manual share can still be
+        // mounted or disconnected on demand and must not present as paused.
+        guard share.connectsAutomatically else { return nil }
+
         if preferences.pauseState.isActive(at: date) {
             return preferences.pauseState
         }

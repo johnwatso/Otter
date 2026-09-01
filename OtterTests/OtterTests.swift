@@ -142,8 +142,10 @@ final class NetworkShareTests: XCTestCase {
         XCTAssertEqual(groups[0].serverName, "HomeNAS")
         XCTAssertEqual(groups[0].shares.map(\.displayName), ["Media", "Backups"])
         XCTAssertTrue(groups[0].isGrouped)
+        XCTAssertEqual(groups[0].shareCountLabel, "2 shares")
         XCTAssertEqual(groups[1].shares, [archive])
         XCTAssertFalse(groups[1].isGrouped)
+        XCTAssertEqual(groups[1].shareCountLabel, "1 share")
     }
 
     func testBonjourServerDisplayNameOmitsServiceSuffix() {
@@ -875,6 +877,66 @@ final class ShareMonitorRetryTests: XCTestCase {
     }
 
     @MainActor
+    func testDisconnectingManualShareDoesNotCreateAutomaticMountingPause() async {
+        let suiteName = "OtterTests.ShareMonitorRetryTests.ManualDisconnect"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            connectionMode: .manual
+        )
+        settings.addShare(share)
+        let monitor = ShareMonitor(
+            settings: settings,
+            mountService: StubMountService(),
+            wakeOnLANService: StubWakeOnLANService(),
+            networkService: StubNetworkReachability(isOnline: true, isReachable: true),
+            notificationService: RecordingNotificationService(),
+            eventLog: ShareEventLog(defaults: defaults),
+            defaults: defaults
+        )
+
+        await monitor.disconnect(share)
+
+        XCTAssertEqual(monitor.status(for: share), .disconnected)
+        XCTAssertEqual(settings.share(id: share.id)?.pauseState, .inactive)
+        XCTAssertFalse(settings.isGloballyPaused)
+    }
+
+    @MainActor
+    func testDisconnectingAllManualSharesDoesNotPauseGlobally() async {
+        let suiteName = "OtterTests.ShareMonitorRetryTests.AllManualDisconnect"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            connectionMode: .manual
+        )
+        settings.addShare(share)
+        let monitor = ShareMonitor(
+            settings: settings,
+            mountService: StubMountService(),
+            wakeOnLANService: StubWakeOnLANService(),
+            networkService: StubNetworkReachability(isOnline: true, isReachable: true),
+            notificationService: RecordingNotificationService(),
+            eventLog: ShareEventLog(defaults: defaults),
+            defaults: defaults
+        )
+
+        await monitor.disconnectAll()
+
+        XCTAssertEqual(monitor.status(for: share), .disconnected)
+        XCTAssertEqual(settings.share(id: share.id)?.pauseState, .inactive)
+        XCTAssertFalse(settings.isGloballyPaused)
+    }
+
+    @MainActor
     func testUnreachableServerConsumesRetryBudgetAndSchedulesBackoff() async {
         let suiteName = "OtterTests.ShareMonitorRetryTests"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -1101,7 +1163,8 @@ final class ShareMonitorRetryTests: XCTestCase {
         settings.addShare(share)
         let network = StubNetworkReachability(
             isOnline: true,
-            isReachable: true,
+            isReachable: false,
+            isReachableAfterVPNConnection: true,
             vpnNameToActivateOnRefresh: "Work VPN"
         )
         let vpnConnectionService = StubVPNConnectionService()
@@ -1203,7 +1266,7 @@ final class ShareMonitorRetryTests: XCTestCase {
             mountService: mountService,
             wakeOnLANService: StubWakeOnLANService(),
             vpnConnectionService: vpnConnectionService,
-            networkService: StubNetworkReachability(isOnline: true, isReachable: true),
+            networkService: StubNetworkReachability(isOnline: true, isReachable: false),
             notificationService: RecordingNotificationService(),
             eventLog: ShareEventLog(defaults: defaults),
             defaults: defaults
@@ -1407,7 +1470,7 @@ final class ShareMonitorRetryTests: XCTestCase {
             mountService: mountService,
             wakeOnLANService: StubWakeOnLANService(),
             vpnConnectionService: vpnConnectionService,
-            networkService: StubNetworkReachability(isOnline: true, isReachable: true),
+            networkService: StubNetworkReachability(isOnline: true, isReachable: false),
             notificationService: RecordingNotificationService(),
             eventLog: ShareEventLog(defaults: defaults),
             defaults: defaults
@@ -1446,7 +1509,7 @@ final class ShareMonitorRetryTests: XCTestCase {
             mountService: mountService,
             wakeOnLANService: StubWakeOnLANService(),
             vpnConnectionService: vpnConnectionService,
-            networkService: StubNetworkReachability(isOnline: true, isReachable: true),
+            networkService: StubNetworkReachability(isOnline: true, isReachable: false),
             notificationService: RecordingNotificationService(),
             eventLog: ShareEventLog(defaults: defaults),
             defaults: defaults
@@ -2253,6 +2316,25 @@ final class SettingsStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testManualShareIgnoresAutomaticMountingPauses() {
+        let suiteName = "OtterTests.SettingsStoreTests.ManualPause"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let store = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://server.local/Media",
+            mountPath: "/Volumes/Media",
+            connectionMode: .manual,
+            pauseState: .paused()
+        )
+        store.addShare(share)
+        store.pauseAll(until: nil)
+
+        XCTAssertNil(store.effectivePauseState(for: share))
+    }
+
+    @MainActor
     func testConfigurationExportOmitsRuntimeAndPrivateState() throws {
         let suiteName = "OtterTests.SettingsStoreTests.Export"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -2605,6 +2687,18 @@ final class AppPreferencesTests: XCTestCase {
         let preferences = try JSONDecoder().decode(AppPreferences.self, from: Data(json.utf8))
         XCTAssertEqual(preferences.autoUpdateInstallPolicy, .whenIdle)
         XCTAssertEqual(preferences.autoUpdateInstallHour, 3)
+        XCTAssertFalse(preferences.alwaysShowServerName)
+    }
+
+    func testAlwaysShowServerNamePreferenceRoundTrips() throws {
+        var preferences = AppPreferences()
+        XCTAssertFalse(preferences.alwaysShowServerName)
+
+        preferences.alwaysShowServerName = true
+        let data = try JSONEncoder().encode(preferences)
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: data)
+
+        XCTAssertTrue(decoded.alwaysShowServerName)
     }
 
     func testPauseStateExpiresAtItsResumeDate() {
@@ -2740,6 +2834,7 @@ private final class StubNetworkReachability: NetworkReachabilityProviding {
     private(set) var canReachCallCount = 0
     private(set) var reachedHosts: [String] = []
     private let reachableHosts: Set<String>?
+    private let isReachableAfterVPNConnection: Bool?
     private let vpnNameToActivateOnRefresh: String?
 
     init(
@@ -2750,6 +2845,7 @@ private final class StubNetworkReachability: NetworkReachabilityProviding {
         currentIPv4Subnets: [String] = [],
         activeVPNNames: [String] = [],
         hasUnidentifiedTunnel: Bool? = nil,
+        isReachableAfterVPNConnection: Bool? = nil,
         vpnNameToActivateOnRefresh: String? = nil,
         reachableHosts: Set<String>? = nil
     ) {
@@ -2761,6 +2857,7 @@ private final class StubNetworkReachability: NetworkReachabilityProviding {
         self.activeVPNNames = activeVPNNames
         self.hasUnidentifiedTunnel = hasUnidentifiedTunnel
             ?? (isVPNConnected && activeVPNNames.isEmpty)
+        self.isReachableAfterVPNConnection = isReachableAfterVPNConnection
         self.vpnNameToActivateOnRefresh = vpnNameToActivateOnRefresh
         self.reachableHosts = reachableHosts
     }
@@ -2769,6 +2866,9 @@ private final class StubNetworkReachability: NetworkReachabilityProviding {
         canReachCallCount += 1
         let host = url.host(percentEncoded: false) ?? ""
         reachedHosts.append(host)
+        if isVPNConnected, let isReachableAfterVPNConnection {
+            return isReachableAfterVPNConnection
+        }
         return reachableHosts?.contains(host) ?? isReachable
     }
 
@@ -3393,7 +3493,8 @@ final class ConnectionModeBehaviorTests: XCTestCase {
             share: adaptive,
             network: StubNetworkReachability(
                 isOnline: true,
-                isReachable: true,
+                isReachable: false,
+                isReachableAfterVPNConnection: true,
                 vpnNameToActivateOnRefresh: "Work VPN"
             ),
             mountService: mountService,
@@ -3497,7 +3598,8 @@ final class ConnectionModeBehaviorTests: XCTestCase {
             share: manual,
             network: StubNetworkReachability(
                 isOnline: true,
-                isReachable: true,
+                isReachable: false,
+                isReachableAfterVPNConnection: true,
                 vpnNameToActivateOnRefresh: "Work VPN"
             ),
             mountService: mountService,
@@ -3508,6 +3610,33 @@ final class ConnectionModeBehaviorTests: XCTestCase {
 
         let vpnConnectionNames = await vpnConnectionService.connectionNames
         XCTAssertEqual(vpnConnectionNames, ["Work VPN"])
+        XCTAssertEqual(monitor.status(for: manual), .connected)
+    }
+
+    @MainActor
+    func testManualUsesTheLocalServerWithoutStartingTheConfiguredVPN() async {
+        let manual = share(
+            .manual,
+            rules: ShareRules(vpnRuleEnabled: true, vpnName: "Work VPN", connectVPNAutomatically: true)
+        )
+        let mountService = StubMountService(mountResult: URL(fileURLWithPath: "/Volumes/Media", isDirectory: true))
+        let vpnConnectionService = StubVPNConnectionService()
+        let network = StubNetworkReachability(isOnline: true, isReachable: true)
+        let (monitor, _, _) = makeMonitor(
+            "ManualPrefersLocalNetwork",
+            share: manual,
+            network: network,
+            mountService: mountService,
+            vpnConnectionService: vpnConnectionService
+        )
+
+        await monitor.mount(manual)
+
+        let vpnConnectionNames = await vpnConnectionService.connectionNames
+        let mountCallCount = await mountService.mountCallCount
+        XCTAssertTrue(vpnConnectionNames.isEmpty)
+        XCTAssertEqual(network.canReachCallCount, 1)
+        XCTAssertEqual(mountCallCount, 1)
         XCTAssertEqual(monitor.status(for: manual), .connected)
     }
 
@@ -3587,7 +3716,8 @@ final class ConnectionModeBehaviorTests: XCTestCase {
             share: connectOnce,
             network: StubNetworkReachability(
                 isOnline: true,
-                isReachable: true,
+                isReachable: false,
+                isReachableAfterVPNConnection: true,
                 vpnNameToActivateOnRefresh: "Work VPN"
             ),
             mountService: mountService,

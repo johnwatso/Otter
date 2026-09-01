@@ -596,6 +596,10 @@ struct NetworkShareServerGroup: Identifiable, Hashable {
         shares.count > 1
     }
 
+    var shareCountLabel: String {
+        shares.count == 1 ? "1 share" : "\(shares.count) shares"
+    }
+
     static func make(from shares: [NetworkShare]) -> [NetworkShareServerGroup] {
         var sharesByKey: [String: [NetworkShare]] = [:]
         var serverNamesByKey: [String: String] = [:]

@@ -123,14 +123,12 @@ struct ShareManagementView: View {
                     Task { await disconnectSelectedShares() }
                 } label: {
                     Label(
-                        selectedServerGroup == nil ? "Disconnect & Pause" : "Disconnect & Pause All",
+                        disconnectSelectedSharesLabel,
                         systemImage: "eject"
                     )
                 }
                 .disabled(!canDisconnectSelectedShares)
-                .help(selectedServerGroup == nil
-                    ? "Disconnect and pause automatic mounting"
-                    : "Disconnect and pause every share on this server")
+                .help(disconnectSelectedSharesHelp)
 
                 if let selectedShare {
                     SharePauseMenu(share: selectedShare)
@@ -429,6 +427,28 @@ struct ShareManagementView: View {
         selectedShares.contains { monitor.status(for: $0) == .connected }
     }
 
+    private var selectedSharesUseAutomaticMounting: Bool {
+        selectedShares.contains(where: { $0.connectsAutomatically })
+    }
+
+    private var disconnectSelectedSharesLabel: String {
+        let isGroup = selectedServerGroup != nil
+        if selectedSharesUseAutomaticMounting {
+            return isGroup ? "Disconnect & Pause All" : "Disconnect & Pause"
+        }
+        return isGroup ? "Disconnect All" : "Disconnect"
+    }
+
+    private var disconnectSelectedSharesHelp: String {
+        let isGroup = selectedServerGroup != nil
+        if selectedSharesUseAutomaticMounting {
+            return isGroup
+                ? "Disconnect every share and pause automatic mounting on this server"
+                : "Disconnect and pause automatic mounting"
+        }
+        return isGroup ? "Disconnect every share on this server" : "Disconnect this share"
+    }
+
     private var canRemoveSelectedShare: Bool {
         guard let selectedShare else { return false }
         return settings.share(id: selectedShare.id) != nil
@@ -533,11 +553,15 @@ struct ShareManagementView: View {
 
     private func disconnectSelectedShares() async {
         for share in selectedShares {
-            await monitor.pause(
-                share,
-                until: nil,
-                disconnect: monitor.status(for: share) == .connected
-            )
+            if share.connectsAutomatically {
+                await monitor.pause(
+                    share,
+                    until: nil,
+                    disconnect: monitor.status(for: share) == .connected
+                )
+            } else if monitor.status(for: share) == .connected {
+                await monitor.disconnect(share, pauseAutomaticMounting: false)
+            }
         }
     }
 
@@ -662,6 +686,9 @@ private struct GeneralPreferencesView: View {
                 }
                 SettingsSecondaryText(settings.preferences.appPresenceMode.detail)
 
+                Toggle("Always show server name", isOn: alwaysShowServerNameBinding)
+                SettingsSecondaryText("In the menu bar, show a server menu even when it contains only one configured share.")
+
                 Toggle("Start at login", isOn: Binding(
                     get: { loginItemService.isEnabled },
                     set: { loginItemService.setEnabled($0) }
@@ -724,6 +751,16 @@ private struct GeneralPreferencesView: View {
         } set: { newValue in
             settings.updatePreferences { preferences in
                 preferences.detectNewShares = newValue
+            }
+        }
+    }
+
+    private var alwaysShowServerNameBinding: Binding<Bool> {
+        Binding {
+            settings.preferences.alwaysShowServerName
+        } set: { newValue in
+            settings.updatePreferences { preferences in
+                preferences.alwaysShowServerName = newValue
             }
         }
     }
