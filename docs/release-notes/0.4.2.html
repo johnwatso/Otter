@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Improve share controls and direct connectivity fallback - Release Notes</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      margin: 0;
+      padding: 32px 20px 48px;
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f4f6f8;
+      color: #0f1720;
+    }
+    main {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 28px;
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.86);
+      box-shadow: 0 20px 60px rgba(15, 23, 32, 0.10);
+    }
+    h1 { margin: 0 0 6px; font-size: 30px; line-height: 1.15; }
+    .meta { margin: 0 0 24px; color: #52606d; font-size: 14px; }
+    p { margin: 0 0 16px; }
+    a { color: #0a67a3; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #0b1015; color: #edf2f7; }
+      main {
+        background: rgba(15, 23, 32, 0.88);
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+      }
+      .meta { color: #9fb0c2; }
+      a { color: #73c3ff; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Improve share controls and direct connectivity fallback</h1>
+    <p class="meta">Version 0.4.2</p>
+    <p>Improve share controls and direct connectivity fallback</p>
+<p>Release notes:<br>- Prefer a directly reachable local server before starting or waiting for a configured VPN in Manual, Adaptive, and Connect Once modes.<br>- Preserve explicit registered-network restrictions while treating VPN-only configuration as a fallback connection path.<br>- Make Manual share disconnect actions avoid creating automatic-mount pauses, and hide pause controls when no automatic shares are present.<br>- Update menu bar and Preferences labels so disconnect behavior clearly distinguishes Manual shares from automatically maintained shares.<br>- Add an Always Show Server Name preference and singular/plural share-count labels for menu organization.<br>- Bump Otter to version 0.4.2 (build 2026083109).<br>- Add regression coverage for local-first VPN routing, Manual disconnect behavior, pause state, server grouping, and preference persistence.</p>
+<p>Validation:<br>- xcodebuild test -project Otter.xcodeproj -scheme Otter -destination 'platform=macOS'<br>- 172 tests passed with 0 failures.</p>
+    <p><strong>Commit:</strong> <a href="https://github.com/johnwatso/Otter/commit/19d0d68322f955cbe48b2afc208c34e1e5bb04bc">19d0d68</a></p>
+  </main>
+</body>
+</html>
