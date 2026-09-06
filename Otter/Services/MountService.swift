@@ -44,6 +44,8 @@ actor MountService {
     // NetFSMountURLSync blocks until the mount finishes (or the user dismisses a
     // credentials dialog), so it runs on a dedicated queue instead of tying up a
     // Swift-concurrency cooperative thread.
+    // Session-only aliases let diagnostics remount by IP without saving a new server.
+    private var diagnosticMountAliases: [NetworkShare.ID: URL] = [:]
     private let mountQueue = DispatchQueue(label: "Otter.MountService")
     private let credentialStore: any CredentialStoring
 
@@ -96,6 +98,10 @@ actor MountService {
                 let mountPaths = mountPoints?.takeRetainedValue() as? [String] ?? []
                 continuation.resume(returning: (status, mountPaths))
             }
+        }
+
+        if result.status == noErr || result.status == EEXIST, let urlOverride {
+            diagnosticMountAliases[share.id] = urlOverride
         }
 
         if result.status == EEXIST {
@@ -155,6 +161,9 @@ actor MountService {
 
     private func expectedShareLocations(for share: NetworkShare) -> [NetworkShareLocation] {
         var locations: [NetworkShareLocation] = []
+        if let alias = diagnosticMountAliases[share.id], let location = NetworkShareLocation(url: alias) {
+            locations.append(location)
+        }
 
         if let location = NetworkShareLocation(url: share.url) {
             locations.append(location)

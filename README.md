@@ -37,6 +37,7 @@ Otters are small, quick, and famously good at not letting important things drift
 - 👀 Notices shares mounted outside Otter and offers to manage them, with an offer that waits in the menu bar until you answer it
 - 🩺 Verifies mounted volumes with responsive, writable, and expected-file checks; tracks reliability trends and guides credential recovery
 - 🔗 Includes richer Shortcuts actions for mounting, pausing, status, reliability, and credential recovery
+- 🩺 Per-share NAS diagnostics explain routing, SMB channels, latency, and optional share performance ([diagnostics guide](docs/nas-diagnostics.md))
 - 🏢 Supports versioned configuration transfer, protected backups, and managed deployment through MDM ([configuration reference](docs/managed-deployment.md))
 - 🍎 Runs as a lightweight native menu bar app with launch-at-login and automatic updates
 - ⌨️ Includes `otterctl` for local shell automation: status, mount, disconnect, pause, resume, and redacted diagnostic export

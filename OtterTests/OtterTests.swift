@@ -4264,3 +4264,483 @@ private actor UnmountRecorder {
         return true
     }
 }
+
+final class NASDiagnosticsTests: XCTestCase {
+    func testSMBActiveStateIsNotInferredFromCapabilities() {
+        let smb = SMBInspector.parseAttributes(["SMB_VERSION": "SMB_3.1.1", "SIGNING_SUPPORTED": true, "ENCRYPTION_REQUIRED": true])
+        XCTAssertEqual(smb.dialect, "SMB 3.1.1")
+        XCTAssertNil(smb.signing)
+        XCTAssertNil(smb.encryption)
+        XCTAssertNil(smb.multichannel)
+        let disabled = SMBInspector.parseAttributes(["SIGNING_ON": false, "SMB_CURR_ENCRYPT_ALGORITHM": NSNull()])
+        XCTAssertEqual(disabled.signing, false)
+        XCTAssertEqual(disabled.encryption, false)
+    }
+
+    func testSMBTextFallbackAndUnknownValues() {
+        let result = SMBInspector.parseText("  SMB_VERSION SMB_3.0.2\n SIGNING_ON TRUE\n SMB_CURR_ENCRYPT_ALGORITHM AES-128-GCM\n")
+        XCTAssertEqual(result.dialect, "SMB 3.0.2")
+        XCTAssertEqual(result.signing, true)
+        XCTAssertEqual(result.encryption, true)
+        XCTAssertNil(SMBInspector.parseText("permission denied").signing)
+        XCTAssertNil(SMBInspector.parseText("SIGNING_ON unsupported").signing)
+    }
+
+    func testMultichannelUsesOnlyRequestedMountAndActiveChannels() throws {
+        let fixture = #"{"/Volumes/Photos":{"session_info":{"mc_on":"yes"},"multi_channel_status":{"0":{"client_interface":"en5","server_inet":"192.168.1.20","state":"session active","link_speed":"2500000000"},"1":{"client_interface":"en0","server_inet":"192.168.1.20","state":"session inactive"}}},"/Volumes/Other":{"session_info":{"mc_on":"no"}}}"#
+        let smb = try XCTUnwrap(SMBMultichannelInspector.parseJSON(fixture, mountPath: "/Volumes/Photos", into: SMBDiagnostic()))
+        XCTAssertEqual(smb.multichannel, true)
+        XCTAssertEqual(smb.channels?.count, 2)
+        XCTAssertEqual(smb.channels?.filter(\.isActive).count, 1)
+        XCTAssertEqual(smb.channels?.first(where: \.isActive)?.linkMbps, 2500)
+        XCTAssertNil(SMBMultichannelInspector.parseJSON(fixture, mountPath: "/Volumes/Missing", into: SMBDiagnostic()))
+    }
+
+    func testMalformedChannelDoesNotBecomeZeroActiveChannels() throws {
+        let smb = try XCTUnwrap(SMBMultichannelInspector.parseJSON(#"{"/Volumes/Photos":{"multi_channel_status":{"0":{"new_state_field":"active"}}}}"#, mountPath: "/Volumes/Photos", into: SMBDiagnostic()))
+        XCTAssertNil(smb.channels)
+        XCTAssertEqual(smb.multichannelText, "Unavailable")
+    }
+
+    func testMultichannelTextFallback() {
+        let smb = SMBMultichannelInspector.parseText("""
+        Session: /Volumes/Photos
+        Info: Multichannel ON: yes, Reconnect Count: 0
+        M 0 en11 (Ethernet) 18 (RSS) [session active       ] 192.168.0.100 445 2.5 Gb
+          1 en0 (Wi-Fi) 19 [session inactive] 192.168.0.100 445 1.0 Gb
+        """, into: SMBDiagnostic())
+        XCTAssertEqual(smb.multichannel, true)
+        XCTAssertEqual(smb.channels?.count, 2)
+        XCTAssertFalse(smb.wifiParticipating)
+        XCTAssertEqual(smb.channels?.first?.linkMbps, 2500)
+    }
+
+    func testNegotiatedMediaRequiresActiveStatus() {
+        XCTAssertEqual(NetworkInterfaceInspector.linkSpeed("media: autoselect (2500base-T <full-duplex>)\nstatus: active"), 2500)
+        XCTAssertEqual(NetworkInterfaceInspector.linkSpeed("media: autoselect (10Gbase-T <full-duplex>)\nstatus: active"), 10000)
+        XCTAssertNil(NetworkInterfaceInspector.linkSpeed("media: autoselect (1000baseT)\nstatus: inactive"))
+        XCTAssertNil(NetworkInterfaceInspector.linkSpeed("media: autoselect\nstatus: active"))
+    }
+
+    func testLatencyIncludesLossAndMissingReplies() {
+        let result = LatencyTester.parse("4 packets transmitted, 3 packets received, 25.0% packet loss\nround-trip min/avg/max/stddev = 0.5/0.8/1.2/0.1 ms")
+        XCTAssertEqual(result.minimum, 0.5)
+        XCTAssertEqual(result.average, 0.8)
+        XCTAssertEqual(result.maximum, 1.2)
+        XCTAssertEqual(result.loss, 25)
+        let blocked = LatencyTester.parse("4 packets transmitted, 0 packets received, 100.0% packet loss")
+        XCTAssertNil(blocked.average)
+        XCTAssertEqual(blocked.loss, 100)
+    }
+
+    func testReadCeilingFindingRequiresSMBAndFasterWrite() {
+        var result = NASDiagnosticResult(mount: MountDiagnostic(protocolName: "SMB", server: "nas.local", shareName: "Photos", mountPath: "/Volumes/Photos"))
+        result.network.linkMbps = 2500
+        result.performance = PerformanceDiagnostic(writeMBps: 220, readMBps: 109, bytes: 1_000_000_000, cacheBypass: true)
+        XCTAssertTrue(result.findings.contains { $0.contains("SMB read performance") })
+        result.performance?.writeMBps = 100
+        XCTAssertFalse(result.findings.contains { $0.contains("SMB read performance") })
+        result.performance?.writeMBps = 220
+        result.mount.protocolName = "NFS"
+        XCTAssertFalse(result.findings.contains { $0.contains("SMB read performance") })
+        result.network.linkMbps = 1000
+        XCTAssertTrue(result.findings.contains { $0.contains("currently operating at 1 Gb/s") })
+    }
+
+    func testTemporaryIPURLStripsCredentialsAndPreservesConfiguration() throws {
+        let share = NetworkShare(displayName: "Photos", urlString: "smb://alice:secret@nas.local/Family%20Photos?token=private#secret", mountPath: "/Volumes/Photos")
+        let url = try XCTUnwrap(NASDiagnosticsService.temporaryIPURL(share: share, address: "192.168.1.20"))
+        XCTAssertEqual(url.absoluteString, "smb://192.168.1.20/Family%20Photos")
+        XCTAssertTrue(share.urlString.contains("nas.local"))
+        XCTAssertNil(NASDiagnosticsService.temporaryIPURL(share: share, address: "--help"))
+        let ipv6 = try XCTUnwrap(NASDiagnosticsService.temporaryIPURL(share: share, address: "fd00::20"))
+        XCTAssertEqual(ipv6.absoluteString, "smb://[fd00::20]/Family%20Photos")
+    }
+
+    func testReportContainsSelectedFieldsAndNoRawURL() {
+        var result = NASDiagnosticResult(mount: MountDiagnostic(protocolName: "SMB", server: "nas.local", shareName: "Photos", mountPath: "/Volumes/Photos"))
+        result.smb = SMBInspector.parseAttributes(["SMB_VERSION": "SMB_3.1.1", "USER_ID": "private-user", "password": "secret", "access_token": "private-token"])
+        let report = DiagnosticReportBuilder.build(result)
+        XCTAssertTrue(report.contains("Address: nas.local"))
+        XCTAssertTrue(report.contains("Encryption: Unavailable"))
+        XCTAssertTrue(report.contains("Not tested"))
+        for secret in ["private-user", "secret", "private-token", "smb://"] { XCTAssertFalse(report.contains(secret)) }
+    }
+
+    func testPerformanceRefusesLocalVolumeBeforeCreatingAnything() async {
+        let mount = MountDiagnostic(protocolName: "SMB", server: "nas.local", shareName: "Photos", mountPath: NSTemporaryDirectory())
+        do {
+            _ = try await SharePerformanceTester().test(mount: mount, gigabytes: 1) { _, _ in }
+            XCTFail("Must refuse a local directory")
+        } catch {
+            XCTAssertTrue(error is SharePerformanceTester.Failure)
+        }
+    }
+
+    func testCommandDeadlineAndCancellation() async {
+        let start = Date()
+        let result = await DiagnosticCommandRunner().run("/bin/sleep", ["30"], timeout: 0.1)
+        XCTAssertNil(result)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 10)
+        let task = Task { await DiagnosticCommandRunner().run("/bin/sleep", ["10"]) }
+        task.cancel()
+        let cancelled = await task.value
+        XCTAssertNil(cancelled)
+    }
+}
+
+extension NASDiagnosticsTests {
+    @MainActor
+    func testDiagnosticRemountPassesIPOverrideWithoutChangingSavedServer() async throws {
+        let suite = "OtterTests.NASDiagnostics.Remount." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(displayName: "Photos", urlString: "smb://nas.local/Photos", mountPath: "/Volumes/Photos")
+        settings.addShare(share)
+        let mount = StubMountService(mountResult: URL(fileURLWithPath: share.mountPath))
+        let monitor = ShareMonitor(settings: settings, mountService: mount,
+                                   wakeOnLANService: StubWakeOnLANService(),
+                                   networkService: StubNetworkReachability(isOnline: true, isReachable: true),
+                                   notificationService: RecordingNotificationService(),
+                                   eventLog: ShareEventLog(defaults: defaults), defaults: defaults)
+        let override = try XCTUnwrap(NASDiagnosticsService.temporaryIPURL(share: share, address: "192.168.1.20"))
+        let completed = await monitor.remountForMaintenance(share, diagnosticURL: override)
+        XCTAssertTrue(completed)
+        let overrides = await mount.mountURLOverrides
+        XCTAssertEqual(overrides, [override])
+        XCTAssertEqual(settings.share(id: share.id)?.urlString, share.urlString)
+        XCTAssertEqual(monitor.status(for: share), .connected)
+    }
+}
+
+extension NASDiagnosticsTests {
+    func testPerformanceIOPreservesExistingFilesAndCleansOwnDirectory() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("OtterBenchmarkTests-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let userFile = directory.appendingPathComponent("user-file.txt")
+        try Data("keep me".utf8).write(to: userFile)
+        let olderTest = directory.appendingPathComponent(".otter-diagnostics-existing")
+        try FileManager.default.createDirectory(at: olderTest, withIntermediateDirectories: false)
+        let root = open(directory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+        XCTAssertGreaterThanOrEqual(root, 0)
+        defer { close(root) }
+        let result = try await SharePerformanceTester.measure(in: root, path: directory.path, bytes: 8_000_000) { _, _ in }
+        XCTAssertEqual(result.bytes, 8_000_000)
+        XCTAssertGreaterThan(result.writeMBps, 0)
+        XCTAssertGreaterThan(result.readMBps, 0)
+        XCTAssertEqual(try String(contentsOf: userFile, encoding: .utf8), "keep me")
+        XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: directory.path)), ["user-file.txt", ".otter-diagnostics-existing"])
+    }
+
+    func testPerformanceCancellationCleansTemporaryFile() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("OtterCancelTests-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let root = open(directory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+        XCTAssertGreaterThanOrEqual(root, 0)
+        defer { close(root) }
+        let (events, continuation) = AsyncStream<Void>.makeStream()
+        let worker = Task.detached {
+            try await SharePerformanceTester.measure(in: root, path: directory.path, bytes: 128_000_000) { value, _ in
+                if value > 0 { continuation.yield(()) }
+            }
+        }
+        for await _ in events { break }
+        worker.cancel()
+        continuation.finish()
+        do {
+            _ = try await worker.value
+            XCTFail("Expected cancellation")
+        } catch is CancellationError { }
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+    }
+}
+
+private struct SlowDiagnosticResolver: HostResolving {
+    func resolveIPAddresses(for hostname: String) async -> [String] {
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        return ["192.168.1.20"]
+    }
+}
+
+extension NASDiagnosticsTests {
+    func testResolutionDeadlineAndCancellationReleaseCaller() async {
+        let start = Date()
+        let addresses = await NASDiagnosticsService.resolve("nas.local", using: SlowDiagnosticResolver(), timeout: 0.05)
+        XCTAssertTrue(addresses.isEmpty)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 1)
+        let task = Task { await NASDiagnosticsService.resolve("nas.local", using: SlowDiagnosticResolver()) }
+        task.cancel()
+        let cancelled = await task.value
+        XCTAssertTrue(cancelled.isEmpty)
+    }
+}
+
+private func healthyNASResult(performance: Bool = true) -> NASDiagnosticResult {
+    var r = NASDiagnosticResult(mount: .init(protocolName: "SMB", server: "nas.local", shareName: "Vault", mountPath: "/Volumes/Vault", resolvedIP: "10.11.1.241", connectedUsing: "Hostname"))
+    r.isComplete = true
+    r.network = .init(interface: "en0", type: "Ethernet", localIP: "10.11.1.40", linkMbps: 1000, target: "10.11.1.241", targetIsSessionAddress: true)
+    r.network.interfaceTypes = ["en0": "Ethernet", "en1": "Wi-Fi"]
+    r.network.mtu = 1500
+    r.network.duplex = "Full"
+    r.network.wifi = .init(connected: true, usedForSMB: false)
+    r.smb = .init(dialect: "SMB 3.1.1", signing: false, encryption: false, multichannel: true,
+                  channels: [.init(interface: "en0", serverIP: "10.11.1.241", state: "session active", linkMbps: 1000)])
+    r.latency = .init(minimum: 0.4, average: 0.5, maximum: 0.6, loss: 0)
+    if performance { r.performance = .init(writeMBps: 82, readMBps: 111.6, bytes: 5_000_000_000, cacheBypass: true, duration: 62) }
+    return r
+}
+
+extension NASDiagnosticsTests {
+    func testHealthyGigabitExampleUsesPracticalEfficiency() throws {
+        let r = healthyNASResult()
+        XCTAssertEqual(r.health.state, .good)
+        XCTAssertEqual(r.expectedMaxMBps, 118)
+        XCTAssertEqual(diagnosticPercent(r.performance?.read.utilisation(expected: r.expectedMaxMBps)), "95%")
+        XCTAssertEqual(diagnosticPercent(r.performance?.write.utilisation(expected: r.expectedMaxMBps)), "69%")
+        XCTAssertTrue(r.detailedFindings.contains { $0.id == "read-good" && $0.severity == .good })
+        XCTAssertTrue(r.detailedFindings.contains { $0.id == "write-plausible" && $0.severity == .info })
+        XCTAssertTrue(r.detailedFindings.contains { $0.id == "latency-good" && $0.severity == .good })
+        XCTAssertTrue(r.detailedFindings.contains { $0.id == "expected-ethernet" })
+        XCTAssertFalse(r.detailedFindings.contains { $0.severity == .warning })
+    }
+
+    func testPracticalMaximaAndIncompleteHealth() {
+        var r = healthyNASResult()
+        for (speed, expected) in [(1000.0, 118.0), (2500, 295), (5000, 590), (10000, 1180)] {
+            r.smb?.channels?[0].linkMbps = speed
+            XCTAssertEqual(r.expectedMaxMBps, expected)
+        }
+        r.performance = nil
+        XCTAssertEqual(r.health.state, .incomplete)
+        r.smb?.channels = nil
+        XCTAssertNil(r.expectedMaxMBps)
+        XCTAssertEqual(r.health.state, .incomplete)
+        r = healthyNASResult()
+        r.isComplete = false
+        XCTAssertEqual(r.health.state, .incomplete)
+        r = healthyNASResult()
+        r.latency?.loss = 25
+        XCTAssertEqual(r.health.state, .needsAttention)
+    }
+
+    func testMultichannelBandwidthExcludesStandbyAndCapsSharedNIC() {
+        var smb = healthyNASResult().smb!
+        let active = smb.channels![0]
+        smb.channels?.append(active)
+        smb.channels?.append(.init(interface: "en9", serverIP: "10.11.1.241", state: "session inactive", linkMbps: 10000))
+        XCTAssertEqual(smb.activeChannelCount, 2)
+        XCTAssertEqual(smb.effectiveBandwidthMbps, 1000)
+        XCTAssertEqual(smb.multichannelText, "Yes")
+        smb.clientLinkMbps = ["en0": 2500]
+        XCTAssertEqual(smb.effectiveBandwidthMbps, 2000)
+        smb.channels?[1].interface = "en5"
+        smb.clientLinkMbps = ["en0": 1000, "en5": 1000]
+        XCTAssertEqual(smb.effectiveBandwidthMbps, 2000)
+        smb.channels?[1].linkMbps = nil
+        XCTAssertNil(smb.effectiveBandwidthMbps)
+        smb.channels = []
+        XCTAssertEqual(smb.activeChannelCount, 0)
+        XCTAssertNil(smb.effectiveBandwidthMbps)
+    }
+
+    func testWiFiPresenceIsNotAWarnedCondition() {
+        var r = healthyNASResult()
+        NASDiagnosticsService.applyWiFiContext(to: &r)
+        XCTAssertEqual(r.network.wifi.text, "Connected · Not used for SMB")
+        XCTAssertFalse(r.detailedFindings.contains { $0.id.hasPrefix("wifi") })
+        r.smb?.channels?[0].interface = "en1"
+        r.smb?.channels?[0].linkMbps = 500
+        r.network.availableEthernetMbps = 2500
+        NASDiagnosticsService.applyWiFiContext(to: &r)
+        XCTAssertEqual(r.network.wifi.usedForSMB, true)
+        XCTAssertEqual(r.network.wifi.text, "Connected · Participating in SMB Multichannel")
+        XCTAssertTrue(r.detailedFindings.contains { $0.id == "wifi-faster-ethernet" && $0.severity == .warning })
+        r.network.fasterEthernetAvailable = false
+        XCTAssertFalse(r.detailedFindings.contains { $0.id == "wifi-faster-ethernet" })
+        r.network.wifi.connected = false
+        XCTAssertEqual(r.network.wifi.text, "Disconnected")
+    }
+
+    func testInterfaceLowerPriorityFieldsAreDefensive() {
+        let text = "en5: flags=8863 mtu 1500\nmedia: autoselect (2500base-T <full-duplex>)\nstatus: active"
+        XCTAssertEqual(NetworkInterfaceInspector.mtu(text), 1500)
+        XCTAssertEqual(NetworkInterfaceInspector.duplex(text), "Full")
+        XCTAssertEqual(NetworkInterfaceInspector.activeState(text), true)
+        XCTAssertNil(NetworkInterfaceInspector.mtu("mtu unknown"))
+        XCTAssertNil(NetworkInterfaceInspector.duplex("status: active"))
+        XCTAssertNil(NetworkInterfaceInspector.activeState("permission denied"))
+    }
+
+    func testSessionAgeAndWakeAreInformational() throws {
+        let utc = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-09-07T04:00:00Z"))
+        let start = try XCTUnwrap(SMBMultichannelInspector.sessionDate("2026-09-07 00:43:00", now: now, timeZone: utc))
+        var r = healthyNASResult()
+        r.generatedAt = now
+        r.smb?.sessionStartedAt = start
+        r.lastWakeAt = now.addingTimeInterval(-3600)
+        XCTAssertEqual(diagnosticDuration(r.sessionAge), "3h 17m")
+        XCTAssertEqual(r.sessionPredatesWake, true)
+        XCTAssertEqual(r.health.state, .good)
+        XCTAssertNil(SMBMultichannelInspector.sessionDate("2026-99-99 00:00:00", now: now, timeZone: utc))
+        XCTAssertNil(SMBMultichannelInspector.sessionDate("2026-09-08 00:00:00", now: now, timeZone: utc))
+        r.lastWakeAt = nil
+        XCTAssertNil(r.sessionPredatesWake)
+    }
+
+    func testThroughputSamplingAndSignificantDrops() {
+        var sampler = ThroughputSampler()
+        for _ in 0..<10 { sampler.record(bytes: 10_000_000, duration: 0.1) }
+        sampler.flush()
+        XCTAssertEqual(sampler.samples.count, 2)
+        let stable = ThroughputDiagnostic(averageMBps: 100, samples: (0..<8).map { .init(bytes: Int64(95 + $0) * 1_000_000, duration: 1) })
+        XCTAssertFalse(stable.isInconsistent)
+        let unstable = ThroughputDiagnostic(averageMBps: 70, samples: [100, 105, 10, 102, 8, 100, 101, 99].map { .init(bytes: Int64($0) * 1_000_000, duration: 1) })
+        XCTAssertTrue(unstable.isInconsistent)
+        XCTAssertEqual(unstable.significantDrops, 2)
+        XCTAssertEqual(unstable.minimumMBps, 8)
+        XCTAssertEqual(unstable.maximumMBps, 105)
+        var r = healthyNASResult()
+        r.performance?.writeSamples = unstable.samples
+        XCTAssertTrue(r.detailedFindings.contains { $0.id == "write-inconsistent" && $0.severity == .warning })
+        XCTAssertFalse(ThroughputDiagnostic(averageMBps: 100, samples: []).isInconsistent)
+    }
+
+    func testComparisonInterpretationRequiresMatchedTests() {
+        let before = healthyNASResult()
+        var after = before
+        after.performance?.writeMBps = 108
+        var comparison = DiagnosticComparison(kind: .reconnect, before: before, after: after)
+        XCTAssertTrue(comparison.interpretations[0].contains("improved by 32%"))
+        comparison.after.performance?.writeMBps = 84
+        XCTAssertTrue(comparison.interpretations[0].contains("No meaningful performance change"))
+        comparison.after.performance?.bytes = 1_000_000_000
+        XCTAssertFalse(comparison.performanceComparable)
+        XCTAssertTrue(comparison.interpretations[0].contains("No matched performance tests"))
+        comparison.after.performance = nil
+        XCTAssertFalse(comparison.interpretations[0].contains("No meaningful"))
+    }
+
+    func testEnhancedReportIncludesReadableSupportFields() {
+        let report = DiagnosticReportBuilder.build(healthyNASResult())
+        for value in ["Connection Health\nGood", "Expected Maximum: ~118 MB/s", "Test Size: 5.0 GB", "Duration: 1m 02s", "Multichannel Enabled: Yes", "Effective SMB Bandwidth: 1 Gb/s", "MTU: 1500", "Duplex: Full", "Utilisation: 95%", "Wi-Fi: Connected · Not used for SMB", "[good]"] { XCTAssertTrue(report.contains(value), value) }
+        XCTAssertFalse(report.contains("5000000000"))
+        XCTAssertFalse(report.contains("Multichannel: Active"))
+    }
+
+    @MainActor
+    func testIPComparisonRepeatsSameSizeAndRestoresHostname() async {
+        let before = healthyNASResult()
+        var calls: [URL?] = []
+        var collectCount = 0
+        var sizes: [Int] = []
+        let ip = URL(string: "smb://10.11.1.241/Vault")!
+        let outcome = await DiagnosticComparisonService.run(before: before, kind: .ipAddress, targetURL: ip,
+            reconnect: { calls.append($0); return true }, collect: {
+                collectCount += 1
+                var r = healthyNASResult(performance: false)
+                if collectCount == 1 { r.mount.server = "10.11.1.241"; r.mount.connectedUsing = "IP address" }
+                return r
+            }, benchmark: { _, size in sizes.append(size); return before.performance! }, status: { _ in })
+        XCTAssertEqual(calls.count, 2)
+        XCTAssertEqual(calls.first!, ip)
+        XCTAssertNil(calls.last!)
+        XCTAssertEqual(sizes, [5])
+        XCTAssertEqual(outcome.comparison?.originalConnectionRestored, true)
+        XCTAssertEqual(outcome.current?.mount.connectedUsing, "Hostname")
+        XCTAssertNil(outcome.error)
+    }
+
+    @MainActor
+    func testIPComparisonRestoresAfterBenchmarkFailure() async {
+        var calls = 0
+        let outcome = await DiagnosticComparisonService.run(before: healthyNASResult(), kind: .ipAddress, targetURL: URL(string: "smb://10.11.1.241/Vault")!,
+            reconnect: { _ in calls += 1; return true }, collect: {
+                var r = healthyNASResult(performance: false)
+                if calls == 1 { r.mount.server = "10.11.1.241"; r.mount.connectedUsing = "IP address" }
+                return r
+            }, benchmark: { _, _ in throw SharePerformanceTester.Failure.io }, status: { _ in })
+        XCTAssertEqual(calls, 2)
+        XCTAssertFalse(outcome.restorationRequired)
+        XCTAssertNotNil(outcome.error)
+        XCTAssertNil(outcome.comparison)
+    }
+
+    @MainActor
+    func testIPComparisonCancellationCannotCancelRestoration() async {
+        var calls = 0
+        let (events, continuation) = AsyncStream<Void>.makeStream()
+        let worker = Task { @MainActor in
+            await DiagnosticComparisonService.run(before: healthyNASResult(), kind: .ipAddress, targetURL: URL(string: "smb://10.11.1.241/Vault")!,
+                reconnect: { _ in
+                    calls += 1
+                    if calls == 1 { continuation.yield(()); try? await Task.sleep(nanoseconds: 2_000_000_000) }
+                    else { XCTAssertFalse(Task.isCancelled) }
+                    return true
+                }, collect: { healthyNASResult(performance: false) }, benchmark: { _, _ in XCTFail("Must not benchmark after cancellation"); throw CancellationError() }, status: { _ in })
+        }
+        for await _ in events { break }
+        worker.cancel()
+        continuation.finish()
+        let outcome = await worker.value
+        XCTAssertEqual(calls, 2)
+        XCTAssertFalse(outcome.restorationRequired)
+        XCTAssertEqual(outcome.error, "Comparison cancelled.")
+    }
+
+    @MainActor
+    func testRestoreFailureKeepsComparisonAndRecoveryAction() async {
+        var calls = 0
+        let outcome = await DiagnosticComparisonService.run(before: healthyNASResult(performance: false), kind: .ipAddress, targetURL: URL(string: "smb://10.11.1.241/Vault")!,
+            reconnect: { _ in calls += 1; return calls == 1 }, collect: {
+                var r = healthyNASResult(performance: false)
+                r.mount.server = "10.11.1.241"; r.mount.connectedUsing = "IP address"
+                return r
+            }, benchmark: { _, _ in XCTFail("No baseline benchmark"); throw CancellationError() }, status: { _ in })
+        XCTAssertTrue(outcome.restorationRequired)
+        XCTAssertEqual(outcome.comparison?.originalConnectionRestored, false)
+        XCTAssertNotNil(outcome.error)
+    }
+
+    @MainActor
+    func testFailedReconnectDoesNotBenchmarkOrAttemptAnotherRemount() async {
+        var calls = 0
+        let outcome = await DiagnosticComparisonService.run(before: healthyNASResult(), kind: .ipAddress, targetURL: URL(string: "smb://10.11.1.241/Vault")!,
+            reconnect: { _ in calls += 1; return false }, collect: { XCTFail(); return healthyNASResult() }, benchmark: { _, _ in XCTFail(); throw CancellationError() }, status: { _ in })
+        XCTAssertEqual(calls, 1)
+        XCTAssertNil(outcome.comparison)
+        XCTAssertFalse(outcome.restorationRequired)
+    }
+}
+
+import SwiftUI
+
+extension NASDiagnosticsTests {
+    @MainActor
+    func testDiagnosticsPanelRendersAtSupportedHeights() async throws {
+        let appModel = AppModel(isRunningTests: true)
+        let model = NASDiagnosticsViewModel()
+        model.result = healthyNASResult()
+        model.status = "Diagnostics complete"
+        let share = NetworkShare(displayName: "RoonieNAS-Pro", urlString: "smb://nas.local/Vault", mountPath: "/Volumes/Vault")
+        for height in [680, 480] {
+            let root = NASDiagnosticsView(share: share, model: model)
+                .environmentObject(appModel).environmentObject(appModel.monitor)
+            let host = NSHostingView(rootView: root)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: height), styleMask: .borderless, backing: .buffered, defer: false)
+            window.contentView = host
+            host.frame = NSRect(x: 0, y: 0, width: 620, height: height)
+            host.layoutSubtreeIfNeeded()
+            try await Task.sleep(nanoseconds: 200_000_000)
+            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+            XCTAssertGreaterThan(png.count, 1000)
+            try png.write(to: URL(fileURLWithPath: "/tmp/otter-diagnostics-preview-\(height).png"))
+            window.contentView = nil
+        }
+    }
+}

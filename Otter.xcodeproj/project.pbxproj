@@ -52,6 +52,18 @@
 		1A2B3C4D5E6F70010000002F /* otterctl in Copy Files */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000021 /* otterctl */; };
 		1A2B3C4D5E6F700100000202 /* OtterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000203 /* OtterTests.swift */; };
 		1A2B3C4D5E6F700100000302 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F700100000301 /* Sparkle */; };
+		D1A600000000000000000000 /* DiagnosticAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A600000000000000010000; };
+		D1A600000000000000000001 /* DiagnosticCommandRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A600000000000000010001; };
+		D1A600000000000000000002 /* DiagnosticModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A600000000000000010002; };
+		D1A600000000000000000003 /* DiagnosticReportBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A600000000000000010003; };
+		D1A600000000000000000004 /* LatencyTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A600000000000000010004; };
+		D1A600000000000000000005 /* NASDiagnosticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A600000000000000010005; };
+		D1A600000000000000000006 /* NetworkInterfaceInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A600000000000000010006; };
+		D1A600000000000000000007 /* SMBInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A600000000000000010007; };
+		D1A600000000000000000008 /* SMBMultichannelInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A600000000000000010008; };
+		D1A600000000000000000009 /* SharePerformanceTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A600000000000000010009; };
+		D1A60000000000000000000A /* NASDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A60000000000000001000A; };
+		D1A600000000000000000020 /* DiagnosticComparisonService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A600000000000000010020; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -119,6 +131,18 @@
 		1A2B3C4D5E6F700100000130 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000201 /* OtterTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OtterTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A2B3C4D5E6F700100000203 /* OtterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtterTests.swift; sourceTree = "<group>"; };
+		D1A600000000000000010000 /* DiagnosticAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Diagnostics/DiagnosticAnalyzer.swift"; sourceTree = "<group>"; };
+		D1A600000000000000010001 /* DiagnosticCommandRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Diagnostics/DiagnosticCommandRunner.swift"; sourceTree = "<group>"; };
+		D1A600000000000000010002 /* DiagnosticModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Diagnostics/DiagnosticModels.swift"; sourceTree = "<group>"; };
+		D1A600000000000000010003 /* DiagnosticReportBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Diagnostics/DiagnosticReportBuilder.swift"; sourceTree = "<group>"; };
+		D1A600000000000000010004 /* LatencyTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Diagnostics/LatencyTester.swift"; sourceTree = "<group>"; };
+		D1A600000000000000010005 /* NASDiagnosticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Diagnostics/NASDiagnosticsService.swift"; sourceTree = "<group>"; };
+		D1A600000000000000010006 /* NetworkInterfaceInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Diagnostics/NetworkInterfaceInspector.swift"; sourceTree = "<group>"; };
+		D1A600000000000000010007 /* SMBInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Diagnostics/SMBInspector.swift"; sourceTree = "<group>"; };
+		D1A600000000000000010008 /* SMBMultichannelInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Diagnostics/SMBMultichannelInspector.swift"; sourceTree = "<group>"; };
+		D1A600000000000000010009 /* SharePerformanceTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Diagnostics/SharePerformanceTester.swift"; sourceTree = "<group>"; };
+		D1A60000000000000001000A /* NASDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NASDiagnosticsView.swift"; sourceTree = "<group>"; };
+		D1A600000000000000010020 /* DiagnosticComparisonService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Diagnostics/DiagnosticComparisonService.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -196,6 +220,17 @@
 		1A2B3C4D5E6F700100000044 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				D1A600000000000000010020 /* DiagnosticComparisonService.swift */,
+				D1A600000000000000010009 /* SharePerformanceTester.swift */,
+				D1A600000000000000010008 /* SMBMultichannelInspector.swift */,
+				D1A600000000000000010007 /* SMBInspector.swift */,
+				D1A600000000000000010006 /* NetworkInterfaceInspector.swift */,
+				D1A600000000000000010005 /* NASDiagnosticsService.swift */,
+				D1A600000000000000010004 /* LatencyTester.swift */,
+				D1A600000000000000010003 /* DiagnosticReportBuilder.swift */,
+				D1A600000000000000010002 /* DiagnosticModels.swift */,
+				D1A600000000000000010001 /* DiagnosticCommandRunner.swift */,
+				D1A600000000000000010000 /* DiagnosticAnalyzer.swift */,
 				1A2B3C4D5E6F700100000106 /* SettingsStore.swift */,
 				1A2B3C4D5E6F700100000117 /* CredentialStore.swift */,
 				1A2B3C4D5E6F700100000116 /* HostResolver.swift */,
@@ -233,6 +268,7 @@
 		1A2B3C4D5E6F700100000045 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				D1A60000000000000001000A /* NASDiagnosticsView.swift */,
 				1A2B3C4D5E6F700100000113 /* ActionButtonStyles.swift */,
 				1A2B3C4D5E6F700100000119 /* ActivityLogView.swift */,
 				1A2B3C4D5E6F70010000010B /* MenuBarView.swift */,
@@ -380,6 +416,18 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D1A600000000000000000020 /* DiagnosticComparisonService.swift in Sources */,
+				D1A60000000000000000000A /* NASDiagnosticsView.swift in Sources */,
+				D1A600000000000000000009 /* SharePerformanceTester.swift in Sources */,
+				D1A600000000000000000008 /* SMBMultichannelInspector.swift in Sources */,
+				D1A600000000000000000007 /* SMBInspector.swift in Sources */,
+				D1A600000000000000000006 /* NetworkInterfaceInspector.swift in Sources */,
+				D1A600000000000000000005 /* NASDiagnosticsService.swift in Sources */,
+				D1A600000000000000000004 /* LatencyTester.swift in Sources */,
+				D1A600000000000000000003 /* DiagnosticReportBuilder.swift in Sources */,
+				D1A600000000000000000002 /* DiagnosticModels.swift in Sources */,
+				D1A600000000000000000001 /* DiagnosticCommandRunner.swift in Sources */,
+				D1A600000000000000000000 /* DiagnosticAnalyzer.swift in Sources */,
 				1A2B3C4D5E6F700100000001 /* OtterApp.swift in Sources */,
 				1A2B3C4D5E6F700100000002 /* AppModel.swift in Sources */,
 				1A2B3C4D5E6F700100000003 /* NetworkShare.swift in Sources */,
@@ -570,7 +618,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2026083109;
+				CURRENT_PROJECT_VERSION = 2026090711;
 				DEVELOPMENT_ASSET_PATHS = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -580,7 +628,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.4.2;
+				MARKETING_VERSION = 0.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.johnwatso.Otter;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = macosx;
@@ -599,7 +647,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2026083109;
+				CURRENT_PROJECT_VERSION = 2026090711;
 				DEVELOPMENT_ASSET_PATHS = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -609,7 +657,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.4.2;
+				MARKETING_VERSION = 0.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.johnwatso.Otter;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = macosx;

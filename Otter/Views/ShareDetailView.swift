@@ -115,6 +115,10 @@ struct ShareDetailView: View {
                 
                 Divider()
                 
+                NASDiagnosticsSection(shares: [currentShare])
+
+                Divider()
+
                 // Configuration Section (Read-Only)
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
@@ -360,6 +364,10 @@ struct ServerDetailView: View {
 
                 Divider()
 
+                NASDiagnosticsSection(shares: currentShares)
+
+                Divider()
+
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Configuration Summary")
                         .font(.subheadline)
@@ -529,7 +537,7 @@ private struct ServerConfigSummaryRow: View {
     }
 }
 
-private struct DetailRow: View {
+struct DetailRow: View {
     let label: String
     let value: String
 

@@ -229,7 +229,8 @@ final class ShareMonitor: ObservableObject {
     /// Returns false when the volume could not be unmounted — a busy volume is
     /// left mounted rather than forced.
     @discardableResult
-    func remountForMaintenance(_ share: NetworkShare) async -> Bool {
+    func remountForMaintenance(_ share: NetworkShare, diagnosticURL: URL? = nil) async -> Bool {
+        guard !activeChecks.contains(share.id), !maintenanceRemounts.contains(share.id) else { return false }
         cancelRetry(for: share.id)
         maintenanceRemounts.insert(share.id)
         defer { maintenanceRemounts.remove(share.id) }
@@ -241,7 +242,7 @@ final class ShareMonitor: ObservableObject {
         }
 
         let updatedShare = settings.share(id: share.id) ?? share
-        await evaluate(updatedShare, reason: .manual, force: true)
+        await evaluate(updatedShare, reason: .manual, force: true, diagnosticURL: diagnosticURL, isMaintenance: true)
         return true
     }
 
@@ -417,7 +418,8 @@ final class ShareMonitor: ObservableObject {
         await evaluate(share, reason: reason, force: force)
     }
 
-    func evaluate(_ share: NetworkShare, reason: MonitorReason, force: Bool = false) async {
+    func evaluate(_ share: NetworkShare, reason: MonitorReason, force: Bool = false, diagnosticURL: URL? = nil, isMaintenance: Bool = false) async {
+        guard isMaintenance || !maintenanceRemounts.contains(share.id) else { return }
         // A check for this share is already running; remember the request and
         // re-run once it finishes so events arriving mid-check aren't lost.
         guard !activeChecks.contains(share.id) else {
@@ -818,7 +820,7 @@ final class ShareMonitor: ObservableObject {
             return
         }
 
-        guard let url = share.url else {
+        guard let url = diagnosticURL ?? share.url else {
             registerFailure("The network address is invalid.", for: share.id)
             return
         }
@@ -832,9 +834,9 @@ final class ShareMonitor: ObservableObject {
         if !reachable {
             reachable = await networkService.canReachServer(for: url)
         }
-        var fallbackURL: URL? = nil
+        var fallbackURL: URL? = diagnosticURL
 
-        if !reachable, networkService.isVPNConnected {
+        if !reachable, diagnosticURL == nil, networkService.isVPNConnected {
             if let host = url.host(percentEncoded: false), !NetworkShare.isIPAddress(host) {
                 for cachedIP in share.orderedCachedIPAddresses {
                     guard !reachable else { break }

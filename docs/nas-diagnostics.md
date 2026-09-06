@@ -1,0 +1,43 @@
+# NAS diagnostics
+
+Open **Diagnostics** from a share or server’s detail panel in Manage Shares. Choose **Run Diagnostics** for a read-only check. Results arrive progressively; **Show Details** expands mount, routing, SMB channel, and latency measurements. Unavailable measurements do not prevent the remaining checks from completing.
+
+**Test Share Performance** is separate and requires acknowledging the temporary file operation. Choose 1–5 GB (decimal; default 1 GB). Otter checks capacity with a 256 MB reserve, verifies the mounted filesystem, and writes random data to an exclusively created file inside a unique `.otter-diagnostics-<UUID>` directory. It flushes writes, requests `F_NOCACHE`, and measures sequential writes and reads in decimal MB/s. NAS caching can still affect these diagnostic comparisons.
+
+Cleanup removes only the file and directory created by that test. Cancellation waits for the current filesystem operation, then cleans up. A disconnected or stalled NAS can delay a blocking filesystem operation, including cleanup. If cleanup fails, the panel provides the exact test folder to remove after reconnecting. Force quitting or powering off can also leave a test folder; Otter does not recursively remove old folders or user files.
+
+**Troubleshooting** contains the non-forced reconnect, comparison, and report actions. **Compare After Reconnect** saves the current completed result in memory, reconnects, and reruns diagnostics. If the baseline includes a performance test, the confirmation explicitly includes repeating that same test size. A baseline without a performance test never triggers disk I/O automatically.
+
+**Compare Using IP Address** is available for hostname-mounted SMB shares after resolution. It verifies the temporary IP mount, collects the comparison, and restores the configured hostname connection, including after failure or cancellation. The before/after snapshots remain available after restoration. If restoration cannot be verified, **Restore Configured Connection** remains available and the comparison report records the failure. Busy shares are not forcibly unmounted. Saved addresses, credentials, and normal connection rules continue through Otter’s existing mount flow.
+
+Read/write changes must exceed 10% to be described as meaningful. Throughput interpretation requires matched test sizes and cache-bypass settings; missing measurements are never treated as zero or as proof of no change. A single comparison cannot distinguish DNS effects from cache, server load, or the new SMB session.
+
+**Copy Diagnostic Report** exports selected fields rather than raw command output. Reports include share/mount names, hostnames, local IP addresses, macOS and Otter versions, measurements, and cautious findings. They exclude configured URL credentials, Keychain contents, tokens, and unrelated SMB sessions. Review the report before sharing it.
+
+## Health and performance expectations
+
+The analyzer assigns **Good**, **Needs Attention**, **Potential Bottleneck**, or **Incomplete**. A completed connection check alone does not establish throughput health. The baseline example (1 Gb/s, 111.6 MB/s read, 82 MB/s write, 0.5 ms latency, no loss) is Good: read utilisation is approximately 95%, and lower writes are informational. Findings use good/info/warning severity; enabled Wi-Fi or security features alone are not warnings.
+
+Expected maximum uses 94.4% practical efficiency: active bandwidth in Mb/s ÷ 8 × 0.944, yielding approximately 118, 295, 590, and 1180 MB/s for 1, 2.5, 5, and 10 Gb/s. SMB estimates use only verified active channels. Inactive/standby channels contribute nothing. Channels sharing a client NIC are capped by its negotiated capacity, or conservatively by the fastest channel when that capacity is unknown. These estimates are ceilings, not guarantees; shared server ports, switches, storage, and processing can reduce usable bandwidth. Missing channel speeds leave the SMB estimate unavailable. Utilisation above 100% is retained, with an explanation when it significantly exceeds the estimate.
+
+The performance test reports decimal GB and elapsed duration, plus read/write average, sampled minimum/maximum, utilisation, and variation. Samples aggregate about 750 ms of measured I/O time, including the final write flush; random-data generation is excluded from throughput timing. Overall duration includes generation. Tiny trailing intervals do not influence consistency. At least six useful samples and repeated large drops or very high variation are required for a consistency warning. Short tests can legitimately have unavailable sample statistics.
+
+## Collection and interpretation
+
+- Mount identity comes from the actual mounted filesystem, with credentials excluded from its source URL.
+- `smbutil statshares -m <mount>` and `smbutil multichannel -m <mount>` scope output to the selected share. JSON is preferred, with a defensive text fallback. Signing/encryption support is not treated as proof that either is enabled. Missing or unfamiliar fields remain unavailable.
+- Multichannel enabled state, active channel count, and estimated effective bandwidth are separate fields. One active channel does not imply multiple interfaces or aggregated bandwidth.
+- Routing uses `route -n get` against an active SMB endpoint when available, otherwise a resolved address. The report identifies this fallback. Network interface types come from SystemConfiguration, negotiated Ethernet media from `ifconfig`, and the local source address from a UDP route selection without sending data. Other SMB channels may use different interfaces than the current route.
+- Interface details include MTU and duplex when exposed. Wi-Fi connection state comes from the interface status, while SMB participation is determined separately from active channels. Connected but unused Wi-Fi does not produce a finding. Unknown interface/channel data stays unavailable. Faster-Ethernet warnings require a known Wi-Fi/channel rate to compare against.
+- Session age uses the selected SMB session’s setup timestamp. Malformed, future, or ambiguous daylight-saving timestamps remain unavailable. Most recent wake uses the read-only `kern.waketime` sysctl; zero or unsupported values remain unavailable. A session predating wake is informational context under Show Details, never a fault by itself.
+- Four numeric ping probes have a subprocess deadline. ICMP filtering can make latency unavailable even when SMB works. A latency observation above 20 ms is contextualized for LAN, Wi-Fi, VPN, remote access, and server load.
+- A 1GbE-like read ceiling on a faster link is flagged only for SMB when reads are 90–120 MB/s and writes exceed 150 MB/s. These are observations, not proof of an SMB defect.
+- No system SMB configuration, signing policy, encryption policy, Wi-Fi state, MTU, or NAS setting is changed.
+
+Parser formats were checked against Apple’s [SMBClient source](https://github.com/apple-oss-distributions/SMBClient/tree/main/smbutil). Apple describes SMB Multichannel behavior in its [support documentation](https://support.apple.com/en-us/102010).
+
+## Verification
+
+Run `xcodebuild -project Otter.xcodeproj -scheme Otter -configuration Debug CODE_SIGNING_ALLOWED=NO test`.
+
+Regression coverage includes health/efficiency thresholds, channel capacity caps, Wi-Fi awareness, consistency sampling, session/wake context, comparison interpretation and restoration after failure/cancellation, native panel rendering at two sizes, JSON/text parsing, unavailable values, active channel selection, interface speed, packet loss, findings, report field selection, temporary IP URLs, maintenance remount overrides, subprocess cancellation/deadlines, local-volume rejection, and temporary-file cleanup on success and cancellation. Local fixture I/O tests validate ownership/cleanup, not NAS throughput. Real UNAS/Synology throughput, mount permissions, and OS-specific output still need hardware validation.
