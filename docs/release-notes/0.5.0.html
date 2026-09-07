@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Add per-share NAS diagnostics - Release Notes</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      margin: 0;
+      padding: 32px 20px 48px;
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f4f6f8;
+      color: #0f1720;
+    }
+    main {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 28px;
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.86);
+      box-shadow: 0 20px 60px rgba(15, 23, 32, 0.10);
+    }
+    h1 { margin: 0 0 6px; font-size: 30px; line-height: 1.15; }
+    .meta { margin: 0 0 24px; color: #52606d; font-size: 14px; }
+    p { margin: 0 0 16px; }
+    a { color: #0a67a3; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #0b1015; color: #edf2f7; }
+      main {
+        background: rgba(15, 23, 32, 0.88);
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+      }
+      .meta { color: #9fb0c2; }
+      a { color: #73c3ff; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Add per-share NAS diagnostics</h1>
+    <p class="meta">Version 0.5.0</p>
+    <p>Add per-share NAS diagnostics</p>
+<p>Release notes:<br>- Add a NAS Diagnostics panel to every share and server detail panel in Manage Shares, reporting connection health, routing, SMB dialect and channels, and latency from a read-only check.<br>- Report an expected practical maximum from verified active SMB channels, capped by each client interface, so utilisation is measured against a defensible ceiling rather than a nominal link speed.<br>- Add an optional 1-5 GB share performance test that writes and reads a temporary file in its own uniquely named folder, requests client cache bypass, and removes what it created on success and on cancellation.<br>- Add Compare After Reconnect and Compare Using IP Address, which repeat diagnostics and any matched performance test, then restore the configured connection including after failure or cancellation.<br>- Offer Restore Configured Connection when a temporary direct-IP mount cannot be verified, leaving saved addresses, credentials, and connection rules unchanged throughout.<br>- Report cautious findings with good, informational, and warning severities, and never treat an unavailable measurement as zero or as proof that nothing is wrong.<br>- Add Copy Diagnostic Report, which exports selected fields rather than raw command output and excludes credentials, Keychain contents, and unrelated SMB sessions.<br>- Leave busy shares mounted rather than forcing an unmount, and give every diagnostic subprocess a deadline so a stalled NAS cannot hold a check open.<br>- Bump Otter to version 0.5.0 (build 2026090711).<br>- Add regression coverage for health and efficiency thresholds, channel capacity caps, Wi-Fi awareness, session and wake context, comparison restoration after failure and cancellation, report field selection, subprocess deadlines, and temporary-file cleanup.</p>
+<p>Validation:<br>- xcodebuild test -project Otter.xcodeproj -scheme Otter -destination 'platform=macOS'<br>- 203 tests passed with 0 failures.<br>- Confirmed the built app resolves CFBundleShortVersionString 0.5.0 and CFBundleVersion 2026090711.</p>
+    <p><strong>Commit:</strong> <a href="https://github.com/johnwatso/Otter/commit/eb7ef166eb7e5114c037d081538ec2c955d430ca">eb7ef16</a></p>
+  </main>
+</body>
+</html>

@@ -3,12 +3,12 @@
     <channel>
         <title>Otter</title>
         <item>
-            <title>0.4.2</title>
-            <pubDate>Tue, 01 Sep 2026 14:23:21 +1200</pubDate>
-            <sparkle:version>2026083109</sparkle:version>
-            <sparkle:shortVersionString>0.4.2</sparkle:shortVersionString>
+            <title>0.5.0</title>
+            <pubDate>Mon, 07 Sep 2026 12:02:57 +1200</pubDate>
+            <sparkle:version>2026090711</sparkle:version>
+            <sparkle:shortVersionString>0.5.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/johnwatso/Otter/releases/download/v0.4.2/Otter-0.4.2.zip" length="9307565" type="application/octet-stream" sparkle:edSignature="Aou2I33rNlaXK8oVGsDnZ5KkpEewPk07g6K37lvuWQytKxY3+aQI1oHh+oyDdjOuEODaWaoZ9Cy978Qta5gnAQ=="/>
+            <enclosure url="https://github.com/johnwatso/Otter/releases/download/v0.5.0/Otter-0.5.0.zip" length="9684241" type="application/octet-stream" sparkle:edSignature="ZEm6+YVL+Iw4T8JKT4a8Mk79CAhgYQp/RqsbFKmKfptmeuJYdy4x6eIMkA8Hh0TALwXwEx55HaM+D0G2zcr8CQ=="/>
         </item>
     </channel>
 </rss>
