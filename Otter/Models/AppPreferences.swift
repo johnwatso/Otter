@@ -159,6 +159,9 @@ struct AppPreferences: Codable, Equatable {
     var hasCompletedOnboarding: Bool = false
     var autoUpdateInstallPolicy: AutoUpdateInstallPolicy = .whenIdle
     var autoUpdateInstallHour: Int = 3
+    /// Names the user gave servers Otter only knows by address, keyed by
+    /// `NetworkShare.serverIdentity`.
+    var serverNames: [String: String] = [:]
 
     init(
         fallbackCheckInterval: TimeInterval = Self.defaultFallbackCheckInterval,
@@ -208,6 +211,7 @@ struct AppPreferences: Codable, Equatable {
         case hasCompletedOnboarding
         case autoUpdateInstallPolicy
         case autoUpdateInstallHour
+        case serverNames
         case showDockIconWhenPreferencesOpen
     }
 
@@ -232,6 +236,7 @@ struct AppPreferences: Codable, Equatable {
         hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
         autoUpdateInstallPolicy = try container.decodeIfPresent(AutoUpdateInstallPolicy.self, forKey: .autoUpdateInstallPolicy) ?? .whenIdle
         autoUpdateInstallHour = try container.decodeIfPresent(Int.self, forKey: .autoUpdateInstallHour) ?? 3
+        serverNames = try container.decodeIfPresent([String: String].self, forKey: .serverNames) ?? [:]
         normalize()
     }
 
@@ -251,11 +256,16 @@ struct AppPreferences: Codable, Equatable {
         try container.encode(hasCompletedOnboarding, forKey: .hasCompletedOnboarding)
         try container.encode(autoUpdateInstallPolicy, forKey: .autoUpdateInstallPolicy)
         try container.encode(autoUpdateInstallHour, forKey: .autoUpdateInstallHour)
+        try container.encode(serverNames, forKey: .serverNames)
     }
 
     mutating func normalize() {
         fallbackCheckInterval = min(max(fallbackCheckInterval, 15), 3600)
         autoUpdateInstallHour = min(max(autoUpdateInstallHour, 0), 23)
+        serverNames = serverNames.reduce(into: [:]) { names, entry in
+            let name = entry.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty { names[entry.key] = name }
+        }
         pauseState.clearIfExpired()
     }
 }

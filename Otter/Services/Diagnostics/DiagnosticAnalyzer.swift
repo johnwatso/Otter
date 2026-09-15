@@ -8,7 +8,7 @@ enum DiagnosticAnalyzer {
               r.mount.protocolName != "SMB" || (r.smb?.dialect != nil && (r.smb?.activeChannelCount ?? 0) > 0) else {
             return .init(state: .incomplete, explanation: "Some connection measurements are missing or still running. Available results are shown below.")
         }
-        if (r.latency?.loss ?? 0) >= 25 || r.detailedFindings.contains(where: { $0.id == "read-low" || $0.id == "write-low" }) {
+        if (r.latency?.loss ?? 0) >= 25 || r.detailedFindings.contains(where: { $0.id.hasSuffix("-low") || $0.id.hasSuffix("-below-gigabit") }) {
             return .init(state: .needsAttention, explanation: "Some measurements warrant a closer look. Review the findings before drawing conclusions about the cause.")
         }
         if r.detailedFindings.contains(where: { $0.severity == .warning }) {
@@ -31,14 +31,32 @@ enum DiagnosticAnalyzer {
         if r.mount.mountPath == nil { add("unmounted", .info, "The share is not mounted. Connect it before checking SMB or testing performance.") }
         if let p = r.performance {
             if let expected = r.expectedMaxMBps {
+                // A link ceiling is an upper bound, not an expectation. Only up to
+                // about 1 Gb/s should a NAS be expected to saturate the network;
+                // beyond it the disks normally set the pace, so falling short of
+                // the ceiling is ordinary rather than a fault worth flagging.
+                let link = r.smb?.effectiveBandwidthMbps ?? r.network.linkMbps
+                let fasterThanGigabit = (link ?? 0) > 1200
+                let gigabitEquivalent = 118.0
                 for (label, measurement) in [("Read", p.read), ("Write", p.write)] {
+                    let key = label.lowercased()
                     let utilisation = measurement.averageMBps / expected
                     if (0.85...1.15).contains(utilisation) {
-                        add(label.lowercased() + "-good", .good, "\(label) performance is approximately \(diagnosticPercent(utilisation * 100)) of the expected practical maximum for the active connection.")
-                    } else if utilisation < 0.5 {
-                        add(label.lowercased() + "-low", .warning, "\(label) performance is well below the estimated link capacity. NAS storage, server load, or the session may be limiting throughput.")
+                        add(key + "-good", .good, "\(label) performance is approximately \(diagnosticPercent(utilisation * 100)) of the expected practical maximum for the active connection.")
                     } else if utilisation > 1.15 {
-                        add(label.lowercased() + "-cache", .info, "\(label) performance exceeds the estimated link capacity. Caching or incomplete channel information may be influencing the result.")
+                        add(key + "-cache", .info, "\(label) performance exceeds the estimated link capacity. Caching or incomplete channel information may be influencing the result.")
+                    } else if utilisation < 0.5 {
+                        if measurement.rates.count < 4 {
+                            // Too few intervals to have measured anything: on a fast
+                            // link a small test is mostly setup, cache and flush.
+                            add(key + "-short-test", .info, "\(label) averaged \(diagnosticNumber(measurement.averageMBps, suffix: " MB/s")), below the \(diagnosticSpeed(link)) link ceiling, but the test was too short on a connection this fast to draw a conclusion from. Run a larger test for a usable figure.")
+                        } else if !fasterThanGigabit {
+                            add(key + "-low", .warning, "\(label) performance is well below the estimated link capacity. NAS storage, server load, or the session may be limiting throughput.")
+                        } else if measurement.averageMBps < gigabitEquivalent {
+                            add(key + "-below-gigabit", .warning, "\(label) performance is below what a 1 Gb/s connection would deliver, despite a \(diagnosticSpeed(link)) link. The SMB path, NAS storage, or server load is worth investigating.")
+                        } else {
+                            add(key + "-storage-bound", .info, "\(label) performance is below the \(diagnosticSpeed(link)) link ceiling. Above 1 Gb/s that is expected: NAS storage, not the network, usually sets the limit.")
+                        }
                     }
                 }
                 if p.writeMBps < p.readMBps * 0.85 && p.writeMBps >= expected * 0.5 {

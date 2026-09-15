@@ -119,6 +119,14 @@ final class NetworkShareTests: XCTestCase {
         XCTAssertEqual(nfsShare.connectionProtocol, .nfs)
     }
 
+    func testReachabilityUsesTheDefaultPortForEachSupportedProtocol() throws {
+        XCTAssertEqual(NetworkReachabilityService.reachabilityPort(for: try XCTUnwrap(URL(string: "smb://nas/Share"))), 445)
+        XCTAssertEqual(NetworkReachabilityService.reachabilityPort(for: try XCTUnwrap(URL(string: "nfs://nas/export"))), 2049)
+        XCTAssertEqual(NetworkReachabilityService.reachabilityPort(for: try XCTUnwrap(URL(string: "http://nas/dav"))), 80)
+        XCTAssertEqual(NetworkReachabilityService.reachabilityPort(for: try XCTUnwrap(URL(string: "https://nas/dav"))), 443)
+        XCTAssertEqual(NetworkReachabilityService.reachabilityPort(for: try XCTUnwrap(URL(string: "nfs://nas:2200/export"))), 2200)
+    }
+
     func testSharesOnTheSameServerAreGroupedForPresentation() {
         let media = NetworkShare(
             displayName: "Media",
@@ -156,6 +164,31 @@ final class NetworkShareTests: XCTestCase {
         )
 
         XCTAssertEqual(share.serverDisplayName, "Living Room NAS")
+    }
+
+    func testCustomServerNameNamesEveryShareOnAnIPAddressedServer() throws {
+        let media = NetworkShare(displayName: "Media", urlString: "smb://192.168.1.20/Media", mountPath: "/Volumes/Media")
+        let backups = NetworkShare(displayName: "Backups", urlString: "smb://192.168.1.20/Backups", mountPath: "/Volumes/Backups")
+        let named = NetworkShare(displayName: "Archive", urlString: "smb://homenas.local/Archive", mountPath: "/Volumes/Archive")
+
+        XCTAssertTrue(media.isAddressedByIP)
+        XCTAssertFalse(named.isAddressedByIP)
+        XCTAssertTrue(NetworkShare(displayName: "V6", urlString: "smb://[fe80::1]/V6", mountPath: "/Volumes/V6").isAddressedByIP)
+
+        let serverNames = [try XCTUnwrap(media.serverIdentity): "Basement NAS"]
+        let groups = NetworkShareServerGroup.make(from: [media, backups, named], serverNames: serverNames)
+        XCTAssertEqual(groups.map(\.serverName), ["Basement NAS", "homenas"])
+        XCTAssertEqual(backups.serverDisplayName(customNames: serverNames), "Basement NAS")
+        XCTAssertEqual(NetworkShareServerGroup.make(from: [media]).first?.serverName, "192.168.1.20")
+
+        // Blank names are dropped, and preferences saved before server names existed still load.
+        var preferences = AppPreferences()
+        preferences.serverNames = ["192.168.1.20": "  Basement NAS ", "10.0.0.2": "   "]
+        preferences.normalize()
+        XCTAssertEqual(preferences.serverNames, ["192.168.1.20": "Basement NAS"])
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: JSONEncoder().encode(preferences))
+        XCTAssertEqual(decoded.serverNames, ["192.168.1.20": "Basement NAS"])
+        XCTAssertEqual(try JSONDecoder().decode(AppPreferences.self, from: Data("{}".utf8)).serverNames, [:])
     }
 
     func testDefaultMountPathPrefersShareName() {
@@ -1560,9 +1593,63 @@ final class MountHealthServiceTests: XCTestCase {
 
         XCTAssertFalse(recovered)
     }
+
+    func testWritablePolicyChecksEffectiveDirectoryAccessAndCleansItsProbe() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OtterHealthTests-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer {
+            chmod(directory.path, 0o700)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let policy = ShareHealthCheckConfiguration(requiresWritableVolume: true)
+
+        let writableResult = await MountHealthService().checkPolicy(at: directory, policy: policy, timeout: 1)
+        XCTAssertEqual(writableResult, .healthy)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+
+        XCTAssertEqual(chmod(directory.path, 0o500), 0)
+        let readOnlyResult = await MountHealthService().checkPolicy(at: directory, policy: policy, timeout: 1)
+        XCTAssertEqual(
+            readOnlyResult,
+            .unavailable("The mounted volume is not writable.")
+        )
+    }
 }
 
 final class ConnectionDoctorTests: XCTestCase {
+    @MainActor
+    func testNFSShareIsDiagnosedUsingItsOwnProtocol() async {
+        let suiteName = "OtterTests.ConnectionDoctorTests.NFS"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Archive",
+            urlString: "nfs://server.local/export",
+            mountPath: "/Volumes/Archive"
+        )
+        settings.addShare(share)
+        let mountService = StubMountService()
+        let network = StubNetworkReachability(isOnline: true, isReachable: true)
+        let monitor = makeMonitor(settings: settings, mountService: mountService, network: network, defaults: defaults)
+        let doctor = ConnectionDoctor(
+            settings: settings,
+            mountService: mountService,
+            mountHealthService: StubMountHealthService(),
+            networkService: network,
+            monitor: monitor,
+            hostResolver: StubHostResolver(result: "192.168.1.20")
+        )
+
+        let report = await doctor.run(for: share, attemptMount: false)
+
+        XCTAssertEqual(report.steps.first?.status, .passed)
+        XCTAssertEqual(report.steps.first { $0.title == "NFS reachability" }?.status, .passed)
+        XCTAssertFalse(report.steps.contains { $0.title == "Keychain credentials" })
+        XCTAssertFalse(report.hasFailures)
+    }
+
     @MainActor
     func testReadinessCheckAttemptsAndReportsSuccessfulMount() async {
         let suiteName = "OtterTests.ConnectionDoctorTests.Readiness"
@@ -2240,12 +2327,20 @@ final class SettingsStoreTests: XCTestCase {
         // Missing smb:// prefix (normalized automatically)
         XCTAssertTrue(store.isDuplicateShare(urlString: "server.local/share"))
         XCTAssertTrue(store.isDuplicateShare(urlString: "//server.local/share"))
+        XCTAssertTrue(store.isDuplicateShare(urlString: "smb://server.local:445/share/"))
         
         // Non-duplicate URL
         XCTAssertFalse(store.isDuplicateShare(urlString: "smb://server.local/other"))
         
         // Excluding current share ID
         XCTAssertFalse(store.isDuplicateShare(urlString: "smb://server.local/share", excluding: share.id))
+
+        store.addShare(NetworkShare(
+            displayName: "Archive",
+            urlString: "nfs://server.local/export",
+            mountPath: "/Volumes/export"
+        ))
+        XCTAssertTrue(store.isDuplicateShare(urlString: "nfs://SERVER.local:2049/export/"))
     }
 
     @MainActor
@@ -2957,6 +3052,30 @@ final class NewShareDetectionTests: XCTestCase {
 
         XCTAssertEqual(detector.pendingSuggestions.map(\.displayName), ["Media"])
         XCTAssertEqual(notifier.notified.count, 1)
+    }
+
+    @MainActor
+    func testUnmountedOfferWithdrawsItsDeliveredNotification() async {
+        let (settings, defaults) = makeSettings("Unmounted")
+        let notifier = RecordingDetectedShareNotifier()
+        let source = SuggestionSource([])
+        let detector = NewShareDetectionService(
+            settings: settings,
+            notificationService: notifier,
+            defaults: defaults,
+            workspaceNotificationCenter: NotificationCenter(),
+            discoverShares: { await source.current() }
+        )
+
+        await detector.scan(announcing: false)
+        await source.set([suggestion()])
+        await detector.scan(announcing: true)
+        await source.set([])
+        await detector.scan(announcing: false)
+
+        XCTAssertTrue(detector.pendingSuggestions.isEmpty)
+        XCTAssertEqual(notifier.notified.count, 1)
+        XCTAssertEqual(notifier.withdrawn.count, 1)
     }
 
     @MainActor
@@ -4526,6 +4645,74 @@ extension NASDiagnosticsTests {
         XCTAssertEqual(r.health.state, .needsAttention)
     }
 
+    /// A 10GbE link is a ceiling, not an expectation: a NAS that cannot fill it
+    /// is ordinary, and a 1 GB test on a link that fast measures almost nothing.
+    func testFastLinkBelowCeilingIsNotTreatedAsAFault() {
+        var r = healthyNASResult()
+        r.smb?.channels?[0].linkMbps = 10000
+        r.smb?.clientLinkMbps = ["en0": 10000]
+        r.network.linkMbps = 10000
+        // The reported case: 1 GB at 189 MB/s write, 884 MB/s read, few intervals.
+        r.performance = .init(writeMBps: 189, readMBps: 884, bytes: 1_000_000_000, cacheBypass: true, duration: 6,
+                              writeSamples: [.init(bytes: 600_000_000, duration: 0.8), .init(bytes: 400_000_000, duration: 4.5)],
+                              readSamples: [.init(bytes: 710_000_000, duration: 0.79), .init(bytes: 290_000_000, duration: 0.34)])
+        XCTAssertEqual(r.expectedMaxMBps, 1180)
+        XCTAssertFalse(r.detailedFindings.contains { $0.severity == .warning })
+        XCTAssertTrue(r.detailedFindings.contains { $0.id == "write-short-test" && $0.severity == .info })
+        XCTAssertEqual(r.health.state, .good)
+
+        // A long enough test on the same link stays informational while the NAS
+        // is still outrunning a gigabit connection.
+        r.performance?.writeSamples = (0..<8).map { _ in .init(bytes: 189_000_000, duration: 1) }
+        XCTAssertTrue(r.detailedFindings.contains { $0.id == "write-storage-bound" && $0.severity == .info })
+        XCTAssertFalse(r.detailedFindings.contains { $0.severity == .warning })
+        XCTAssertEqual(r.health.state, .good)
+
+        // Below what 1GbE would have delivered, a fast link is a real finding.
+        r.performance?.writeMBps = 60
+        r.performance?.writeSamples = (0..<8).map { _ in .init(bytes: 60_000_000, duration: 1) }
+        XCTAssertTrue(r.detailedFindings.contains { $0.id == "write-below-gigabit" && $0.severity == .warning })
+        XCTAssertEqual(r.health.state, .needsAttention)
+
+        // A gigabit link is expected to be saturated, so the old warning stands.
+        var gigabit = healthyNASResult()
+        gigabit.performance = .init(writeMBps: 40, readMBps: 111.6, bytes: 1_000_000_000, cacheBypass: true, duration: 30,
+                                    writeSamples: (0..<8).map { _ in .init(bytes: 40_000_000, duration: 1) })
+        XCTAssertTrue(gigabit.detailedFindings.contains { $0.id == "write-low" && $0.severity == .warning })
+        XCTAssertEqual(gigabit.health.state, .needsAttention)
+    }
+
+    /// The reported range must contain the average shown next to it.
+    func testReportedRangeAlwaysContainsTheAverage() {
+        let short = ThroughputDiagnostic(averageMBps: 884, samples: [.init(bytes: 710_000_000, duration: 0.79), .init(bytes: 290_000_000, duration: 0.34)])
+        XCTAssertEqual(short.minimumMBps.map { ($0 * 10).rounded() / 10 }, 852.9)
+        XCTAssertEqual(short.maximumMBps.map { ($0 * 10).rounded() / 10 }, 898.7)
+        XCTAssertLessThanOrEqual(short.minimumMBps!, 884)
+        XCTAssertGreaterThanOrEqual(short.maximumMBps!, 884)
+        XCTAssertNil(short.variation)
+
+        // A single interval is not a range.
+        XCTAssertNil(ThroughputDiagnostic(averageMBps: 899, samples: [.init(bytes: 710_000_000, duration: 0.79)]).minimumMBps)
+        // A flush interval carries no bytes and is not a 0 MB/s drop.
+        let flushed = ThroughputDiagnostic(averageMBps: 100, samples: (0..<7).map { _ in .init(bytes: 100_000_000, duration: 1) } + [.init(bytes: 0, duration: 2)])
+        XCTAssertEqual(flushed.minimumMBps, 100)
+        XCTAssertEqual(flushed.significantDrops, 0)
+        XCTAssertFalse(flushed.isInconsistent)
+
+        // The write average includes flush time even though a zero-byte flush
+        // is not itself an interval rate.
+        let slowFlush = ThroughputDiagnostic(
+            averageMBps: 40,
+            samples: [
+                .init(bytes: 100_000_000, duration: 1),
+                .init(bytes: 100_000_000, duration: 1),
+                .init(bytes: 0, duration: 3)
+            ]
+        )
+        XCTAssertEqual(slowFlush.minimumMBps, 40)
+        XCTAssertEqual(slowFlush.maximumMBps, 100)
+    }
+
     func testMultichannelBandwidthExcludesStandbyAndCapsSharedNIC() {
         var smb = healthyNASResult().smb!
         let active = smb.channels![0]
@@ -4742,5 +4929,29 @@ extension NASDiagnosticsTests {
             try png.write(to: URL(fileURLWithPath: "/tmp/otter-diagnostics-preview-\(height).png"))
             window.contentView = nil
         }
+    }
+
+    /// A server's shares share one diagnostics sheet, so busy state and
+    /// results span every share.
+    @MainActor
+    func testServerDiagnosticsSessionSpansEveryShare() {
+        let media = NetworkShare(displayName: "Media", urlString: "smb://nas.local/Media", mountPath: "/Volumes/Media")
+        let backups = NetworkShare(displayName: "Backups", urlString: "smb://nas.local/Backups", mountPath: "/Volumes/Backups")
+        let mediaModel = NASDiagnosticsViewModel()
+        let session = NASDiagnosticsSession(shares: [media, backups], models: [media.id: mediaModel])
+
+        XCTAssertTrue(session.model(for: media) === mediaModel)
+        XCTAssertFalse(session.hasResults)
+        XCTAssertFalse(session.isBusy)
+        XCTAssertEqual(session.serverReport(), "")
+
+        mediaModel.result = healthyNASResult()
+        XCTAssertTrue(session.hasResults)
+        XCTAssertFalse(session.serverReport().isEmpty)
+
+        session.model(for: backups).testing = true
+        XCTAssertTrue(session.isBusy)
+        XCTAssertTrue(session.blocksDismissal)
+        XCTAssertTrue(session.isCancellable)
     }
 }

@@ -1,23 +1,90 @@
 import AppKit
+import Combine
 import SwiftUI
 
 struct NASDiagnosticsSection: View {
     let shares: [NetworkShare]
-    @State private var selectedShare: NetworkShare?
+    var serverName: String?
+    @State private var isPresented = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Diagnostics").font(.subheadline).fontWeight(.bold).foregroundStyle(.secondary)
-            Text("Check the network path, SMB connection, and share performance.")
+            Text(shares.count > 1
+                 ? "Check the network path, SMB connections, and performance of all \(shares.count) shares on this server."
+                 : "Check the network path, SMB connection, and share performance.")
                 .font(.caption).foregroundStyle(.secondary)
-            ForEach(shares) { share in
-                Button { selectedShare = share } label: {
-                    Label(shares.count > 1 ? "Diagnose \(share.displayName)" : "Open Diagnostics", systemImage: "waveform.path.ecg")
-                }
-                .tahoeSecondaryActionButton()
+            Button { isPresented = true } label: {
+                Label("Open Diagnostics", systemImage: "waveform.path.ecg")
             }
+            .tahoeSecondaryActionButton()
+            .disabled(shares.isEmpty)
         }
-        .sheet(item: $selectedShare) { share in NASDiagnosticsView(share: share) }
+        .sheet(isPresented: $isPresented) { NASDiagnosticsView(shares: shares, title: serverName) }
+    }
+}
+
+/// The diagnostics for every share in one sheet. Each share keeps its own
+/// results while the user switches between them.
+@MainActor
+final class NASDiagnosticsSession: ObservableObject {
+    let shares: [NetworkShare]
+    @Published private(set) var runningAll = false
+    private var models: [NetworkShare.ID: NASDiagnosticsViewModel] = [:]
+    private var runAllTask: Task<Void, Never>?
+    private var subscriptions: Set<AnyCancellable> = []
+
+    init(shares: [NetworkShare], models provided: [NetworkShare.ID: NASDiagnosticsViewModel] = [:]) {
+        self.shares = shares
+        for share in shares {
+            let model = provided[share.id] ?? NASDiagnosticsViewModel()
+            models[share.id] = model
+            // Busy state spans every share, so a change to one refreshes the sheet.
+            model.objectWillChange
+                .sink { [weak self] _ in self?.objectWillChange.send() }
+                .store(in: &subscriptions)
+        }
+    }
+
+    func model(for share: NetworkShare) -> NASDiagnosticsViewModel {
+        models[share.id] ?? NASDiagnosticsViewModel()
+    }
+
+    /// Shares on one server travel the same network path, so an action on one
+    /// share waits for work on any other to finish.
+    var isBusy: Bool { runningAll || models.values.contains(where: \.isBusy) }
+    var isCancellable: Bool { runningAll || models.values.contains { $0.running || $0.testing || $0.comparing } }
+    var blocksDismissal: Bool { models.values.contains(where: \.blocksDismissal) }
+    var hasResults: Bool { models.values.contains { $0.result != nil } }
+
+    /// Checks each share in turn. Checking them concurrently would have their
+    /// latency probes and SMB queries compete on the same path.
+    func runAll(service: MountService) {
+        guard !isBusy else { return }
+        runningAll = true
+        runAllTask = Task {
+            for share in shares {
+                guard !Task.isCancelled,
+                      let task = model(for: share).run(share: share, service: service)
+                else { break }
+                await task.value
+            }
+            runningAll = false
+            runAllTask = nil
+        }
+    }
+
+    func serverReport() -> String {
+        shares.compactMap { share in
+            let shareModel = self.model(for: share)
+            return shareModel.result.map { DiagnosticReportBuilder.build($0, comparison: shareModel.comparison) }
+        }
+        .joined(separator: "\n\n")
+    }
+
+    func cancel() {
+        runAllTask?.cancel()
+        models.values.forEach { $0.cancel() }
     }
 }
 
@@ -34,10 +101,15 @@ final class NASDiagnosticsViewModel: ObservableObject {
     @Published var comparing = false
     @Published var restorationRequired = false
     @Published var restoring = false
+    @Published var reconnecting = false
     private var task: Task<Void, Never>?
 
-    func run(share: NetworkShare, service: MountService) {
-        guard !running, !testing, !comparing, !restoring else { return }
+    var isBusy: Bool { running || testing || comparing || restoring || reconnecting }
+    var blocksDismissal: Bool { testing || comparing || restoring || reconnecting }
+
+    @discardableResult
+    func run(share: NetworkShare, service: MountService) -> Task<Void, Never>? {
+        guard !running, !testing, !comparing, !restoring else { return nil }
         running = true
         result = nil
         comparison = nil
@@ -53,6 +125,7 @@ final class NASDiagnosticsViewModel: ObservableObject {
             running = false
             task = nil
         }
+        return task
     }
 
     func test(gigabytes: Int) {
@@ -147,38 +220,135 @@ final class NASDiagnosticsViewModel: ObservableObject {
     }
 }
 
+/// Diagnostics for one share, or for every share on a server in one sheet: a
+/// single run checks each share, and an overview switches between results.
 struct NASDiagnosticsView: View {
-    let share: NetworkShare
     @EnvironmentObject private var appModel: AppModel
-    @EnvironmentObject private var monitor: ShareMonitor
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var model = NASDiagnosticsViewModel()
-    @State private var gigabytes = 1
-    @State private var showPerformanceConfirmation = false
-    @State private var copied = false
-    @State private var reconnecting = false
-    @State private var pendingComparison: DiagnosticComparisonKind?
-    @State private var confirmComparison = false
+    @StateObject private var session: NASDiagnosticsSession
+    @State private var selectedShareID: NetworkShare.ID?
+    @State private var copiedServerReport = false
+    private let title: String?
+
+    @MainActor
+    init(shares: [NetworkShare], title: String? = nil) {
+        self.title = title
+        _session = StateObject(wrappedValue: NASDiagnosticsSession(shares: shares))
+        _selectedShareID = State(initialValue: shares.first?.id)
+    }
 
     @MainActor
     init(share: NetworkShare, model: NASDiagnosticsViewModel? = nil) {
-        self.share = share
-        _model = StateObject(wrappedValue: model ?? NASDiagnosticsViewModel())
+        title = nil
+        _session = StateObject(wrappedValue: NASDiagnosticsSession(shares: [share], models: model.map { [share.id: $0] } ?? [:]))
+        _selectedShareID = State(initialValue: share.id)
     }
 
-    private var busy: Bool { model.running || model.testing || model.comparing || model.restoring || reconnecting }
+    private var shares: [NetworkShare] { session.shares }
+    private var coversServer: Bool { shares.count > 1 }
+    private var selectedShare: NetworkShare? { shares.first { $0.id == selectedShareID } ?? shares.first }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading) {
                     Text("NAS Diagnostics").font(.title2.bold())
-                    Text(share.displayName).foregroundStyle(.secondary)
+                    Text(subtitle).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
-                    .disabled(model.testing || model.comparing || model.restoring || reconnecting)
+                    .disabled(session.blocksDismissal)
             }
+            if coversServer { shareOverview }
+            if let share = selectedShare {
+                NASShareDiagnosticsPanel(share: share, model: session.model(for: share), busy: session.isBusy)
+                    .id(share.id)
+            }
+            HStack {
+                Button(coversServer ? "Run Diagnostics on All Shares" : "Run Diagnostics") {
+                    copiedServerReport = false
+                    session.runAll(service: appModel.mountService)
+                }
+                .tahoePrimaryActionButton().disabled(session.isBusy)
+                if session.isCancellable { Button("Cancel") { session.cancel() }.tahoeSecondaryActionButton() }
+                Spacer()
+                if coversServer {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(session.serverReport(), forType: .string)
+                        copiedServerReport = true
+                    } label: {
+                        Label(copiedServerReport ? "Copied" : "Copy Server Report", systemImage: copiedServerReport ? "checkmark" : "doc.on.doc")
+                    }
+                    .tahoeSecondaryActionButton()
+                    .disabled(!session.hasResults)
+                }
+            }
+        }
+        .padding(20)
+        .frame(width: 620)
+        .frame(minHeight: 420, idealHeight: 680, maxHeight: 680)
+        .interactiveDismissDisabled(session.blocksDismissal)
+        .background(Color(NSColor.windowBackgroundColor))
+        .onDisappear { session.cancel() }
+    }
+
+    private var subtitle: String {
+        guard coversServer else { return shares.first?.displayName ?? "" }
+        return "\(title ?? shares.first?.serverDisplayName ?? "Server") · \(shares.count) shares"
+    }
+
+    private var shareOverview: some View {
+        VStack(spacing: 2) {
+            ForEach(shares) { share in
+                let model = session.model(for: share)
+                let isSelected = share.id == selectedShare?.id
+                Button { selectedShareID = share.id } label: {
+                    HStack(spacing: 8) {
+                        Text(share.displayName)
+                            .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                        Spacer()
+                        if model.isBusy { ProgressView().controlSize(.mini) }
+                        Text(model.running ? "Checking…" : (model.result?.health.state.rawValue ?? "Not checked"))
+                            .font(.subheadline)
+                            .foregroundStyle(model.running ? Color.secondary : (model.result?.health.state.color ?? Color.secondary))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+private extension ConnectionHealthState {
+    var color: Color {
+        switch self {
+        case .good: .green
+        case .incomplete: .secondary
+        case .needsAttention, .potentialBottleneck: .orange
+        }
+    }
+}
+
+private struct NASShareDiagnosticsPanel: View {
+    let share: NetworkShare
+    @ObservedObject var model: NASDiagnosticsViewModel
+    /// True while diagnostics for any share on the server are working.
+    let busy: Bool
+    @EnvironmentObject private var appModel: AppModel
+    @EnvironmentObject private var monitor: ShareMonitor
+    @State private var gigabytes = 1
+    @State private var showPerformanceConfirmation = false
+    @State private var copied = false
+    @State private var pendingComparison: DiagnosticComparisonKind?
+    @State private var confirmComparison = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack {
@@ -270,19 +440,10 @@ struct NASDiagnosticsView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            HStack {
-                Button("Run Diagnostics") { copied = false; model.run(share: share, service: appModel.mountService) }
-                    .tahoePrimaryActionButton().disabled(busy)
-                if model.running || model.testing || model.comparing { Button("Cancel") { model.cancel() }.tahoeSecondaryActionButton() }
-                Spacer()
-            }
         }
-        .padding(20)
-        .frame(width: 620)
-        .frame(minHeight: 420, idealHeight: 680, maxHeight: 680)
-        .interactiveDismissDisabled(model.testing || model.comparing || model.restoring || reconnecting)
-        .background(Color(NSColor.windowBackgroundColor))
-        .onDisappear { model.cancel() }
+        .onChange(of: model.running) { _, running in
+            if running { copied = false }
+        }
         .alert("Test Share Performance?", isPresented: $showPerformanceConfirmation) {
             Button("Cancel", role: .cancel) { }
             Button("Start Test") { model.test(gigabytes: gigabytes) }
@@ -322,7 +483,7 @@ struct NASDiagnosticsView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Connection Health").font(.headline)
             Text(r.health.state.rawValue).font(.title3.weight(.semibold))
-                .foregroundStyle(r.health.state == .good ? Color.green : (r.health.state == .incomplete ? Color.secondary : Color.orange))
+                .foregroundStyle(r.health.state.color)
             Text(r.health.explanation).font(.callout).foregroundStyle(.secondary)
             DetailRow(label: "Network", value: "\(r.network.type ?? "Unavailable") · \(r.network.speedText)")
             if r.mount.protocolName == "SMB" {
@@ -421,10 +582,10 @@ struct NASDiagnosticsView: View {
     }
 
     private func reconnect(url: URL? = nil) {
-        reconnecting = true
+        model.reconnecting = true
         Task {
             let success = await monitor.remountForMaintenance(share, diagnosticURL: url)
-            reconnecting = false
+            model.reconnecting = false
             if success {
                 model.run(share: share, service: appModel.mountService)
             }

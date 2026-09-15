@@ -155,10 +155,21 @@ struct ThroughputSample: Sendable {
 struct ThroughputDiagnostic: Sendable {
     var averageMBps: Double
     var samples: [ThroughputSample]
+    // A flush interval carrying no bytes is not an interval rate.
+    var allRates: [Double] { samples.filter { $0.bytes > 0 && $0.duration > 0 && $0.mbps.isFinite }.map(\.mbps) }
     // Ignore a tiny trailing fragment when assessing consistency.
-    var rates: [Double] { samples.filter { $0.duration >= 0.5 && $0.mbps.isFinite }.map(\.mbps) }
-    var minimumMBps: Double? { rates.min() }
-    var maximumMBps: Double? { rates.max() }
+    var rates: [Double] { samples.filter { $0.bytes > 0 && $0.duration >= 0.5 && $0.mbps.isFinite }.map(\.mbps) }
+    // One interval is not a range; reporting it as both ends invites a
+    // comparison against the average that it cannot honestly support.
+    // The overall write average includes fsync time, which may sit below every
+    // data-carrying interval. Include that aggregate in the displayed bounds so
+    // the range and average never contradict one another.
+    private var rangeValues: [Double]? {
+        guard allRates.count >= 2 else { return nil }
+        return averageMBps.isFinite ? allRates + [averageMBps] : allRates
+    }
+    var minimumMBps: Double? { rangeValues?.min() }
+    var maximumMBps: Double? { rangeValues?.max() }
     var variation: Double? {
         let values = rates
         guard values.count >= 4 else { return nil }

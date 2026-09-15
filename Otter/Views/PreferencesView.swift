@@ -79,7 +79,7 @@ struct ShareManagementView: View {
     }
 
     private var shareGroups: [NetworkShareServerGroup] {
-        NetworkShareServerGroup.make(from: shares)
+        NetworkShareServerGroup.make(from: shares, serverNames: settings.preferences.serverNames)
     }
 
     private var selectionValidationSignature: [String] {

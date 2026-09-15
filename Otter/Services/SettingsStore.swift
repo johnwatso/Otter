@@ -216,12 +216,13 @@ final class SettingsStore: ObservableObject {
             return false
         }
 
-        components.scheme = components.scheme?.lowercased()
         components.host = host
-        guard let normalizedURL = components.string else { return false }
+        guard let candidateURL = components.string else { return false }
+        let normalizedURL = Self.normalizedShareAddress(candidateURL)
 
         return shares.contains { share in
-            share.id != shareID && share.urlString.localizedCaseInsensitiveCompare(normalizedURL) == .orderedSame
+            share.id != shareID
+                && Self.normalizedShareAddress(share.urlString) == normalizedURL
         }
     }
 
@@ -394,6 +395,19 @@ final class SettingsStore: ObservableObject {
         return result
     }
 
+    /// The name the user gave this share's server, if any.
+    func customServerName(for share: NetworkShare) -> String? {
+        share.serverIdentity.flatMap { preferences.serverNames[$0] }
+    }
+
+    /// Names every share on this share's server. A nil or blank name removes it.
+    func setCustomServerName(_ name: String?, for share: NetworkShare) {
+        guard let identity = share.serverIdentity else { return }
+        updatePreferences { preferences in
+            preferences.serverNames[identity] = name
+        }
+    }
+
     func updatePreferences(_ update: (inout AppPreferences) -> Void) {
         var updated = preferences
         update(&updated)
@@ -434,7 +448,15 @@ final class SettingsStore: ObservableObject {
         }
         components.scheme = components.scheme?.lowercased()
         components.host = components.host?.lowercased()
-        if components.port == 445 {
+        let defaultPort: Int?
+        switch components.scheme?.lowercased() {
+        case "smb": defaultPort = 445
+        case "nfs": defaultPort = 2049
+        case "https", "webdavs": defaultPort = 443
+        case "http", "webdav": defaultPort = 80
+        default: defaultPort = nil
+        }
+        if components.port == defaultPort {
             components.port = nil
         }
         components.path = "/" + components.path

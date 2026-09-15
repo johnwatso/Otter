@@ -80,10 +80,16 @@ final class NewShareDetectionService: ObservableObject {
 
         // Drop offers whose volume was unmounted, that were added in the
         // meantime, or that the user has since chosen to ignore.
-        pendingSuggestions = pendingSuggestions.filter { suggestion in
+        let previousSuggestions = pendingSuggestions
+        let retainedSuggestions = previousSuggestions.filter { suggestion in
             guard let key = Self.addressKey(for: suggestion), detected[key] != nil else { return false }
             return !ignoredAddresses.contains(key) && !isConfigured(suggestion, in: settings.shares)
         }
+        let retainedIDs = Set(retainedSuggestions.map(\.id))
+        for suggestion in previousSuggestions where !retainedIDs.contains(suggestion.id) {
+            notificationService.withdrawDetectedShareNotification(for: suggestion)
+        }
+        pendingSuggestions = retainedSuggestions
         knownAddresses.formIntersection(detected.keys)
 
         guard announcing, !isSuppressed, isDetectionEnabled else {

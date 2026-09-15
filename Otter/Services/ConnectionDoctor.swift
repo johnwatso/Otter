@@ -82,12 +82,12 @@ final class ConnectionDoctor {
         await networkService.refreshNetworkDetailsIfStale(maxAge: 0)
 
         guard let url = share.url,
-              url.scheme?.lowercased() == "smb",
+              let connectionProtocol = NetworkShareProtocol(urlScheme: url.scheme),
               url.host(percentEncoded: false) != nil
         else {
             steps.append(.init(
                 title: "Share configuration",
-                detail: "The SMB address is invalid.",
+                detail: "The network share address is invalid.",
                 status: .failed
             ))
             return ConnectionDiagnosticReport(generatedAt: Date(), steps: steps)
@@ -102,7 +102,7 @@ final class ConnectionDoctor {
         } else {
             steps.append(.init(
                 title: "Share configuration",
-                detail: "The SMB address and mount location are valid.",
+                detail: "The \(connectionProtocol.title) address and mount location are valid.",
                 status: .passed
             ))
         }
@@ -195,15 +195,17 @@ final class ConnectionDoctor {
                 || (shareRules.hasVPNRule && shareRules.requiredVPNName != nil))
 
         let originalHost = url.host(percentEncoded: false) ?? ""
-        let hasCredentials = settings.hasCredentials(for: originalHost)
-            || share.cachedIPAddresses.contains(where: settings.hasCredentials(for:))
-        steps.append(.init(
-            title: "Keychain credentials",
-            detail: hasCredentials
-                ? "A matching macOS Keychain credential is available."
-                : "No matching credential was found. Connect once in Finder and save the password.",
-            status: hasCredentials ? .passed : .warning
-        ))
+        if connectionProtocol == .smb {
+            let hasCredentials = settings.hasCredentials(for: originalHost)
+                || share.cachedIPAddresses.contains(where: settings.hasCredentials(for:))
+            steps.append(.init(
+                title: "Keychain credentials",
+                detail: hasCredentials
+                    ? "A matching macOS Keychain credential is available."
+                    : "No matching credential was found. Connect once in Finder and save the password.",
+                status: hasCredentials ? .passed : .warning
+            ))
+        }
 
         let resolvedIPAddresses = NetworkShare.isIPAddress(originalHost)
             ? []
@@ -248,7 +250,7 @@ final class ConnectionDoctor {
         } else if resolvedIPAddress != nil {
             nameResolutionStep = .init(
                 title: "Name resolution",
-                detail: SystemHostResolver.bonjourServiceIdentity(for: originalHost) == nil
+                detail: connectionProtocol != .smb || SystemHostResolver.bonjourServiceIdentity(for: originalHost) == nil
                     ? "The server name resolved successfully."
                     : "The Bonjour SMB service resolved to its host and network address.",
                 status: .passed
@@ -262,7 +264,7 @@ final class ConnectionDoctor {
         } else if reachable {
             nameResolutionStep = .init(
                 title: "Name resolution",
-                detail: "Direct DNS lookup returned no address, but macOS can still reach the SMB service, likely through Bonjour or an existing connection.",
+                detail: "Direct DNS lookup returned no address, but macOS can still reach the \(connectionProtocol.title) service, likely through service discovery or an existing connection.",
                 status: .information
             )
         } else {
@@ -318,10 +320,10 @@ final class ConnectionDoctor {
         }
 
         steps.append(.init(
-            title: "SMB reachability",
+            title: "\(connectionProtocol.title) reachability",
             detail: reachable
-                ? "The server accepted a connection on the SMB port."
-                : "The server did not answer on the SMB port within three seconds.",
+                ? "The server accepted a connection on the \(connectionProtocol.title) port."
+                : "The server did not answer on the \(connectionProtocol.title) port within three seconds.",
             status: reachable ? .passed : .failed
         ))
 
@@ -394,14 +396,14 @@ final class ConnectionDoctor {
         await networkService.refreshNetworkDetailsIfStale(maxAge: 0)
 
         guard let url = currentShare.url,
-              url.scheme?.lowercased() == "smb",
+              NetworkShareProtocol(urlScheme: url.scheme) != nil,
               url.host(percentEncoded: false) != nil,
               url.user(percentEncoded: false) == nil,
               url.password(percentEncoded: false) == nil
         else {
             return .init(
                 title: "Repair attempt",
-                detail: "Otter did not make changes because the SMB address must be corrected manually.",
+                detail: "Otter did not make changes because the network share address must be corrected manually.",
                 status: .failed
             )
         }

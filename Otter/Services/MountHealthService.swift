@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 // Network volumes can remain registered with macOS while every filesystem
@@ -37,8 +38,8 @@ final class MountHealthService: @unchecked Sendable {
     }
 
     // Checks that matter to clients of a mounted volume, not just that macOS
-    // still lists it. This remains read-only: a writable-volume check uses the
-    // filesystem attributes rather than creating a probe file on user data.
+    // still lists it. A writable-volume check creates and immediately removes
+    // one exclusively named, empty file at the share root.
     func checkPolicy(
         at url: URL,
         policy: ShareHealthCheckConfiguration,
@@ -49,9 +50,8 @@ final class MountHealthService: @unchecked Sendable {
         let responsiveness = await checkMount(at: url, timeout: timeout)
         guard responsiveness == .healthy else { return responsiveness }
 
-        let values = try? url.resourceValues(forKeys: [.volumeIsReadOnlyKey])
-        if policy.requiresWritableVolume, values?.volumeIsReadOnly == true {
-            return .unavailable("The mounted volume is read-only.")
+        if policy.requiresWritableVolume, !Self.canCreateFile(in: url) {
+            return .unavailable("The mounted volume is not writable.")
         }
 
         if !policy.sentinelRelativePath.isEmpty {
@@ -61,6 +61,18 @@ final class MountHealthService: @unchecked Sendable {
             }
         }
         return .healthy
+    }
+
+    private static func canCreateFile(in url: URL) -> Bool {
+        let directory = open(url.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+        guard directory >= 0 else { return false }
+        defer { close(directory) }
+
+        let filename = ".otter-health-" + UUID().uuidString
+        let file = openat(directory, filename, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
+        guard file >= 0 else { return false }
+        close(file)
+        return unlinkat(directory, filename, 0) == 0
     }
 }
 

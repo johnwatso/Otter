@@ -78,7 +78,12 @@ struct ShareDetailView: View {
                         .foregroundStyle(.secondary)
 
                     VStack(spacing: 6) {
-                        DetailRow(label: "Server", value: currentShare.host ?? "Unknown")
+                        if let customServerName = settings.customServerName(for: currentShare) {
+                            DetailRow(label: "Server", value: customServerName)
+                            DetailRow(label: "Address", value: currentShare.host ?? "Unknown")
+                        } else {
+                            DetailRow(label: "Server", value: currentShare.host ?? "Unknown")
+                        }
                         ForEach(currentShare.orderedCachedIPAddresses, id: \.self) { address in
                             DetailRow(
                                 label: NetworkShare.isIPv4Address(address) ? "IPv4 address" : "IPv6 address",
@@ -89,6 +94,8 @@ struct ShareDetailView: View {
                         DetailRow(label: "Mount location", value: currentShare.mountPath)
                         DetailRow(label: "Protocol", value: currentShare.connectionProtocol?.title ?? "Unknown")
                         DetailRow(label: "Keychain credentials", value: hasKeychainCredentials ? "✓ Saved" : "✕ Not found")
+
+                        ServerNameButton(share: currentShare)
 
                         if runtimeState.needsCredentials {
                             Button {
@@ -344,6 +351,10 @@ struct ServerDetailView: View {
                         }
                         DetailRow(label: "Shares", value: "\(currentShares.count)")
                         DetailRow(label: "Protocol", value: "SMB")
+
+                        if let share = currentShares.first {
+                            ServerNameButton(share: share)
+                        }
                     }
                 }
 
@@ -364,7 +375,7 @@ struct ServerDetailView: View {
 
                 Divider()
 
-                NASDiagnosticsSection(shares: currentShares)
+                NASDiagnosticsSection(shares: currentShares, serverName: group.serverName)
 
                 Divider()
 
@@ -553,6 +564,43 @@ struct DetailRow: View {
                 .textSelection(.enabled)
         }
         .padding(.vertical, 1)
+    }
+}
+
+/// Lets the user name a server Otter only knows by its IP address. The name is
+/// shown in Otter only and applies to every share on that server.
+private struct ServerNameButton: View {
+    @EnvironmentObject private var settings: SettingsStore
+    let share: NetworkShare
+    @State private var isEditing = false
+    @State private var draftName = ""
+
+    var body: some View {
+        let customName = settings.customServerName(for: share)
+
+        if share.isAddressedByIP || customName != nil {
+            Button {
+                draftName = customName ?? ""
+                isEditing = true
+            } label: {
+                Label(customName == nil ? "Add Server Name…" : "Rename Server…", systemImage: "character.cursor.ibeam")
+            }
+            .tahoeSecondaryActionButton()
+            .alert(customName == nil ? "Add Server Name" : "Rename Server", isPresented: $isEditing) {
+                TextField("Server name", text: $draftName)
+                Button("Save") {
+                    settings.setCustomServerName(draftName, for: share)
+                }
+                if customName != nil {
+                    Button("Remove Name", role: .destructive) {
+                        settings.setCustomServerName(nil, for: share)
+                    }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Otter connects to \(share.host ?? "this server") by address and found no name for it. The name is shown in Otter and applies to every share on this server.")
+            }
+        }
     }
 }
 

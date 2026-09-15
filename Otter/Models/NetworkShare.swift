@@ -358,6 +358,21 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         return trimmedHost.isEmpty ? "Unknown Server" : trimmedHost
     }
 
+    /// The server name to show, preferring one the user gave this server.
+    func serverDisplayName(customNames: [String: String]) -> String {
+        if let serverIdentity, let name = customNames[serverIdentity] {
+            return name
+        }
+        return serverDisplayName
+    }
+
+    /// Otter knows this server only by an IP address, so it has no name of its
+    /// own to show and the user may give it one.
+    var isAddressedByIP: Bool {
+        guard let host else { return false }
+        return Self.isIPAddress(host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")))
+    }
+
     mutating func normalize() {
         displayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         urlString = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -600,7 +615,7 @@ struct NetworkShareServerGroup: Identifiable, Hashable {
         shares.count == 1 ? "1 share" : "\(shares.count) shares"
     }
 
-    static func make(from shares: [NetworkShare]) -> [NetworkShareServerGroup] {
+    static func make(from shares: [NetworkShare], serverNames: [String: String] = [:]) -> [NetworkShareServerGroup] {
         var sharesByKey: [String: [NetworkShare]] = [:]
         var serverNamesByKey: [String: String] = [:]
         var orderedKeys: [String] = []
@@ -609,7 +624,7 @@ struct NetworkShareServerGroup: Identifiable, Hashable {
             let key = share.serverIdentity.map { "server:\($0)" } ?? "share:\(share.id.uuidString)"
             if sharesByKey[key] == nil {
                 orderedKeys.append(key)
-                serverNamesByKey[key] = share.serverDisplayName
+                serverNamesByKey[key] = share.serverDisplayName(customNames: serverNames)
             }
             sharesByKey[key, default: []].append(share)
         }

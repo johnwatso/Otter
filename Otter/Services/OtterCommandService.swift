@@ -11,6 +11,7 @@ final class OtterCommandService {
     private let appModel: AppModel
     private var observer: NSObjectProtocol?
     private var completedResponses: [String: String] = [:]
+    private var inFlightRequestIDs = Set<String>()
 
     private enum ShareSelection {
         case matches([NetworkShare])
@@ -53,11 +54,14 @@ final class OtterCommandService {
             return
         }
 
+        guard inFlightRequestIDs.insert(requestID).inserted else { return }
+
         let shareName = notification.userInfo?["share"] as? String
         let outputPath = notification.userInfo?["outputPath"] as? String
 
         Task { @MainActor in
             let response = await execute(command: command, shareName: shareName, outputPath: outputPath)
+            inFlightRequestIDs.remove(requestID)
             completedResponses[requestID] = response
             if completedResponses.count > 100 {
                 completedResponses.removeAll(keepingCapacity: true)

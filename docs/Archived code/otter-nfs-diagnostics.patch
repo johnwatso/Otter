@@ -1,0 +1,762 @@
+Shelved: NAS diagnostics NFS support (Compare Using NFS / Reconnect as NFS, UNAS-aware).
+Apply from the repo root with: git apply otter-nfs-diagnostics.patch
+Base: the NAS diagnostics working tree as of 2026-09-07, NFS removed.
+
+--- a/Otter.xcodeproj/project.pbxproj
++++ b/Otter.xcodeproj/project.pbxproj
+@@ -64,6 +64,7 @@
+ 		D1A600000000000000000009 /* SharePerformanceTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A600000000000000010009; };
+ 		D1A60000000000000000000A /* NASDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A60000000000000001000A; };
+ 		D1A600000000000000000020 /* DiagnosticComparisonService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A600000000000000010020; };
++		D1A600000000000000000021 /* NFSExportInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A600000000000000010021; };
+ /* End PBXBuildFile section */
+ 
+ /* Begin PBXContainerItemProxy section */
+@@ -143,6 +144,7 @@
+ 		D1A600000000000000010009 /* SharePerformanceTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Diagnostics/SharePerformanceTester.swift"; sourceTree = "<group>"; };
+ 		D1A60000000000000001000A /* NASDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NASDiagnosticsView.swift"; sourceTree = "<group>"; };
+ 		D1A600000000000000010020 /* DiagnosticComparisonService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Diagnostics/DiagnosticComparisonService.swift"; sourceTree = "<group>"; };
++		D1A600000000000000010021 /* NFSExportInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Diagnostics/NFSExportInspector.swift"; sourceTree = "<group>"; };
+ /* End PBXFileReference section */
+ 
+ /* Begin PBXFrameworksBuildPhase section */
+@@ -220,6 +222,7 @@
+ 		1A2B3C4D5E6F700100000044 /* Services */ = {
+ 			isa = PBXGroup;
+ 			children = (
++				D1A600000000000000010021 /* NFSExportInspector.swift */,
+ 				D1A600000000000000010020 /* DiagnosticComparisonService.swift */,
+ 				D1A600000000000000010009 /* SharePerformanceTester.swift */,
+ 				D1A600000000000000010008 /* SMBMultichannelInspector.swift */,
+@@ -416,6 +419,7 @@
+ 			isa = PBXSourcesBuildPhase;
+ 			buildActionMask = 2147483647;
+ 			files = (
++				D1A600000000000000000021 /* NFSExportInspector.swift in Sources */,
+ 				D1A600000000000000000020 /* DiagnosticComparisonService.swift in Sources */,
+ 				D1A60000000000000000000A /* NASDiagnosticsView.swift in Sources */,
+ 				D1A600000000000000000009 /* SharePerformanceTester.swift in Sources */,
+--- a/OtterTests/OtterTests.swift
++++ b/OtterTests/OtterTests.swift
+@@ -4744,3 +4744,130 @@
+         }
+     }
+ }
++
++extension NASDiagnosticsTests {
++    func testNFSExportListingKeepsPathsAndDropsHeadersAndAccessLists() {
++        let output = """
++        Exports list on nas.local:
++        /volume1/Vault                      10.11.1.0/24
++        /volume1/Time Machine               Everyone
++        /volume1/Vault                      backup.local
++        not-an-export                       Everyone
++        /volume1/../etc                     Everyone
++        """
++        XCTAssertEqual(NFSExportInspector.parse(output), ["/volume1/Vault", "/volume1/Time Machine"])
++        XCTAssertEqual(NFSExportInspector.parse("showmount: Cannot retrieve info from host"), [])
++        XCTAssertEqual(NFSExportInspector.normalizedExport("//volume1///Vault/"), "/volume1/Vault")
++        for rejected in ["volume1/Vault", "/volume1/../etc", "/./secrets", "", "/vol\nume"] {
++            XCTAssertNil(NFSExportInspector.normalizedExport(rejected), rejected)
++        }
++        XCTAssertFalse(NFSExportInspector.isQueryableHost("-e"))
++        XCTAssertFalse(NFSExportInspector.isQueryableHost("nas.local extra"))
++        XCTAssertTrue(NFSExportInspector.isQueryableHost("nas.local"))
++    }
++
++    func testNFSExportMatchingOnlyGuessesWhenTheChoiceIsUnambiguous() {
++        let exports = ["/volume1/Vault", "/volume2/vault", "/volume1/Media"]
++        XCTAssertNil(NFSExportInspector.bestMatch(in: exports, shareName: "Vault"))
++        XCTAssertEqual(NFSExportInspector.bestMatch(in: exports, shareName: "media"), "/volume1/Media")
++        XCTAssertNil(NFSExportInspector.bestMatch(in: exports, shareName: "Photos"))
++        XCTAssertEqual(NFSExportInspector.bestMatch(in: ["/exports/Photos"], shareName: "Vault"), "/exports/Photos")
++        XCTAssertEqual(NFSExportInspector.bestMatch(in: ["/exports/Photos"], shareName: "Unavailable"), "/exports/Photos")
++        XCTAssertNil(NFSExportInspector.bestMatch(in: [], shareName: "Vault"))
++    }
++
++    func testSuggestedExportsLeadWithUniFiDriveAndStayValid() {
++        let suggestions = NFSExportInspector.suggestedExports(shareName: "Shared_Drive")
++        XCTAssertEqual(suggestions.first, "/var/nfs/shared/Shared_Drive")
++        XCTAssertEqual(suggestions, suggestions.compactMap { NFSExportInspector.normalizedExport($0) })
++        let share = NetworkShare(displayName: "Drive", urlString: "smb://unas.local/Shared_Drive", mountPath: "/Volumes/Shared_Drive")
++        XCTAssertEqual(NASDiagnosticsService.temporaryNFSURL(share: share, export: suggestions[0])?.absoluteString,
++                       "nfs://unas.local/var/nfs/shared/Shared_Drive")
++        XCTAssertTrue(NFSExportInspector.suggestedExports(shareName: "Unavailable").isEmpty)
++        XCTAssertTrue(NFSExportInspector.suggestedExports(shareName: " ").isEmpty)
++        XCTAssertTrue(NFSExportInspector.suggestedExports(shareName: "..").isEmpty)
++    }
++
++    func testTemporaryNFSURLKeepsTheConfiguredServerAndRejectsUnusablePaths() throws {
++        let share = NetworkShare(displayName: "Vault", urlString: "smb://alice:secret@nas.local/Vault?token=private", mountPath: "/Volumes/Vault")
++        let url = try XCTUnwrap(NASDiagnosticsService.temporaryNFSURL(share: share, export: "/volume1/Vault"))
++        XCTAssertEqual(url.absoluteString, "nfs://nas.local/volume1/Vault")
++        XCTAssertEqual(NASDiagnosticsService.temporaryNFSURL(share: share, export: "/volume1/Time Machine")?.absoluteString,
++                       "nfs://nas.local/volume1/Time%20Machine")
++        XCTAssertTrue(share.urlString.contains("smb://"))
++        for rejected in ["/volume1/../etc", "Vault", "/"] {
++            XCTAssertNil(NASDiagnosticsService.temporaryNFSURL(share: share, export: rejected), rejected)
++        }
++        let ipShare = NetworkShare(displayName: "Vault", urlString: "smb://10.11.1.241/Vault", mountPath: "/Volumes/Vault")
++        XCTAssertEqual(NASDiagnosticsService.temporaryNFSURL(share: ipShare, export: "/volume1/Vault")?.absoluteString, "nfs://10.11.1.241/volume1/Vault")
++        let nfsShare = NetworkShare(displayName: "Vault", urlString: "nfs://nas.local/volume1/Vault", mountPath: "/Volumes/Vault")
++        XCTAssertNil(NASDiagnosticsService.temporaryNFSURL(share: nfsShare, export: "/volume1/Vault"))
++    }
++
++    @MainActor
++    func testNFSComparisonComparesProtocolsThenRestoresSMB() async {
++        var reconnections: [URL?] = []
++        let target = URL(string: "nfs://nas.local/volume1/Vault")!
++        let outcome = await DiagnosticComparisonService.run(before: healthyNASResult(), kind: .nfs, targetURL: target,
++            isRestored: { $0.mount.protocolName == "SMB" && $0.mount.connectedUsing == "Hostname" },
++            reconnect: { url in reconnections.append(url); return true }, collect: {
++                guard reconnections.count == 1 else { return healthyNASResult(performance: false) }
++                var r = healthyNASResult(performance: false)
++                r.mount.protocolName = "NFS"
++                r.mount.shareName = "volume1/Vault"
++                r.smb = nil
++                return r
++            }, benchmark: { mount, size in
++                XCTAssertEqual(mount.protocolName, "NFS")
++                XCTAssertEqual(size, 5)
++                return .init(writeMBps: 110, readMBps: 112, bytes: 5_000_000_000, cacheBypass: true, duration: 60)
++            }, status: { _ in })
++        XCTAssertEqual(reconnections, [target, nil])
++        XCTAssertFalse(outcome.restorationRequired)
++        XCTAssertNil(outcome.error)
++        let comparison = outcome.comparison
++        XCTAssertEqual(comparison?.originalConnectionRestored, true)
++        XCTAssertEqual(comparison?.rows.first?.label, "Protocol")
++        XCTAssertEqual(comparison?.rows.first?.after, "NFS")
++        XCTAssertEqual(comparison?.rows.first(where: { $0.label == "SMB channels" })?.after, "Unavailable")
++        XCTAssertTrue(comparison?.interpretations.contains { $0.contains("Write performance improved") && $0.contains("using the NFS export") } == true)
++        XCTAssertTrue(comparison?.interpretations.contains { $0.contains("different protocols") } == true)
++        XCTAssertEqual(outcome.current?.mount.protocolName, "SMB")
++    }
++
++    @MainActor
++    func testNFSComparisonRefusesAnUnverifiedProtocolAndAMissingExport() async {
++        let noExport = await DiagnosticComparisonService.run(before: healthyNASResult(), kind: .nfs, targetURL: nil,
++            reconnect: { _ in XCTFail("Must not reconnect without an export"); return false },
++            collect: { healthyNASResult() }, benchmark: { _, _ in throw CancellationError() }, status: { _ in })
++        XCTAssertEqual(noExport.error, "An NFS export path is required.")
++
++        var reconnections = 0
++        // The remount succeeded but landed back on SMB: no comparison, and the
++        // configured connection is still restored before reporting the failure.
++        let unverified = await DiagnosticComparisonService.run(before: healthyNASResult(performance: false), kind: .nfs,
++            targetURL: URL(string: "nfs://nas.local/volume1/Vault")!,
++            reconnect: { _ in reconnections += 1; return true },
++            collect: { healthyNASResult(performance: false) },
++            benchmark: { _, _ in XCTFail("Must not benchmark an unverified mount"); throw CancellationError() }, status: { _ in })
++        XCTAssertEqual(reconnections, 2)
++        XCTAssertNil(unverified.comparison)
++        XCTAssertFalse(unverified.restorationRequired)
++        XCTAssertEqual(unverified.error, "The share did not reconnect over NFS. Check the export path and that the server exports it to this Mac.")
++    }
++
++    @MainActor
++    func testConfiguredConnectionCheckRequiresTheSavedProtocolAndAddressForm() {
++        let smb = NASDiagnosticsViewModel.matchesConfiguration(NetworkShare(displayName: "Vault", urlString: "smb://nas.local/Vault", mountPath: "/Volumes/Vault"))
++        var result = healthyNASResult()
++        XCTAssertTrue(smb(result))
++        result.mount.protocolName = "NFS"
++        XCTAssertFalse(smb(result))
++        result.mount.protocolName = "SMB"
++        result.mount.connectedUsing = "IP address"
++        XCTAssertFalse(smb(result))
++
++        let byIP = NASDiagnosticsViewModel.matchesConfiguration(NetworkShare(displayName: "Vault", urlString: "smb://10.11.1.241/Vault", mountPath: "/Volumes/Vault"))
++        XCTAssertTrue(byIP(result))
++    }
++}
+--- a/docs/nas-diagnostics.md
++++ b/docs/nas-diagnostics.md
+@@ -6,14 +6,30 @@
+ 
+ Cleanup removes only the file and directory created by that test. Cancellation waits for the current filesystem operation, then cleans up. A disconnected or stalled NAS can delay a blocking filesystem operation, including cleanup. If cleanup fails, the panel provides the exact test folder to remove after reconnecting. Force quitting or powering off can also leave a test folder; Otter does not recursively remove old folders or user files.
+ 
+-**Troubleshooting** contains the non-forced reconnect, comparison, and report actions. **Compare After Reconnect** saves the current completed result in memory, reconnects, and reruns diagnostics. If the baseline includes a performance test, the confirmation explicitly includes repeating that same test size. A baseline without a performance test never triggers disk I/O automatically.
++**Troubleshooting** contains the non-forced reconnect, comparison, protocol, and report actions. **Compare After Reconnect** saves the current completed result in memory, reconnects, and reruns diagnostics. If the baseline includes a performance test, the confirmation explicitly includes repeating that same test size. A baseline without a performance test never triggers disk I/O automatically.
+ 
+ **Compare Using IP Address** is available for hostname-mounted SMB shares after resolution. It verifies the temporary IP mount, collects the comparison, and restores the configured hostname connection, including after failure or cancellation. The before/after snapshots remain available after restoration. If restoration cannot be verified, **Restore Configured Connection** remains available and the comparison report records the failure. Busy shares are not forcibly unmounted. Saved addresses, credentials, and normal connection rules continue through Otter’s existing mount flow.
+ 
++**Compare Using NFS** and **Reconnect as NFS** are offered for SMB shares that are currently connected over SMB. Both ask the server for its exports with `showmount -e` and offer the matching path; an export path is only pre-selected when exactly one export matches the SMB share name, or the server exports exactly one path. Servers that do not answer an export listing — UniFi Drive among them — get a short list of suggested paths instead, clearly labelled as suggestions, with UniFi Drive's layout first. The path is always editable. Only an absolute path is accepted, and relative segments are rejected.
++
++**Compare Using NFS** mounts the export temporarily, repeats diagnostics and any matched performance test, then restores the configured SMB connection, including after failure or cancellation. The comparison is refused unless the share actually reconnected over NFS. **Reconnect as NFS** keeps the NFS connection for the rest of the session so it can be used in normal work; the panel then offers **Restore Configured Connection** whenever the live protocol differs from the saved one, including when the panel is closed and reopened. Before/after reconnect comparisons are unavailable while the connection is on a different protocol than the saved address. Neither action changes the saved URL, credentials, or protocol, and the export path is never saved.
++
++An SMB-versus-NFS comparison reports the protocol alongside the usual rows; SMB dialect, channel, and bandwidth figures are genuinely unavailable on the NFS side rather than missing. Because the two protocols differ in caching, write, and metadata behaviour — and an export may not even be the same storage — a difference between them is not evidence of a fault in either. A server that refuses the mount is reported as such, with the mount's own message, rather than the panel guessing why.
++
+ Read/write changes must exceed 10% to be described as meaningful. Throughput interpretation requires matched test sizes and cache-bypass settings; missing measurements are never treated as zero or as proof of no change. A single comparison cannot distinguish DNS effects from cache, server load, or the new SMB session.
+ 
+ **Copy Diagnostic Report** exports selected fields rather than raw command output. Reports include share/mount names, hostnames, local IP addresses, macOS and Otter versions, measurements, and cautious findings. They exclude configured URL credentials, Keychain contents, tokens, and unrelated SMB sessions. Review the report before sharing it.
+ 
++## UniFi Drive (UNAS)
++
++UniFi Drive exports each shared drive as `/var/nfs/shared/<Shared_Drive_Name>`, which is what the first suggested path offers when the export list is unavailable. NFS has to be turned on first in **UniFi Drive > Settings > Services**, and each shared drive needs an NFS squash mode.
++
++Use **Collaborative Mode (All Squash)** for a drive Otter compares. **Isolated Mode (No Root Squash)** cannot be undone and removes SMB access to that drive entirely, so a drive in that mode has no SMB connection left to compare against — and Otter offers these actions only for a share that is currently connected over SMB.
++
++macOS cannot mount NFS from a reserved port without root privileges, and Otter mounts through the same unprivileged NetFS path as every other share. An export that requires privileged ports therefore refuses the mount however the path is spelled. Otter reports the mount's own message alongside that possibility rather than guessing; the equivalent Linux `mount -t nfs` in Ubiquiti's guide runs as root and does use a reserved port, so a working Linux mount does not prove the export will accept this Mac.
++
++All-squash access maps every remote user to an anonymous account, so file ownership and permissions over NFS will not match the SMB view, and a share performance test can be refused for permissions alone. That is a property of the export, not a fault Otter found.
++
+ ## Health and performance expectations
+ 
+ The analyzer assigns **Good**, **Needs Attention**, **Potential Bottleneck**, or **Incomplete**. A completed connection check alone does not establish throughput health. The baseline example (1 Gb/s, 111.6 MB/s read, 82 MB/s write, 0.5 ms latency, no loss) is Good: read utilisation is approximately 95%, and lower writes are informational. Findings use good/info/warning severity; enabled Wi-Fi or security features alone are not warnings.
+@@ -30,6 +46,7 @@
+ - Routing uses `route -n get` against an active SMB endpoint when available, otherwise a resolved address. The report identifies this fallback. Network interface types come from SystemConfiguration, negotiated Ethernet media from `ifconfig`, and the local source address from a UDP route selection without sending data. Other SMB channels may use different interfaces than the current route.
+ - Interface details include MTU and duplex when exposed. Wi-Fi connection state comes from the interface status, while SMB participation is determined separately from active channels. Connected but unused Wi-Fi does not produce a finding. Unknown interface/channel data stays unavailable. Faster-Ethernet warnings require a known Wi-Fi/channel rate to compare against.
+ - Session age uses the selected SMB session’s setup timestamp. Malformed, future, or ambiguous daylight-saving timestamps remain unavailable. Most recent wake uses the read-only `kern.waketime` sysctl; zero or unsupported values remain unavailable. A session predating wake is informational context under Show Details, never a fault by itself.
++- `showmount -e <server>` lists NFS exports over the MOUNT protocol. The access list beside each export is parsed away and never shown or reported. No exports, an unreachable portmapper, or an NFSv4-only server leaves the list unavailable rather than empty, and manual entry stays open.
+ - Four numeric ping probes have a subprocess deadline. ICMP filtering can make latency unavailable even when SMB works. A latency observation above 20 ms is contextualized for LAN, Wi-Fi, VPN, remote access, and server load.
+ - A 1GbE-like read ceiling on a faster link is flagged only for SMB when reads are 90–120 MB/s and writes exceed 150 MB/s. These are observations, not proof of an SMB defect.
+ - No system SMB configuration, signing policy, encryption policy, Wi-Fi state, MTU, or NAS setting is changed.
+@@ -40,4 +57,4 @@
+ 
+ Run `xcodebuild -project Otter.xcodeproj -scheme Otter -configuration Debug CODE_SIGNING_ALLOWED=NO test`.
+ 
+-Regression coverage includes health/efficiency thresholds, channel capacity caps, Wi-Fi awareness, consistency sampling, session/wake context, comparison interpretation and restoration after failure/cancellation, native panel rendering at two sizes, JSON/text parsing, unavailable values, active channel selection, interface speed, packet loss, findings, report field selection, temporary IP URLs, maintenance remount overrides, subprocess cancellation/deadlines, local-volume rejection, and temporary-file cleanup on success and cancellation. Local fixture I/O tests validate ownership/cleanup, not NAS throughput. Real UNAS/Synology throughput, mount permissions, and OS-specific output still need hardware validation.
++Regression coverage includes health/efficiency thresholds, channel capacity caps, Wi-Fi awareness, consistency sampling, session/wake context, comparison interpretation and restoration after failure/cancellation, NFS export listing/matching and temporary NFS addresses, native panel rendering at two sizes, JSON/text parsing, unavailable values, active channel selection, interface speed, packet loss, findings, report field selection, temporary IP URLs, maintenance remount overrides, subprocess cancellation/deadlines, local-volume rejection, and temporary-file cleanup on success and cancellation. Local fixture I/O tests validate ownership/cleanup, not NAS throughput. Real UNAS/Synology throughput, mount permissions, and OS-specific output still need hardware validation.
+--- a/Otter/Views/NASDiagnosticsView.swift
++++ b/Otter/Views/NASDiagnosticsView.swift
+@@ -34,8 +34,20 @@
+     @Published var comparing = false
+     @Published var restorationRequired = false
+     @Published var restoring = false
++    @Published var exportChoices: [String] = []
++    @Published var exportsDiscovered = false
++    @Published var exportPath = ""
++    @Published var discovering = false
+     private var task: Task<Void, Never>?
+ 
++    /// What the configured share must look like before restoration counts as
++    /// verified: the saved protocol, reached the way the saved address spells it.
++    static func matchesConfiguration(_ share: NetworkShare) -> @MainActor (NASDiagnosticResult) -> Bool {
++        let protocolName = share.url?.scheme?.uppercased() ?? "SMB"
++        let connectedUsing = NetworkShare.isIPAddress(share.host ?? "") ? "IP address" : "Hostname"
++        return { $0.mount.protocolName == protocolName && $0.mount.connectedUsing == connectedUsing }
++    }
++
+     func run(share: NetworkShare, service: MountService) {
+         guard !running, !testing, !comparing, !restoring else { return }
+         running = true
+@@ -82,13 +94,19 @@
+     }
+ 
+     func compare(kind: DiagnosticComparisonKind, share: NetworkShare, service: MountService, monitor: ShareMonitor) {
+-        guard !running, !testing, !comparing, !restoring, !restorationRequired, let before = result else { return }
+-        let target = kind == .ipAddress ? before.mount.resolvedIP.flatMap { NASDiagnosticsService.temporaryIPURL(share: share, address: $0) } : nil
++        guard !running, !testing, !comparing, !restoring, !discovering, !restorationRequired, let before = result else { return }
++        let target: URL?
++        switch kind {
++        case .reconnect: target = nil
++        case .ipAddress: target = before.mount.resolvedIP.flatMap { NASDiagnosticsService.temporaryIPURL(share: share, address: $0) }
++        case .nfs: target = NASDiagnosticsService.temporaryNFSURL(share: share, export: exportPath)
++        }
+         comparing = true
+         comparison = nil
+         error = nil
+         task = Task {
+             let outcome = await DiagnosticComparisonService.run(before: before, kind: kind, targetURL: target,
++                isRestored: Self.matchesConfiguration(share),
+                 reconnect: { url in await monitor.remountForMaintenance(share, diagnosticURL: url) },
+                 collect: {
+                     var collected: NASDiagnosticResult?
+@@ -118,8 +136,68 @@
+         }
+     }
+ 
++    /// macOS cannot use a reserved source port without root, so an export
++    /// restricted to privileged ports refuses Otter's mount. That is the most
++    /// common NFS refusal, and the mount's own message is kept ahead of it.
++    static func nfsMountFailure(monitor: ShareMonitor, share: NetworkShare) -> String {
++        var reason = "The share did not reconnect over NFS."
++        if case let .failed(message) = monitor.status(for: share) { reason += " " + message }
++        return reason + " Check the export path, that the server exports it to this Mac, and that the export allows"
++            + " non-privileged ports — macOS cannot mount NFS from a reserved port."
++    }
++
++    /// Lists the server's exports so the panel can offer a choice instead of
++    /// guessing an export path from the SMB share name.
++    func discoverExports(share: NetworkShare) {
++        guard !running, !testing, !comparing, !restoring, !discovering else { return }
++        discovering = true
++        exportChoices = []
++        error = nil
++        let host = share.host ?? ""
++        let shareName = result?.mount.shareName ?? NetworkShare.inferredShareName(from: share.urlString) ?? ""
++        task = Task {
++            let discovered = await NFSExportInspector().exports(host: host)
++            exportsDiscovered = discovered != nil
++            exportChoices = discovered ?? NFSExportInspector.suggestedExports(shareName: shareName)
++            exportPath = discovered.flatMap { NFSExportInspector.bestMatch(in: $0, shareName: shareName) ?? $0.first }
++                ?? exportChoices.first ?? ""
++            discovering = false
++            task = nil
++        }
++    }
++
++    /// Connects over NFS and stays there for this session. The saved SMB
++    /// address is untouched, so restoration remains on offer throughout.
++    func reconnectAsNFS(share: NetworkShare, url: URL, service: MountService, monitor: ShareMonitor) {
++        guard !running, !testing, !comparing, !restoring, !discovering else { return }
++        running = true
++        result = nil
++        comparison = nil
++        error = nil
++        status = "Connecting over NFS…"
++        performanceStatus = "Not tested"
++        task = Task {
++            if await monitor.remountForMaintenance(share, diagnosticURL: url) {
++                restorationRequired = true
++                await NASDiagnosticsService().run(share: share, mountService: service) { [weak self] result, status in
++                    self?.result = result
++                    self?.status = status
++                }
++                if !Task.isCancelled, result?.mount.protocolName != "NFS" {
++                    error = Self.nfsMountFailure(monitor: monitor, share: share)
++                    status = "NFS connection not verified"
++                }
++            } else {
++                error = "The share is busy or another connection check is running. Close open files or wait briefly, then try again."
++            }
++            if Task.isCancelled { status = "Diagnostics cancelled — partial results" }
++            running = false
++            task = nil
++        }
++    }
++
+     func restore(share: NetworkShare, service: MountService, monitor: ShareMonitor) {
+-        guard !running, !testing, !comparing, !restoring else { return }
++        guard !running, !testing, !comparing, !restoring, !discovering else { return }
+         restoring = true
+         status = "Restoring the configured connection…"
+         error = nil
+@@ -131,10 +209,11 @@
+                     self.status = label
+                 }
+             }
+-            let restored = reconnected && result?.isComplete == true && result?.mount.mountPath != nil && result?.mount.connectedUsing == "Hostname"
++            let matches = result.map(Self.matchesConfiguration(share)) == true
++            let restored = reconnected && result?.isComplete == true && result?.mount.mountPath != nil && matches
+             restorationRequired = !restored
+             comparison?.originalConnectionRestored = restored
+-            if !restored { error = "The configured hostname connection could not be verified. Close files on the share and retry restoration. Your saved server address is unchanged." }
++            if !restored { error = "The configured connection could not be verified. Close files on the share and retry restoration. Your saved server address is unchanged." }
+             restoring = false
+             task = nil
+         }
+@@ -159,15 +238,34 @@
+     @State private var reconnecting = false
+     @State private var pendingComparison: DiagnosticComparisonKind?
+     @State private var confirmComparison = false
++    @State private var nfsIntent: NFSIntent?
+ 
++    /// What the export picker will do once a path is chosen.
++    private enum NFSIntent: String, Identifiable { case compare, reconnect
++        var id: String { rawValue }
++    }
++
+     @MainActor
+     init(share: NetworkShare, model: NASDiagnosticsViewModel? = nil) {
+         self.share = share
+         _model = StateObject(wrappedValue: model ?? NASDiagnosticsViewModel())
+     }
+ 
+-    private var busy: Bool { model.running || model.testing || model.comparing || model.restoring || reconnecting }
++    private var busy: Bool { model.running || model.testing || model.comparing || model.restoring || model.discovering || reconnecting }
+ 
++    /// Only an SMB share currently connected over SMB has another protocol to try.
++    private func supportsNFS(_ result: NASDiagnosticResult) -> Bool {
++        share.url?.scheme == "smb" && result.mount.protocolName == "SMB"
++            && NFSExportInspector.isQueryableHost(share.host ?? "")
++    }
++
++    /// A session-only protocol change outlives this panel, so restoration is
++    /// offered from the live mount as well as from the comparison that made it.
++    private func connectedOnAnotherProtocol(_ result: NASDiagnosticResult?) -> Bool {
++        guard let result, let scheme = share.url?.scheme?.uppercased(), result.mount.mountPath != nil else { return false }
++        return result.mount.protocolName != scheme
++    }
++
+     var body: some View {
+         VStack(alignment: .leading, spacing: 16) {
+             HStack {
+@@ -224,7 +322,8 @@
+                                     pendingComparison = .reconnect
+                                     confirmComparison = true
+                                 }
+-                                .disabled(busy || !result.isComplete || result.mount.mountPath == nil || model.restorationRequired)
++                                .disabled(busy || !result.isComplete || result.mount.mountPath == nil || model.restorationRequired
++                                          || connectedOnAnotherProtocol(result))
+ 
+                                 if result.mount.connectedUsing == "Hostname", let address = result.mount.resolvedIP,
+                                    NASDiagnosticsService.temporaryIPURL(share: share, address: address) != nil {
+@@ -235,6 +334,18 @@
+                                     .disabled(busy || !result.isComplete || model.restorationRequired)
+                                 }
+ 
++                                if supportsNFS(result) {
++                                    troubleshootingButton("Compare Using NFS", systemImage: "arrow.triangle.swap") {
++                                        beginNFS(.compare)
++                                    }
++                                    .disabled(busy || !result.isComplete || result.mount.mountPath == nil || model.restorationRequired)
++
++                                    troubleshootingButton("Reconnect as NFS", systemImage: "externaldrive.connected.to.line.below") {
++                                        beginNFS(.reconnect)
++                                    }
++                                    .disabled(busy || result.mount.mountPath == nil)
++                                }
++
+                                 troubleshootingButton(
+                                     copied ? "Copied" : "Copy Diagnostic Report",
+                                     systemImage: copied ? "checkmark" : "doc.on.doc"
+@@ -251,20 +362,31 @@
+                                     .font(.caption)
+                                     .foregroundStyle(.secondary)
+                             }
++                            if supportsNFS(result) {
++                                Label("An NFS comparison restores SMB when it finishes; Reconnect as NFS stays connected until you restore it or relaunch Otter. Your saved SMB address is unchanged either way.", systemImage: "info.circle")
++                                    .font(.caption)
++                                    .foregroundStyle(.secondary)
++                            }
+                         }
+                         Text("Reports include server names and local IP addresses. Review before sharing.").font(.caption).foregroundStyle(.secondary)
+                     } else {
+                         Text("Run a short check to understand this share’s connection. Performance testing is optional and starts separately.").foregroundStyle(.secondary)
+                     }
+                     if let comparison = model.comparison { comparisonView(comparison) }
+-                    if model.restorationRequired {
+-                        Button {
+-                            model.restore(share: share, service: appModel.mountService, monitor: monitor)
+-                        } label: {
+-                            Label("Restore Configured Connection", systemImage: "arrow.uturn.backward")
++                    if model.restorationRequired || connectedOnAnotherProtocol(model.result) {
++                        VStack(alignment: .leading, spacing: 8) {
++                            Button {
++                                model.restore(share: share, service: appModel.mountService, monitor: monitor)
++                            } label: {
++                                Label("Restore Configured Connection", systemImage: "arrow.uturn.backward")
++                            }
++                            .tahoeSecondaryActionButton()
++                            .disabled(busy)
++                            if let live = model.result?.mount.protocolName, connectedOnAnotherProtocol(model.result) {
++                                Text("This share is connected over \(live) for this session only. Your saved \(share.url?.scheme?.uppercased() ?? "SMB") address is unchanged.")
++                                    .font(.caption).foregroundStyle(.secondary)
++                            }
+                         }
+-                        .tahoeSecondaryActionButton()
+-                        .disabled(busy)
+                     }
+                     if let error = model.error { Text(error).foregroundStyle(.orange).textSelection(.enabled) }
+                 }
+@@ -289,6 +411,7 @@
+         } message: {
+             Text("Otter will write and read a \(gigabytes) GB temporary file in its own unique folder on this share, then remove it. This uses network and storage bandwidth. NAS caching can affect the results.")
+         }
++        .sheet(item: $nfsIntent) { intent in exportPicker(intent) }
+         .alert(pendingComparison?.rawValue ?? "Compare Connection", isPresented: $confirmComparison) {
+             Button("Cancel", role: .cancel) { }
+             Button("Start Comparison") {
+@@ -420,6 +543,62 @@
+         .tahoeSecondaryActionButton()
+     }
+ 
++    private func beginNFS(_ intent: NFSIntent) {
++        model.discoverExports(share: share)
++        nfsIntent = intent
++    }
++
++    private func exportPicker(_ intent: NFSIntent) -> some View {
++        let target = NASDiagnosticsService.temporaryNFSURL(share: share, export: model.exportPath)
++        return VStack(alignment: .leading, spacing: 14) {
++            Text(intent == .compare ? "Compare Using NFS" : "Reconnect as NFS").font(.title3.bold())
++            Text(intent == .compare
++                 ? "Otter will connect this share over NFS and repeat diagnostics. "
++                    + (model.result?.performance.map { "It will also repeat the \($0.sizeText) temporary-file performance test and remove the file. " } ?? "No performance test will run because the baseline was not tested. ")
++                    + "The configured SMB connection will be restored when finished, including after cancellation."
++                 : "Otter will connect this share over NFS and leave it connected for this session, so you can use it in normal work. Restore Configured Connection puts SMB back, and relaunching Otter does the same.")
++                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
++            if model.discovering {
++                HStack(spacing: 8) {
++                    ProgressView().controlSize(.small)
++                    Text("Asking \(share.host ?? "the server") for its exports…").foregroundStyle(.secondary)
++                }.font(.callout)
++            } else {
++                if !model.exportChoices.isEmpty {
++                    Picker(model.exportsDiscovered ? "Export" : "Suggested", selection: $model.exportPath) {
++                        ForEach(model.exportChoices, id: \.self) { Text($0).tag($0) }
++                        if !model.exportChoices.contains(model.exportPath) { Text(model.exportPath).tag(model.exportPath) }
++                    }
++                }
++                if !model.exportsDiscovered {
++                    Label("\(share.host ?? "The server") did not list its exports — UniFi Drive does not, and an NFSv4-only server may not either. UniFi Drive exports each shared drive as /var/nfs/shared/<name>. Confirm the path or enter your own.", systemImage: "info.circle")
++                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
++                }
++            }
++            TextField("Export path", text: $model.exportPath, prompt: Text("/volume1/Vault"))
++                .textFieldStyle(.roundedBorder).disabled(model.discovering)
++            if !model.exportPath.isEmpty, target == nil {
++                Text("Enter an absolute export path, such as /volume1/Vault.").font(.caption).foregroundStyle(.orange)
++            }
++            HStack {
++                Spacer()
++                Button("Cancel") { nfsIntent = nil }.keyboardShortcut(.cancelAction)
++                Button(intent == .compare ? "Start Comparison" : "Reconnect as NFS") {
++                    nfsIntent = nil
++                    copied = false
++                    if intent == .compare {
++                        model.compare(kind: .nfs, share: share, service: appModel.mountService, monitor: monitor)
++                    } else if let target {
++                        model.reconnectAsNFS(share: share, url: target, service: appModel.mountService, monitor: monitor)
++                    }
++                }
++                .tahoePrimaryActionButton().disabled(model.discovering || target == nil)
++            }
++        }
++        .padding(20).frame(width: 460)
++        .background(Color(NSColor.windowBackgroundColor))
++    }
++
+     private func reconnect(url: URL? = nil) {
+         reconnecting = true
+         Task {
+--- a/Otter/Services/Diagnostics/DiagnosticModels.swift
++++ b/Otter/Services/Diagnostics/DiagnosticModels.swift
+@@ -212,6 +212,44 @@
+ enum DiagnosticComparisonKind: String, Sendable {
+     case reconnect = "Before / After Reconnect"
+     case ipAddress = "Hostname vs IP"
++    case nfs = "SMB vs NFS"
++
++    /// Kinds that connect somewhere other than the configured address and must
++    /// put the configured connection back afterwards.
++    var usesTemporaryMount: Bool { self != .reconnect }
++
++    var changeContext: String {
++        switch self {
++        case .reconnect: "after reconnecting the SMB session"
++        case .ipAddress: "using the direct-IP connection"
++        case .nfs: "using the NFS export"
++        }
++    }
++
++    var noChangeSummary: String {
++        switch self {
++        case .reconnect: "No meaningful performance change was detected after reconnecting (10% threshold)."
++        case .ipAddress: "No meaningful difference was detected between hostname and direct-IP connections (10% threshold)."
++        case .nfs: "No meaningful difference was detected between the SMB share and the NFS export (10% threshold)."
++        }
++    }
++
++    var columnTitles: (before: String, after: String) {
++        switch self {
++        case .reconnect: ("Before", "After")
++        case .ipAddress: ("Hostname", "IP")
++        case .nfs: ("SMB", "NFS")
++        }
++    }
++
++    var caveat: String {
++        switch self {
++        case .nfs:
++            "This is a single comparison between two different protocols. NFS and SMB differ in caching, write, and metadata behaviour, and the export may not even be the same storage, so a difference does not by itself identify a fault in either."
++        default:
++            "This is a single before/after comparison. NAS caches, storage activity, and session changes may influence the result; it does not isolate DNS as the cause."
++        }
++    }
+ }
+ struct DiagnosticComparison: Sendable {
+     var kind: DiagnosticComparisonKind
+@@ -231,13 +269,11 @@
+             guard old > 0, old.isFinite, new.isFinite else { continue }
+             let change = (new / old - 1) * 100
+             if abs(change) > 10 {
+-                messages.append("\(label) performance \(change > 0 ? "improved" : "decreased") by \(diagnosticPercent(abs(change))) \(kind == .reconnect ? "after reconnecting the SMB session" : "using the direct-IP connection").")
++                messages.append("\(label) performance \(change > 0 ? "improved" : "decreased") by \(diagnosticPercent(abs(change))) \(kind.changeContext).")
+             }
+         }
+-        if messages.isEmpty {
+-            messages.append(kind == .reconnect ? "No meaningful performance change was detected after reconnecting (10% threshold)." : "No meaningful difference was detected between hostname and direct-IP connections (10% threshold).")
+-        }
+-        messages.append("This is a single before/after comparison. NAS caches, storage activity, and session changes may influence the result; it does not isolate DNS as the cause.")
++        if messages.isEmpty { messages.append(kind.noChangeSummary) }
++        messages.append(kind.caveat)
+         return messages
+     }
+ }
+@@ -250,7 +286,9 @@
+ }
+ extension DiagnosticComparison {
+     var rows: [DiagnosticComparisonRow] {
+-        [
++        // The SMB rows stay in a protocol comparison: an unavailable NFS value
++        // is a real difference between the two connections, not a gap.
++        (kind == .nfs ? [DiagnosticComparisonRow(label: "Protocol", before: before.mount.protocolName, after: after.mount.protocolName)] : []) + [
+             .init(label: "Latency", before: diagnosticNumber(before.latency?.average, suffix: " ms"), after: diagnosticNumber(after.latency?.average, suffix: " ms")),
+             .init(label: "SMB channels", before: before.smb?.activeChannelCount.map(String.init) ?? "Unavailable", after: after.smb?.activeChannelCount.map(String.init) ?? "Unavailable"),
+             .init(label: "SMB bandwidth", before: diagnosticSpeed(before.smb?.effectiveBandwidthMbps), after: diagnosticSpeed(after.smb?.effectiveBandwidthMbps)),
+--- a/Otter/Services/Diagnostics/DiagnosticComparisonService.swift
++++ b/Otter/Services/Diagnostics/DiagnosticComparisonService.swift
+@@ -12,6 +12,7 @@
+ @MainActor
+ enum DiagnosticComparisonService {
+     static func run(before: NASDiagnosticResult, kind: DiagnosticComparisonKind, targetURL: URL?,
++                    isRestored: @escaping @MainActor (NASDiagnosticResult) -> Bool = { $0.mount.connectedUsing == "Hostname" },
+                     reconnect: @escaping @MainActor (URL?) async -> Bool,
+                     collect: @escaping @MainActor () async throws -> NASDiagnosticResult,
+                     benchmark: @escaping @MainActor (MountDiagnostic, Int) async throws -> PerformanceDiagnostic,
+@@ -21,8 +22,8 @@
+             outcome.error = "Run Diagnostics on the connected share before comparing."
+             return outcome
+         }
+-        if kind == .ipAddress, targetURL == nil {
+-            outcome.error = "A resolved IP address is required."
++        if kind.usesTemporaryMount, targetURL == nil {
++            outcome.error = kind == .nfs ? "An NFS export path is required." : "A resolved IP address is required."
+             return outcome
+         }
+         var needsRestoration = false
+@@ -30,15 +31,20 @@
+             try Task.checkCancellation()
+             status("Reconnecting for comparison…")
+             let reconnected = await reconnect(targetURL)
+-            needsRestoration = kind == .ipAddress && reconnected
++            needsRestoration = kind.usesTemporaryMount && reconnected
+             guard reconnected else { throw ComparisonError.reconnect }
+             try Task.checkCancellation()
+             var after = try await collect()
+             guard after.isComplete, after.mount.mountPath != nil else { throw ComparisonError.incomplete }
+-            if kind == .ipAddress {
++            switch kind {
++            case .reconnect:
++                break
++            case .ipAddress:
+                 guard after.mount.connectedUsing == "IP address", after.mount.server == targetURL?.host(percentEncoded: false)?.trimmingCharacters(in: CharacterSet(charactersIn: "[]")) else {
+                     throw ComparisonError.unverifiedIP
+                 }
++            case .nfs:
++                guard after.mount.protocolName == "NFS" else { throw ComparisonError.unverifiedNFS }
+             }
+             if let performance = before.performance {
+                 try Task.checkCancellation()
+@@ -63,7 +69,7 @@
+                 guard await reconnect(nil) else { return nil as NASDiagnosticResult? }
+                 return try? await collect()
+             }.value
+-            let succeeded = restored?.isComplete == true && restored?.mount.mountPath != nil && restored?.mount.connectedUsing == "Hostname"
++            let succeeded = restored?.isComplete == true && restored?.mount.mountPath != nil && restored.map(isRestored) == true
+             outcome.comparison?.originalConnectionRestored = succeeded
+             outcome.current = succeeded ? restored : nil
+             outcome.restorationRequired = !succeeded
+@@ -75,12 +81,13 @@
+     }
+ 
+     private enum ComparisonError: LocalizedError {
+-        case reconnect, incomplete, unverifiedIP, testSize
++        case reconnect, incomplete, unverifiedIP, unverifiedNFS, testSize
+         var errorDescription: String? {
+             switch self {
+             case .reconnect: return "The share is busy or another connection check is running. The comparison could not reconnect it."
+             case .incomplete: return "Diagnostics did not find a connected share after reconnecting. No comparison was completed."
+             case .unverifiedIP: return "The direct-IP mount could not be verified. No IP comparison was completed."
++            case .unverifiedNFS: return "The share did not reconnect over NFS. Check the export path and that the server exports it to this Mac."
+             case .testSize: return "The baseline test size cannot be repeated. Run a new performance test before comparing."
+             }
+         }
+--- a/Otter/Services/Diagnostics/NASDiagnosticsService.swift
++++ b/Otter/Services/Diagnostics/NASDiagnosticsService.swift
+@@ -107,6 +107,19 @@
+         return components.url
+     }
+ 
++    /// Session-only NFS address for an SMB share. The configured server name is
++    /// kept; only the protocol and the exported path change.
++    static func temporaryNFSURL(share: NetworkShare, export: String) -> URL? {
++        guard let url = share.url, url.scheme == "smb",
++              let host = share.host, !host.isEmpty,
++              let path = NFSExportInspector.normalizedExport(export) else { return nil }
++        var components = URLComponents()
++        components.scheme = "nfs"
++        components.host = NetworkShare.isIPAddress(host) ? NetworkShare.urlComponentsHost(forIPAddress: host) : host
++        components.path = path
++        return components.url
++    }
++
+     static func mountedSource(path: String) -> MountDiagnostic? {
+         let count = getfsstat(nil, 0, MNT_NOWAIT)
+         guard count > 0 else { return nil }
+diff --git a/Otter/Services/Diagnostics/NFSExportInspector.swift b/Otter/Services/Diagnostics/NFSExportInspector.swift
+new file mode 100644
+--- /dev/null
++++ b/Otter/Services/Diagnostics/NFSExportInspector.swift
+@@ -0,0 +1,69 @@
++import Foundation
++
++/// Lists a server's NFS exports over the MOUNT protocol. Servers that do not
++/// answer `showmount` — NFSv4 only, or a filtered portmapper — leave the list
++/// unavailable rather than empty, so the panel can offer manual entry instead
++/// of claiming the server has no exports.
++struct NFSExportInspector {
++    func exports(host: String, runner: DiagnosticCommandRunner = DiagnosticCommandRunner()) async -> [String]? {
++        guard Self.isQueryableHost(host),
++              let output = await runner.run("/usr/bin/showmount", ["-e", host], timeout: 10) else { return nil }
++        let paths = Self.parse(output)
++        return paths.isEmpty ? nil : paths
++    }
++
++    /// A leading dash would be read as an option by the utility.
++    static func isQueryableHost(_ host: String) -> Bool {
++        !host.isEmpty && host.count <= 253 && !host.hasPrefix("-")
++            && host.rangeOfCharacter(from: .whitespacesAndNewlines) == nil
++            && host != "Unavailable"
++    }
++
++    /// `showmount -e` prints a header line, then one export per line followed by
++    /// its access list. The access list is never shown or reported.
++    static func parse(_ text: String) -> [String] {
++        var paths: [String] = []
++        for line in text.components(separatedBy: .newlines) {
++            let trimmed = line.trimmingCharacters(in: .whitespaces)
++            guard trimmed.hasPrefix("/") else { continue }
++            // The access list is column-aligned, so two or more spaces end the
++            // path. A single space stays part of it.
++            let path = DiagnosticParsing.capture(#"^(/\S(?:.*?\S)?)(?:\s{2,}.*)?$"#, in: trimmed)?.first ?? trimmed
++            guard let normalized = normalizedExport(path), !paths.contains(normalized) else { continue }
++            paths.append(normalized)
++            if paths.count == 64 { break }
++        }
++        return paths
++    }
++
++    /// Accepts an absolute export path only, with no relative or empty segments.
++    static func normalizedExport(_ path: String) -> String? {
++        let trimmed = path.trimmingCharacters(in: .whitespaces)
++        guard trimmed.hasPrefix("/"), trimmed.count <= 1024,
++              trimmed.rangeOfCharacter(from: CharacterSet.newlines.union(.controlCharacters)) == nil else { return nil }
++        let components = trimmed.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
++        guard !components.isEmpty, !components.contains("."), !components.contains("..") else { return nil }
++        return "/" + components.joined(separator: "/")
++    }
++
++    /// Where the servers Otter is used with put a share when the export list is
++    /// unavailable. UniFi Drive is first: it exports each shared drive as
++    /// `/var/nfs/shared/<name>` and does not answer an export listing.
++    /// These are starting points for the user to confirm, never a guess Otter
++    /// acts on by itself.
++    static func suggestedExports(shareName: String) -> [String] {
++        let name = shareName.trimmingCharacters(in: .whitespaces)
++        guard !name.isEmpty, name != "Unavailable", normalizedExport("/" + name) != nil else { return [] }
++        return ["/var/nfs/shared/\(name)", "/volume1/\(name)", "/mnt/\(name)", "/\(name)"]
++    }
++
++    /// An export path rarely equals the SMB share name, but its last component
++    /// usually does. Anything less certain is left for the user to choose.
++    static func bestMatch(in exports: [String], shareName: String) -> String? {
++        let name = shareName.trimmingCharacters(in: .whitespaces).lowercased()
++        guard !name.isEmpty, name != "unavailable" else { return exports.count == 1 ? exports.first : nil }
++        let matches = exports.filter { $0.split(separator: "/").last?.lowercased() == name }
++        if matches.count == 1 { return matches.first }
++        return matches.isEmpty && exports.count == 1 ? exports.first : nil
++    }
++}

@@ -59,7 +59,7 @@ struct ConnectionDoctorView: View {
                 ContentUnavailableView {
                     Label("Ready to Check", systemImage: "stethoscope")
                 } description: {
-                    Text("Otter will check the network, conditions, credentials, SMB reachability, and mounted-volume health.")
+                    Text("Otter will check the network, connection conditions, server reachability, and mounted-volume health.")
                 }
             }
 

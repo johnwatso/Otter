@@ -92,7 +92,11 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
             reachableHost = host
         }
 
-        let port = NWEndpoint.Port(rawValue: UInt16(url.port ?? 445)) ?? NWEndpoint.Port(rawValue: 445)!
+        guard let rawPort = Self.reachabilityPort(for: url),
+              let port = NWEndpoint.Port(rawValue: rawPort)
+        else {
+            return false
+        }
         let connection = NWConnection(host: NWEndpoint.Host(reachableHost), port: port, using: .tcp)
 
         return await withCheckedContinuation { continuation in
@@ -115,6 +119,20 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
             reachabilityQueue.asyncAfter(deadline: .now() + timeout) {
                 attempt.finish(false)
             }
+        }
+    }
+
+    nonisolated static func reachabilityPort(for url: URL) -> UInt16? {
+        if let explicitPort = url.port {
+            return UInt16(exactly: explicitPort)
+        }
+
+        switch url.scheme?.lowercased() {
+        case "smb": return 445
+        case "nfs": return 2049
+        case "https", "webdavs": return 443
+        case "http", "webdav": return 80
+        default: return nil
         }
     }
 
