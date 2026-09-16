@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Add per-share NAS diagnostics - Release Notes</title>
+  <title>Improve NAS diagnostics and connection reliability - Release Notes</title>
   <style>
     :root { color-scheme: light dark; }
     body {
@@ -39,12 +39,17 @@
 </head>
 <body>
   <main>
-    <h1>Add per-share NAS diagnostics</h1>
+    <h1>Improve NAS diagnostics and connection reliability</h1>
     <p class="meta">Version 0.5.0</p>
-    <p>Add per-share NAS diagnostics</p>
-<p>Release notes:<br>- Add a NAS Diagnostics panel to every share and server detail panel in Manage Shares, reporting connection health, routing, SMB dialect and channels, and latency from a read-only check.<br>- Report an expected practical maximum from verified active SMB channels, capped by each client interface, so utilisation is measured against a defensible ceiling rather than a nominal link speed.<br>- Add an optional 1-5 GB share performance test that writes and reads a temporary file in its own uniquely named folder, requests client cache bypass, and removes what it created on success and on cancellation.<br>- Add Compare After Reconnect and Compare Using IP Address, which repeat diagnostics and any matched performance test, then restore the configured connection including after failure or cancellation.<br>- Offer Restore Configured Connection when a temporary direct-IP mount cannot be verified, leaving saved addresses, credentials, and connection rules unchanged throughout.<br>- Report cautious findings with good, informational, and warning severities, and never treat an unavailable measurement as zero or as proof that nothing is wrong.<br>- Add Copy Diagnostic Report, which exports selected fields rather than raw command output and excludes credentials, Keychain contents, and unrelated SMB sessions.<br>- Leave busy shares mounted rather than forcing an unmount, and give every diagnostic subprocess a deadline so a stalled NAS cannot hold a check open.<br>- Bump Otter to version 0.5.0 (build 2026090711).<br>- Add regression coverage for health and efficiency thresholds, channel capacity caps, Wi-Fi awareness, session and wake context, comparison restoration after failure and cancellation, report field selection, subprocess deadlines, and temporary-file cleanup.</p>
-<p>Validation:<br>- xcodebuild test -project Otter.xcodeproj -scheme Otter -destination 'platform=macOS'<br>- 203 tests passed with 0 failures.<br>- Confirmed the built app resolves CFBundleShortVersionString 0.5.0 and CFBundleVersion 2026090711.</p>
-    <p><strong>Commit:</strong> <a href="https://github.com/johnwatso/Otter/commit/eb7ef166eb7e5114c037d081538ec2c955d430ca">eb7ef16</a></p>
+    <p>Improve NAS diagnostics and connection reliability</p>
+<p>Release notes:</p>
+<p>- Run server-wide diagnostics across every configured share, with per-share status and a combined report.</p>
+<p>- Add custom display names for servers configured by IP address.</p>
+<p>- Make fast-link performance findings more realistic and keep reported throughput ranges consistent with their averages.</p>
+<p>- Extend reachability and Connection Doctor support across SMB, NFS, and WebDAV.</p>
+<p>- Harden writable-volume checks, duplicate-address detection, CLI request handling, and detected-share notification cleanup.</p>
+<p>- Expand regression coverage and documentation, and archive the shelved NFS diagnostics implementation for future work.</p>
+    <p><strong>Commit:</strong> <a href="https://github.com/johnwatso/Otter/commit/ba5ef9d37c16ee61ed299c05adac57a420c59176">ba5ef9d</a></p>
   </main>
 </body>
 </html>
