@@ -50,8 +50,9 @@ struct MenuBarView: View {
             appModel.requestNewShare()
             showShares()
         } label: {
-            Label("Add Share", systemImage: "plus")
+            Label("Add Share…", systemImage: "plus")
         }
+        .keyboardShortcut("n")
 
         Button {
             Task { await monitor.mountAll() }
@@ -69,11 +70,13 @@ struct MenuBarView: View {
 
         GlobalPauseMenu()
 
-        Divider()
-
-        networkStatusLabel
-        if networkService.isVPNConnected || networkService.hasUnidentifiedTunnel {
-            vpnStatusLabel
+        // Read-only status, grouped under a header so it doesn't read as a
+        // row of clickable commands.
+        Section("Network") {
+            networkStatusLabel
+            if networkService.isVPNConnected || networkService.hasUnidentifiedTunnel {
+                vpnStatusLabel
+            }
         }
 
         Divider()
@@ -87,8 +90,9 @@ struct MenuBarView: View {
         Button {
             showPreferences()
         } label: {
-            Label("Preferences", systemImage: "gearshape")
+            Label("Settings…", systemImage: "gearshape")
         }
+        .keyboardShortcut(",")
 
         Button {
             updaterViewModel.checkForUpdates()
@@ -102,6 +106,7 @@ struct MenuBarView: View {
         } label: {
             Label("Quit Otter", systemImage: "power")
         }
+        .keyboardShortcut("q")
     }
 
     private var networkStatusLabel: some View {
@@ -238,7 +243,7 @@ private struct ServerShareMenu: View {
             }
         } label: {
             Label {
-                Text("\(group.serverName) - \(group.shareCountLabel)")
+                Text("\(group.serverName) – \(group.shareCountLabel)")
             } icon: {
                 Image(systemName: "server.rack")
             }
@@ -312,7 +317,7 @@ private struct ShareMenu: View {
             }
         } label: {
             Label {
-                Text("\(share.displayName) - \(monitor.status(for: share).label)")
+                Text("\(share.displayName) – \(monitor.status(for: share).label)")
             } icon: {
                 Image(systemName: monitor.status(for: share).systemImage)
             }

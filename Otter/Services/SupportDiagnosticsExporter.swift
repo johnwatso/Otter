@@ -2,12 +2,11 @@ import AppKit
 import Foundation
 import UniformTypeIdentifiers
 
-/// Presents a responsive, window-attached export flow for Otter's existing
-/// redacted support package. The payload remains JSON so support tooling can
-/// consume it without parsing a display-oriented report.
+/// Presents a responsive, window-attached export flow for a readable,
+/// redacted diagnostic report that can be inspected before it is shared.
 @MainActor
 enum SupportDiagnosticsExporter {
-    static let fileType = UTType(filenameExtension: "ottersupport", conformingTo: .json) ?? .json
+    static let fileType = UTType.plainText
 
     static func makeData(
         settings: SettingsStore,
@@ -16,7 +15,7 @@ enum SupportDiagnosticsExporter {
         networkService: NetworkReachabilityService,
         notificationService: NotificationService,
         loginItemService: LoginItemService
-    ) throws -> Data {
+    ) -> Data {
         let package = SupportPackageService.make(
             settings: settings,
             eventLog: eventLog,
@@ -25,7 +24,7 @@ enum SupportDiagnosticsExporter {
             notificationService: notificationService,
             loginItemService: loginItemService
         )
-        return try SupportPackageService.encode(package)
+        return SupportPackageService.textData(package)
     }
 
     static func defaultFilename(for date: Date = Date()) -> String {
@@ -33,11 +32,11 @@ enum SupportDiagnosticsExporter {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd-HHmmss"
-        return "Otter-support-\(formatter.string(from: date)).ottersupport"
+        return "Otter-diagnostics-\(formatter.string(from: date)).txt"
     }
 
     static func defaultFileURL(for date: Date = Date()) -> URL {
-        let directory = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        let directory = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser
         return directory.appendingPathComponent(defaultFilename(for: date))
     }
@@ -57,27 +56,22 @@ enum SupportDiagnosticsExporter {
         // usually fast, but it keeps exports of a full activity log responsive.
         await Task.yield()
 
-        let data: Data
-        do {
-            data = try makeData(
-                settings: settings,
-                eventLog: eventLog,
-                monitor: monitor,
-                networkService: networkService,
-                notificationService: notificationService,
-                loginItemService: loginItemService
-            )
-        } catch {
-            return .failure(error)
-        }
+        let data = makeData(
+            settings: settings,
+            eventLog: eventLog,
+            monitor: monitor,
+            networkService: networkService,
+            notificationService: notificationService,
+            loginItemService: loginItemService
+        )
 
         let panel = NSSavePanel()
         panel.allowedContentTypes = [fileType]
         panel.nameFieldStringValue = defaultFilename()
-        panel.title = "Export Otter Support Package"
-        panel.message = "Save a redacted diagnostic package to share with support."
+        panel.title = "Export Diagnostic Logs"
+        panel.message = "Save a readable, redacted diagnostic report you can review and attach to an issue."
         panel.canCreateDirectories = true
-        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        panel.directoryURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
 
         guard await present(panel) == .OK, let url = panel.url else {
             return .success(nil)
@@ -116,7 +110,7 @@ enum SupportDiagnosticsExporter {
             backing: .buffered,
             defer: false
         )
-        panel.title = "Export Otter Support Package"
+        panel.title = "Export Diagnostic Logs"
         panel.isReleasedWhenClosed = false
         panel.isMovable = false
         panel.standardWindowButton(.closeButton)?.isHidden = true
@@ -136,7 +130,7 @@ enum SupportDiagnosticsExporter {
         title.frame = NSRect(x: 75, y: 81, width: 270, height: 22)
         content.addSubview(title)
 
-        let detail = NSTextField(wrappingLabelWithString: "Collecting and redacting activity data. Your server, share, and account details are excluded.")
+        let detail = NSTextField(wrappingLabelWithString: "Collecting live share state, retry timing, health history, and recent events. Identifying details are removed.")
         detail.font = .systemFont(ofSize: 13)
         detail.textColor = .secondaryLabelColor
         detail.maximumNumberOfLines = 2

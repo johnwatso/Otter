@@ -76,6 +76,18 @@ final class NetworkShareTests: XCTestCase {
         XCTAssertFalse(original.isSameShare(as: differentShare))
     }
 
+    func testMountedSuggestionMatchesAnEquivalentCredentialBearingRemountURL() throws {
+        let suggestion = MountedShareSuggestion(
+            displayName: "Media",
+            urlString: "smb://nas.local/Media",
+            mountPath: "/Volumes/Media"
+        )
+
+        XCTAssertTrue(suggestion.matches(url: try XCTUnwrap(URL(string: "smb://john@NAS/Media/Movies"))))
+        XCTAssertFalse(suggestion.matches(url: try XCTUnwrap(URL(string: "smb://nas.local/Backups"))))
+        XCTAssertFalse(suggestion.matches(url: try XCTUnwrap(URL(string: "smb://nas.local/"))))
+    }
+
     func testFinderImportCandidatesPreferTheSelectedBonjourServer() {
         let selectedServer = DiscoveredSMBServer(name: "Living Room NAS", domain: "local.")
         let selectedShare = MountedShareSuggestion(
@@ -154,6 +166,15 @@ final class NetworkShareTests: XCTestCase {
         XCTAssertEqual(groups[1].shares, [archive])
         XCTAssertFalse(groups[1].isGrouped)
         XCTAssertEqual(groups[1].shareCountLabel, "1 share")
+
+        XCTAssertEqual(
+            NetworkShareServerGroup.diagnosticShares(containing: backups, in: [media, archive, backups]),
+            [media, backups]
+        )
+        XCTAssertEqual(
+            NetworkShareServerGroup.diagnosticShares(containing: archive, in: [media, archive, backups]),
+            [archive]
+        )
     }
 
     func testBonjourServerDisplayNameOmitsServiceSuffix() {
@@ -166,7 +187,7 @@ final class NetworkShareTests: XCTestCase {
         XCTAssertEqual(share.serverDisplayName, "Living Room NAS")
     }
 
-    func testCustomServerNameNamesEveryShareOnAnIPAddressedServer() throws {
+    func testCustomServerNameNamesEveryShareOnAnyServer() throws {
         let media = NetworkShare(displayName: "Media", urlString: "smb://192.168.1.20/Media", mountPath: "/Volumes/Media")
         let backups = NetworkShare(displayName: "Backups", urlString: "smb://192.168.1.20/Backups", mountPath: "/Volumes/Backups")
         let named = NetworkShare(displayName: "Archive", urlString: "smb://homenas.local/Archive", mountPath: "/Volumes/Archive")
@@ -175,10 +196,14 @@ final class NetworkShareTests: XCTestCase {
         XCTAssertFalse(named.isAddressedByIP)
         XCTAssertTrue(NetworkShare(displayName: "V6", urlString: "smb://[fe80::1]/V6", mountPath: "/Volumes/V6").isAddressedByIP)
 
-        let serverNames = [try XCTUnwrap(media.serverIdentity): "Basement NAS"]
+        let serverNames = [
+            try XCTUnwrap(media.serverIdentity): "Basement NAS",
+            try XCTUnwrap(named.serverIdentity): "Upstairs NAS"
+        ]
         let groups = NetworkShareServerGroup.make(from: [media, backups, named], serverNames: serverNames)
-        XCTAssertEqual(groups.map(\.serverName), ["Basement NAS", "homenas"])
+        XCTAssertEqual(groups.map(\.serverName), ["Basement NAS", "Upstairs NAS"])
         XCTAssertEqual(backups.serverDisplayName(customNames: serverNames), "Basement NAS")
+        XCTAssertEqual(named.serverDisplayName(customNames: serverNames), "Upstairs NAS")
         XCTAssertEqual(NetworkShareServerGroup.make(from: [media]).first?.serverName, "192.168.1.20")
 
         // Blank names are dropped, and preferences saved before server names existed still load.
@@ -2641,7 +2666,7 @@ final class SupportPackageTests: XCTestCase {
         appModel.eventLog.record(
             .mountFailed,
             for: share,
-            detail: "NeedleEvent included a private server error"
+            detail: "macOS returned mount error 22 for NeedleEvent"
         )
 
         let package = SupportPackageService.make(
@@ -2669,7 +2694,7 @@ final class SupportPackageTests: XCTestCase {
         XCTAssertFalse(json.contains("203.0.113.77"))
         XCTAssertFalse(json.contains("NeedleEvent"))
 
-        let exportData = try SupportDiagnosticsExporter.makeData(
+        let exportData = SupportDiagnosticsExporter.makeData(
             settings: appModel.settings,
             eventLog: appModel.eventLog,
             monitor: appModel.monitor,
@@ -2677,17 +2702,22 @@ final class SupportPackageTests: XCTestCase {
             notificationService: appModel.notificationService,
             loginItemService: appModel.loginItemService
         )
-        let exportedJSON = String(decoding: exportData, as: UTF8.self)
-        XCTAssertFalse(exportedJSON.contains("needle-server"))
-        XCTAssertFalse(exportedJSON.contains("NeedleEvent"))
+        let exportedReport = String(decoding: exportData, as: UTF8.self)
+        XCTAssertTrue(exportedReport.contains("=== Otter Diagnostic Report ==="))
+        XCTAssertTrue(exportedReport.contains("=== Shares (1) ==="))
+        XCTAssertTrue(exportedReport.contains("=== Events (oldest → newest, 1) ==="))
+        XCTAssertTrue(exportedReport.contains("macOS returned mount error 22."))
+        XCTAssertTrue(exportedReport.contains("reliability7d: drops=0 connectionFailures=1 healthFailures=0"))
+        XCTAssertFalse(exportedReport.contains("needle-server"))
+        XCTAssertFalse(exportedReport.contains("NeedleEvent"))
     }
 
     @MainActor
-    func testSupportExportFilenameUsesUTCAndTheSupportExtension() {
+    func testSupportExportFilenameUsesUTCAndPlainTextExtension() {
         let date = Date(timeIntervalSince1970: 0)
         XCTAssertEqual(
             SupportDiagnosticsExporter.defaultFilename(for: date),
-            "Otter-support-1970-01-01-000000.ottersupport"
+            "Otter-diagnostics-1970-01-01-000000.txt"
         )
     }
 }

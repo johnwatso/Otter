@@ -83,6 +83,16 @@ actor MountService {
             throw MountServiceError.passwordInURL
         }
 
+        // NetFS used to report EEXIST for this case. On macOS 27 it can return
+        // an unrelated address error instead, so do not ask it to mount an
+        // address that is already represented by a mounted volume.
+        if let mountedURL = mountedVolumeURL(matching: url) {
+            if urlOverride != nil {
+                diagnosticMountAliases[share.id] = url
+            }
+            return mountedURL
+        }
+
         let result: (status: Int32, mountPaths: [String]) = await withCheckedContinuation { continuation in
             mountQueue.async {
                 var mountPoints: Unmanaged<CFArray>?
@@ -100,12 +110,14 @@ actor MountService {
             }
         }
 
-        if result.status == noErr || result.status == EEXIST, let urlOverride {
-            diagnosticMountAliases[share.id] = urlOverride
-        }
-
-        if result.status == EEXIST {
-            return mountedVolumeURL(for: share)
+        // Re-read the mount table regardless of the status. Besides handling
+        // EEXIST, this covers a race with Finder and macOS versions that return
+        // a different error even though the requested volume is mounted.
+        if let mountedURL = mountedVolumeURL(matching: url) {
+            if urlOverride != nil {
+                diagnosticMountAliases[share.id] = url
+            }
+            return mountedURL
         }
 
         guard result.status == noErr else {
@@ -134,8 +146,18 @@ actor MountService {
     }
 
     private func mountedVolumeURL(for share: NetworkShare) -> URL? {
-        let fileManager = FileManager.default
         let expectedLocations = expectedShareLocations(for: share)
+
+        return mountedVolumeURL(matching: expectedLocations)
+    }
+
+    private func mountedVolumeURL(matching url: URL) -> URL? {
+        guard let location = NetworkShareLocation(url: url) else { return nil }
+        return mountedVolumeURL(matching: [location])
+    }
+
+    private func mountedVolumeURL(matching expectedLocations: [NetworkShareLocation]) -> URL? {
+        let fileManager = FileManager.default
 
         guard !expectedLocations.isEmpty else { return nil }
 

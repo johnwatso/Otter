@@ -160,7 +160,7 @@ final class OtterCommandService {
             ?? SupportDiagnosticsExporter.defaultFileURL()
 
         do {
-            let data = try SupportDiagnosticsExporter.makeData(
+            let data = SupportDiagnosticsExporter.makeData(
                 settings: appModel.settings,
                 eventLog: appModel.eventLog,
                 monitor: appModel.monitor,

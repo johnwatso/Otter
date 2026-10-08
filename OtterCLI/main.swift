@@ -106,7 +106,7 @@ private enum Otterctl {
       disconnect [share]             Disconnect and pause one share, or all shares.
       pause [share]                  Pause automatic mounting.
       resume [share]                 Resume automatic mounting.
-      export-diagnostics [path]      Write a redacted .ottersupport package.
+      export-diagnostics [path]      Write a readable, redacted diagnostic report.
     """
 }
 

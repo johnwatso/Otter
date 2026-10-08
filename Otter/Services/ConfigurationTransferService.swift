@@ -325,7 +325,7 @@ private extension JSONDecoder {
 }
 
 struct OtterSupportPackage: Codable, Equatable {
-    static let currentFormatVersion = 1
+    static let currentFormatVersion = 2
 
     let formatVersion: Int
     let generatedAt: Date
@@ -339,7 +339,10 @@ struct SupportEnvironment: Codable, Equatable {
     let otterVersion: String
     let otterBuild: String
     let macOSVersion: String
+    let architecture: String
     let isOnline: Bool
+    let monitorIsChecking: Bool
+    let globallyPaused: Bool
     let activeNamedVPNCount: Int
     let hasUnidentifiedTunnel: Bool
     let configuredVPNCount: Int
@@ -349,11 +352,14 @@ struct SupportEnvironment: Codable, Equatable {
     let loginItemRequiresApproval: Bool
     let fallbackCheckInterval: TimeInterval
     let recoversUnresponsiveMounts: Bool
+    let detectsNewShares: Bool
+    let deduplicatesConnections: Bool
 }
 
 struct SupportShare: Codable, Equatable {
     let reference: String
     let status: String
+    let statusDetail: String?
     let hasSavedCredentials: Bool
     let hasCachedFallbackAddress: Bool
     let recentAddressChangeCount: Int
@@ -365,12 +371,26 @@ struct SupportShare: Codable, Equatable {
     let startsVPNAutomatically: Bool
     let vpnCanBeStartedByOtter: Bool
     let wakeOnLANEnabled: Bool
+    let healthCheckEnabled: Bool
+    let requiresWritableVolume: Bool
+    let hasSentinelCheck: Bool
+    let failureCount: Int
+    let needsCredentials: Bool
+    let lastCheckedAt: Date?
+    let nextRetryAt: Date?
+    let mountedAt: Date?
+    let lastConnectedAt: Date?
+    let connectionDrops: Int
+    let connectionFailures: Int
+    let healthFailures: Int
+    let lastProblemAt: Date?
 }
 
 struct SupportEvent: Codable, Equatable {
     let shareReference: String
     let date: Date
     let kind: String
+    let detail: String?
 }
 
 @MainActor
@@ -393,10 +413,13 @@ enum SupportPackageService {
             let hasSavedCredentials = !host.isEmpty && settings.hasCredentials(for: host)
                 || share.cachedIPAddresses.contains(where: settings.hasCredentials(for:))
             let requiredVPNName = share.rules.requiredVPNName
+            let runtime = monitor.runtimeState(for: share)
+            let reliability = eventLog.reliabilitySummary(for: share.id, at: generatedAt)
 
             return SupportShare(
                 reference: "Share \(index + 1)",
                 status: monitor.status(for: share).label,
+                statusDetail: diagnosticDetail(runtime.status.detail),
                 hasSavedCredentials: hasSavedCredentials,
                 hasCachedFallbackAddress: !share.cachedIPAddresses.isEmpty,
                 recentAddressChangeCount: share.recentIPAddressChangeCount(at: generatedAt),
@@ -407,7 +430,20 @@ enum SupportPackageService {
                 usesNamedVPNRule: requiredVPNName != nil,
                 startsVPNAutomatically: share.rules.shouldConnectVPNAutomatically,
                 vpnCanBeStartedByOtter: requiredVPNName.map(networkService.canControlVPN(named:)) ?? false,
-                wakeOnLANEnabled: share.wakeOnLAN.isEnabled
+                wakeOnLANEnabled: share.wakeOnLAN.isEnabled,
+                healthCheckEnabled: share.healthCheck.isEnabled,
+                requiresWritableVolume: share.healthCheck.requiresWritableVolume,
+                hasSentinelCheck: !share.healthCheck.sentinelRelativePath.isEmpty,
+                failureCount: runtime.failureCount,
+                needsCredentials: runtime.needsCredentials,
+                lastCheckedAt: runtime.lastCheckedAt,
+                nextRetryAt: runtime.nextRetryDate,
+                mountedAt: runtime.mountedAt,
+                lastConnectedAt: runtime.lastConnectedAt,
+                connectionDrops: reliability.connectionDrops,
+                connectionFailures: reliability.failures,
+                healthFailures: reliability.healthFailures,
+                lastProblemAt: reliability.lastProblemAt
             )
         }
 
@@ -416,19 +452,23 @@ enum SupportPackageService {
             return SupportEvent(
                 shareReference: shareReference,
                 date: event.date,
-                kind: event.kind.rawValue
+                kind: event.kind.rawValue,
+                detail: diagnosticDetail(event.detail, for: event.kind)
             )
         }
 
         return OtterSupportPackage(
             formatVersion: OtterSupportPackage.currentFormatVersion,
             generatedAt: generatedAt,
-            privacyNotice: "Server addresses, share names, mount paths, network names, VPN names, usernames, passwords, and event details are intentionally omitted.",
+            privacyNotice: "Server addresses, share names, mount paths, network names, VPN names, usernames, passwords, and free-form event details are omitted. Safe error categories and numeric mount codes are retained.",
             environment: SupportEnvironment(
                 otterVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown",
                 otterBuild: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown",
                 macOSVersion: ProcessInfo.processInfo.operatingSystemVersionString,
+                architecture: runtimeArchitecture,
                 isOnline: networkService.isOnline,
+                monitorIsChecking: monitor.isChecking,
+                globallyPaused: settings.isGloballyPaused,
                 activeNamedVPNCount: networkService.activeVPNNames.count,
                 hasUnidentifiedTunnel: networkService.hasUnidentifiedTunnel,
                 configuredVPNCount: networkService.knownVPNNames.count,
@@ -437,7 +477,9 @@ enum SupportPackageService {
                 startsAtLogin: loginItemService.isEnabled,
                 loginItemRequiresApproval: loginItemService.requiresApproval,
                 fallbackCheckInterval: settings.preferences.fallbackCheckInterval,
-                recoversUnresponsiveMounts: settings.preferences.recoverUnresponsiveMounts
+                recoversUnresponsiveMounts: settings.preferences.recoverUnresponsiveMounts,
+                detectsNewShares: settings.preferences.detectNewShares,
+                deduplicatesConnections: settings.preferences.deduplicateConnections
             ),
             shares: shares,
             events: events
@@ -449,5 +491,159 @@ enum SupportPackageService {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         encoder.dateEncodingStrategy = .iso8601
         return try encoder.encode(package)
+    }
+
+    static func textData(_ package: OtterSupportPackage) -> Data {
+        Data(renderText(package).utf8)
+    }
+
+    static func renderText(_ package: OtterSupportPackage, now: Date? = nil) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        let reference = now ?? package.generatedAt
+        let environment = package.environment
+
+        var output = "=== Otter Diagnostic Report ===\n"
+        output += "Generated: \(formatter.string(from: package.generatedAt))\n"
+        output += "App: \(environment.otterVersion) (build \(environment.otterBuild))\n"
+        output += "OS: \(environment.macOSVersion) · arch \(environment.architecture)\n"
+        output += "Privacy: \(package.privacyNotice)\n\n"
+
+        output += "=== Environment ===\n"
+        output += "online=\(environment.isOnline) monitorChecking=\(environment.monitorIsChecking) globallyPaused=\(environment.globallyPaused)\n"
+        output += "VPN: activeNamed=\(environment.activeNamedVPNCount) unidentifiedTunnel=\(environment.hasUnidentifiedTunnel) configured=\(environment.configuredVPNCount) controllable=\(environment.controllableVPNCount)\n"
+        output += "notifications=\(environment.notifications) startsAtLogin=\(environment.startsAtLogin) loginItemRequiresApproval=\(environment.loginItemRequiresApproval)\n"
+        output += "fallbackCheck=\(formatDuration(environment.fallbackCheckInterval)) recoverUnresponsiveMounts=\(environment.recoversUnresponsiveMounts) detectNewShares=\(environment.detectsNewShares) deduplicateConnections=\(environment.deduplicatesConnections)\n\n"
+
+        output += "=== Shares (\(package.shares.count)) ===\n"
+        if package.shares.isEmpty {
+            output += "(none)\n"
+        } else {
+            for share in package.shares {
+                output += "[\(share.reference)] status=\(share.status) mode=\(share.connectionMode) failures=\(share.failureCount) needsCredentials=\(share.needsCredentials)\n"
+                if let statusDetail = share.statusDetail {
+                    output += "  statusDetail=\(statusDetail)\n"
+                }
+                output += "  keepMounted=\(share.keepsMounted) mountAtLogin=\(share.mountsAtLogin) savedCredentials=\(share.hasSavedCredentials) cachedFallback=\(share.hasCachedFallbackAddress) addressChanges30d=\(share.recentAddressChangeCount)\n"
+                output += "  networkRule=\(share.usesRegisteredNetworkRule) VPNRule=\(share.usesNamedVPNRule) autoStartVPN=\(share.startsVPNAutomatically) VPNControllable=\(share.vpnCanBeStartedByOtter) wakeOnLAN=\(share.wakeOnLANEnabled)\n"
+                output += "  healthCheck=\(share.healthCheckEnabled) writableRequired=\(share.requiresWritableVolume) sentinelConfigured=\(share.hasSentinelCheck)\n"
+                let timestamps = [
+                    timestamp("lastChecked", share.lastCheckedAt, reference: reference, formatter: formatter),
+                    timestamp("nextRetry", share.nextRetryAt, reference: reference, formatter: formatter),
+                    timestamp("mountedAt", share.mountedAt, reference: reference, formatter: formatter),
+                    timestamp("lastConnected", share.lastConnectedAt, reference: reference, formatter: formatter),
+                    timestamp("lastProblem", share.lastProblemAt, reference: reference, formatter: formatter)
+                ].compactMap { $0 }
+                if !timestamps.isEmpty {
+                    output += "  \(timestamps.joined(separator: " "))\n"
+                }
+                output += "  reliability7d: drops=\(share.connectionDrops) connectionFailures=\(share.connectionFailures) healthFailures=\(share.healthFailures)\n"
+            }
+        }
+        output += "\n"
+
+        let events = package.events.sorted { $0.date < $1.date }
+        output += "=== Events (oldest → newest, \(events.count)) ===\n"
+        if events.isEmpty {
+            output += "(none)\n"
+        } else {
+            for event in events {
+                output += "\(formatter.string(from: event.date))  [\(event.shareReference)]  \(event.kind)"
+                if let detail = event.detail, !detail.isEmpty {
+                    output += "  \(detail)"
+                }
+                output += "\n"
+            }
+        }
+
+        return output
+    }
+
+    private static var runtimeArchitecture: String {
+#if arch(arm64)
+        "arm64"
+#elseif arch(x86_64)
+        "x86_64"
+#else
+        "unknown"
+#endif
+    }
+
+    private static func timestamp(
+        _ name: String,
+        _ date: Date?,
+        reference: Date,
+        formatter: ISO8601DateFormatter
+    ) -> String? {
+        guard let date else { return nil }
+        let interval = date.timeIntervalSince(reference)
+        let relation = interval > 0
+            ? "in \(formatDuration(interval))"
+            : "\(formatDuration(-interval)) ago"
+        return "\(name)=\(formatter.string(from: date)) (\(relation))"
+    }
+
+    private static func formatDuration(_ interval: TimeInterval) -> String {
+        let seconds = Int(max(0, interval).rounded())
+        if seconds < 60 { return "\(seconds)s" }
+        if seconds < 3_600 { return "\(seconds / 60)m\(seconds % 60)s" }
+        let hours = seconds / 3_600
+        return "\(hours)h\((seconds % 3_600) / 60)m"
+    }
+
+    private static func diagnosticDetail(
+        _ detail: String?,
+        for kind: ShareEventKind? = nil
+    ) -> String? {
+        guard let detail = detail?.trimmingCharacters(in: .whitespacesAndNewlines), !detail.isEmpty else {
+            return nil
+        }
+        let lowercased = detail.lowercased()
+
+        if let expression = try? NSRegularExpression(pattern: #"(?i)mount error\s+(-?\d+)"#),
+           let match = expression.firstMatch(
+               in: detail,
+               range: NSRange(detail.startIndex..<detail.endIndex, in: detail)
+           ),
+           let codeRange = Range(match.range(at: 1), in: detail) {
+            return "macOS returned mount error \(detail[codeRange])."
+        }
+        if lowercased.contains("authenticate") || lowercased.contains("credential") {
+            return "macOS authentication or saved credentials require attention."
+        }
+        if lowercased.contains("network address is invalid") || lowercased.contains("invalid address") {
+            return "The network address was rejected as invalid."
+        }
+        if lowercased.contains("server didn't respond") || lowercased.contains("server did not respond") {
+            return "The server did not respond."
+        }
+        if lowercased.contains("not writable") {
+            return "The mounted volume is not writable."
+        }
+        if lowercased.contains("expected file") && lowercased.contains("missing") {
+            return "A configured sentinel file is missing."
+        }
+        if lowercased.contains("could not be read") || lowercased.contains("stopped responding") {
+            return "The mounted volume could not be read or stopped responding."
+        }
+
+        switch kind {
+        case .blockedByRule:
+            return "Connection conditions prevented mounting."
+        case .credentialsRequired:
+            return "Finder credentials need to be refreshed."
+        case .duplicateResolved:
+            return "A duplicate connection was reconciled with the preferred server name."
+        case .recoveryAttempted:
+            return "Otter attempted safe recovery of an unresponsive volume."
+        case .mountFailed:
+            return "A mount attempt failed."
+        case .healthCheckFailed:
+            return "A mounted-volume health check failed."
+        case .unresponsiveDetected:
+            return "The mounted volume stopped responding."
+        case .mounted, .connectionLost, .disconnected, .wakePacketSent, .none:
+            return nil
+        }
     }
 }

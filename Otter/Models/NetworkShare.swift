@@ -615,6 +615,18 @@ struct NetworkShareServerGroup: Identifiable, Hashable {
         shares.count == 1 ? "1 share" : "\(shares.count) shares"
     }
 
+    /// Diagnostics launched from a child share should still cover every share
+    /// on that server. This keeps the entry point from changing the scope of
+    /// the diagnostic run.
+    static func diagnosticShares(
+        containing selectedShare: NetworkShare,
+        in shares: [NetworkShare]
+    ) -> [NetworkShare] {
+        make(from: shares)
+            .first { group in group.shares.contains(where: { $0.id == selectedShare.id }) }?
+            .shares ?? [selectedShare]
+    }
+
     static func make(from shares: [NetworkShare], serverNames: [String: String] = [:]) -> [NetworkShareServerGroup] {
         var sharesByKey: [String: [NetworkShare]] = [:]
         var serverNamesByKey: [String: String] = [:]

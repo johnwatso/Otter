@@ -116,7 +116,7 @@ struct ActivityLogView: View {
             }
             .padding(16)
         }
-        .frame(width: 480, height: 440)
+        .frame(minWidth: 480, idealWidth: 560, maxWidth: .infinity, minHeight: 440, idealHeight: 520, maxHeight: .infinity)
     }
 
     private func shareName(for shareID: NetworkShare.ID) -> String {
@@ -131,18 +131,19 @@ private struct ActivityLogRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: event.kind.symbol)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(event.kind.color)
                 .frame(width: 16, alignment: .center)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(event.kind.title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.body.weight(.medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
 
                 Text(metadataText)
-                    .font(.system(size: 11))
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .help(metadataText)
@@ -151,10 +152,11 @@ private struct ActivityLogRow: View {
             Spacer(minLength: 8)
 
             Text(timeLabel)
-                .font(.system(size: 11).monospacedDigit())
+                .font(.subheadline.monospacedDigit())
                 .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
     }
 
     private var metadataText: String {

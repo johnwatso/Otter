@@ -1205,7 +1205,7 @@ struct ShareEditorView: View {
                     if newlyMountedShares.count == 1, let suggestion = newlyMountedShares.first {
                         apply(suggestion)
                     }
-                    shareBrowserMessage = "Selected \(newlyMountedShares.count) new share\(newlyMountedShares.count == 1 ? "" : "s")."
+                    shareBrowserMessage = "Selected \(String.counted(newlyMountedShares.count, "new share"))."
                 }
             } catch {
                 shareBrowserMessage = "Couldn't browse this server: \(error.localizedDescription)"
@@ -1241,7 +1241,7 @@ struct ShareEditorView: View {
                     if newlyMountedShares.count == 1, let suggestion = newlyMountedShares.first {
                         apply(suggestion)
                     }
-                    shareBrowserMessage = "Selected \(newlyMountedShares.count) new share\(newlyMountedShares.count == 1 ? "" : "s") from Keychain."
+                    shareBrowserMessage = "Selected \(String.counted(newlyMountedShares.count, "new share")) from Keychain."
                 }
             } catch {
                 shareBrowserMessage = "Couldn't connect using this saved connection: \(error.localizedDescription)"

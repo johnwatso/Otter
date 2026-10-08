@@ -109,7 +109,7 @@ struct ConnectionDoctorView: View {
             }
             .padding(16)
         }
-        .frame(width: 560, height: 540)
+        .frame(minWidth: 560, idealWidth: 600, maxWidth: .infinity, minHeight: 540, idealHeight: 600, maxHeight: .infinity)
         .task {
             await runDoctorNow()
         }
@@ -167,21 +167,32 @@ struct ConnectionDoctorView: View {
             Image(systemName: step.status.symbol)
                 .foregroundStyle(step.status.color)
                 .frame(width: 18)
+                .accessibilityLabel(step.status.accessibilityName)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(step.title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.body.weight(.semibold))
                 Text(step.detail)
-                    .font(.system(size: 12))
+                    .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.vertical, 3)
+        .accessibilityElement(children: .combine)
     }
 }
 
 private extension DiagnosticStepStatus {
+    var accessibilityName: String {
+        switch self {
+        case .passed: "Passed"
+        case .warning: "Warning"
+        case .failed: "Failed"
+        case .information: "Information"
+        }
+    }
+
     var symbol: String {
         switch self {
         case .passed:

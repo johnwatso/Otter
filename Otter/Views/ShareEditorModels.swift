@@ -57,13 +57,21 @@ struct MountedShareSuggestion: Identifiable, Hashable, Sendable {
     }
 
     func isSameShare(as other: MountedShareSuggestion) -> Bool {
-        if let location = NetworkShareLocation(url: URL(string: urlString)),
-           let otherLocation = NetworkShareLocation(url: URL(string: other.urlString)),
-           location == otherLocation {
+        if matches(url: URL(string: other.urlString)) {
             return true
         }
 
         return Self.normalizedMountPath(mountPath) == Self.normalizedMountPath(other.mountPath)
+    }
+
+    func matches(url: URL?) -> Bool {
+        guard let location = NetworkShareLocation(url: URL(string: urlString)),
+              let otherLocation = NetworkShareLocation(url: url)
+        else {
+            return false
+        }
+
+        return location == otherLocation
     }
 
     static func finderImportCandidates(
@@ -274,4 +282,12 @@ struct DraftShare {
         )
     }
 
+}
+
+extension String {
+    /// "1 share", "3 shares" — grammar agreement from Foundation rather than
+    /// hand-rolled suffixes, so irregular nouns and localizations stay correct.
+    static func counted(_ count: Int, _ noun: String) -> String {
+        String(AttributedString(localized: "^[\(count) \(noun)](inflect: true)").characters)
+    }
 }

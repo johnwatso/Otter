@@ -183,6 +183,16 @@ actor SMBShareBrowserService {
     }
 
     private func browse(_ serverURL: URL, matchingHost: String) async throws -> [MountedShareSuggestion] {
+        // A saved Keychain entry can point at a share Finder has already
+        // mounted. Avoid another NetFS call for that exact share: macOS 27 can
+        // reject the redundant request as an invalid address instead of
+        // returning the older EEXIST result.
+        let requestsSpecificShare = NetworkShareLocation(url: serverURL) != nil
+        if requestsSpecificShare, let mountedShare = MountedShareSuggestion.discover().first(where: {
+            $0.matches(url: serverURL)
+        }) {
+            return [mountedShare]
+        }
 
         let result: (status: Int32, mountPaths: [String]) = await withCheckedContinuation { continuation in
             mountQueue.async {
@@ -201,13 +211,6 @@ actor SMBShareBrowserService {
             }
         }
 
-        if result.status == ECANCELED {
-            return []
-        }
-        guard result.status == noErr || result.status == EEXIST else {
-            throw MountServiceError.failure(status: result.status)
-        }
-
         let selectedShares = result.mountPaths.compactMap {
             try? MountedShareSuggestion.make(from: URL(fileURLWithPath: $0, isDirectory: true))
         }
@@ -217,6 +220,18 @@ actor SMBShareBrowserService {
             }
         }
 
-        return MountedShareSuggestion.discover().filter { $0.matches(host: matchingHost) }
+        let mountedShares = MountedShareSuggestion.discover()
+        if requestsSpecificShare, let mountedShare = mountedShares.first(where: { $0.matches(url: serverURL) }) {
+            return [mountedShare]
+        }
+
+        if result.status == ECANCELED {
+            return []
+        }
+        guard result.status == noErr || result.status == EEXIST else {
+            throw MountServiceError.failure(status: result.status)
+        }
+
+        return mountedShares.filter { $0.matches(host: matchingHost) }
     }
 }

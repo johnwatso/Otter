@@ -32,7 +32,7 @@ Otters are small, quick, and famously good at not letting important things drift
 - 🔒 Connects on a registered network or over VPN, with optional automatic VPN connection and server checks for providers such as WireGuard
 - 🧭 Guides setup with mounted-share import, SMB discovery, the native macOS share picker, and a Connection Readiness test
 - 🔌 Handles slow or sleeping servers with reachability monitoring, Wake-on-LAN, hostname fallback, and safe recovery tools
-- 🔐 Stores credentials in Keychain, with an opt-in password-encrypted backup for eligible SMB credentials; plain exports and support packages stay redacted
+- 🔐 Stores credentials in Keychain, with an opt-in password-encrypted backup for eligible SMB credentials; plain exports and diagnostic reports stay redacted
 - ⏸️ Provides flexible pause controls, actionable notifications, and Shortcuts actions for everyday management
 - 👀 Notices shares mounted outside Otter and offers to manage them, with an offer that waits in the menu bar until you answer it
 - 🩺 Verifies mounted volumes with responsive, writable, and expected-file checks; tracks reliability trends and guides credential recovery
@@ -88,7 +88,7 @@ OTTERCTL="/Applications/Otter.app/Contents/MacOS/otterctl"
 "$OTTERCTL" status
 "$OTTERCTL" mount "Media"
 "$OTTERCTL" pause
-"$OTTERCTL" export-diagnostics ~/Desktop/otter-support.ottersupport
+"$OTTERCTL" export-diagnostics ~/Desktop/otter-diagnostics.txt
 ```
 
 ## License

@@ -415,7 +415,7 @@ struct OnboardingView: View {
                 Label("No shares were added. Go Back to add one, or finish and add one later.", systemImage: "info.circle")
                     .foregroundStyle(.secondary)
             } else {
-                Label("\(settings.shares.count) share\(settings.shares.count == 1 ? "" : "s") ready for Otter to monitor.", systemImage: "checkmark.circle.fill")
+                Label("\(String.counted(settings.shares.count, "share")) ready for Otter to monitor.", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
             }
 
@@ -504,7 +504,7 @@ struct OnboardingView: View {
                 suggestions.forEach(importSuggestion)
                 let addedCount = settings.shares.count - previousCount
                 shareBrowserMessage = addedCount > 0
-                    ? "Added \(addedCount) share\(addedCount == 1 ? "" : "s")."
+                    ? "Added \(String.counted(addedCount, "share"))."
                     : "The selected share was already added."
             } catch {
                 shareBrowserMessage = "Couldn't browse this server: \(error.localizedDescription)"
@@ -545,7 +545,7 @@ struct OnboardingView: View {
                 suggestions.forEach(importSuggestion)
                 let addedCount = settings.shares.count - previousCount
                 shareBrowserMessage = addedCount > 0
-                    ? "Added \(addedCount) share\(addedCount == 1 ? "" : "s") from Keychain."
+                    ? "Added \(String.counted(addedCount, "share")) from Keychain."
                     : "The selected share was already added."
             } catch {
                 shareBrowserMessage = "Couldn't connect using this saved connection: \(error.localizedDescription)"

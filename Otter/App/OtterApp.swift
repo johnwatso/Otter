@@ -88,6 +88,14 @@ private struct OtterCommands: Commands {
             }
         }
 
+        CommandGroup(replacing: .newItem) {
+            Button("Add Share…") {
+                appModel.requestNewShare()
+                appModel.triggerOpenSharesWindow()
+            }
+            .keyboardShortcut("n")
+        }
+
         // No .appSettings override: the Settings scene installs its own
         // "Settings…" item, and replacing the group removes the responder that
         // actually opens the window.

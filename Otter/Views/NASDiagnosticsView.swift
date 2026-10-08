@@ -9,9 +9,9 @@ struct NASDiagnosticsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Diagnostics").font(.subheadline).fontWeight(.bold).foregroundStyle(.secondary)
+            DetailSectionHeader("Diagnostics")
             Text(shares.count > 1
-                 ? "Check the network path, SMB connections, and performance of all \(shares.count) shares on this server."
+                 ? "Check the network path, SMB connections, and performance of \(shares.count == 2 ? "both shares" : "all \(shares.count) shares") on this server."
                  : "Check the network path, SMB connection, and share performance.")
                 .font(.caption).foregroundStyle(.secondary)
             Button { isPresented = true } label: {
@@ -30,6 +30,8 @@ struct NASDiagnosticsSection: View {
 final class NASDiagnosticsSession: ObservableObject {
     let shares: [NetworkShare]
     @Published private(set) var runningAll = false
+    @Published private(set) var activeShareID: NetworkShare.ID?
+    @Published private(set) var completedShareCount = 0
     private var models: [NetworkShare.ID: NASDiagnosticsViewModel] = [:]
     private var runAllTask: Task<Void, Never>?
     private var subscriptions: Set<AnyCancellable> = []
@@ -62,15 +64,21 @@ final class NASDiagnosticsSession: ObservableObject {
     func runAll(service: MountService) {
         guard !isBusy else { return }
         runningAll = true
+        completedShareCount = 0
         runAllTask = Task {
-            for share in shares {
-                guard !Task.isCancelled,
-                      let task = model(for: share).run(share: share, service: service)
-                else { break }
-                await task.value
+            defer {
+                activeShareID = nil
+                runningAll = false
+                runAllTask = nil
             }
-            runningAll = false
-            runAllTask = nil
+            for share in shares {
+                guard !Task.isCancelled else { break }
+                activeShareID = share.id
+                guard let task = model(for: share).run(share: share, service: service) else { break }
+                await task.value
+                guard !Task.isCancelled else { break }
+                completedShareCount += 1
+            }
         }
     }
 
@@ -271,6 +279,11 @@ struct NASDiagnosticsView: View {
                 }
                 .tahoePrimaryActionButton().disabled(session.isBusy)
                 if session.isCancellable { Button("Cancel") { session.cancel() }.tahoeSecondaryActionButton() }
+                if coversServer && session.runningAll {
+                    Text("Running \(min(session.completedShareCount + 1, shares.count)) of \(shares.count)…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 if coversServer {
                     Button {
@@ -290,6 +303,9 @@ struct NASDiagnosticsView: View {
         .frame(minHeight: 420, idealHeight: 680, maxHeight: 680)
         .interactiveDismissDisabled(session.blocksDismissal)
         .background(Color(NSColor.windowBackgroundColor))
+        .onChange(of: session.activeShareID) { _, shareID in
+            if let shareID { selectedShareID = shareID }
+        }
         .onDisappear { session.cancel() }
     }
 

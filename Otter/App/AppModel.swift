@@ -315,7 +315,7 @@ final class AppModel: ObservableObject {
     }
 
     // Shared by Preferences → Support and the Help menu so both produce the
-    // same redacted package from the same live services.
+    // same redacted report from the same live services.
     func exportSupportPackage() async -> Result<URL?, Error> {
         await SupportDiagnosticsExporter.presentSavePanel(
             settings: settings,

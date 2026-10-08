@@ -66,7 +66,8 @@ struct ShareManagementView: View {
     @State private var selection: ShareManagementSelection?
     @State private var didRegisterWindowAppearance = false
     @State private var isShowingActivityLog = false
-    @State private var isShowingConnectionDoctor = false
+    @State private var connectionDoctorShare: NetworkShare?
+    @State private var shareToRemove: NetworkShare?
     @State private var isShowingOnboarding = false
     @State private var editingServerShareIDs: [NetworkShare.ID] = []
     @Namespace private var selectionHighlightNamespace
@@ -95,29 +96,32 @@ struct ShareManagementView: View {
         } detail: {
             detail
         }
+        .toolbar(removing: .sidebarToggle)
         .toolbar {
+            // Every button keeps its slot regardless of status, so the
+            // toolbar doesn't reshuffle as shares connect and disconnect.
             ToolbarItemGroup {
-                if !selectedShares.isEmpty {
-                    if areAllSelectedSharesConnected {
-                        Button(action: showSelectedSharesInFinder) {
-                            Label(
-                                selectedServerGroup == nil ? "Show in Finder" : "Show All in Finder",
-                                systemImage: "finder"
-                            )
-                        }
-                        .help(selectedServerGroup == nil ? "Show in Finder" : "Show all shares in Finder")
-                    } else {
-                        Button {
-                            Task { await mountSelectedShares() }
-                        } label: {
-                            Label(
-                                selectedServerGroup == nil ? "Mount Now" : "Mount All",
-                                systemImage: "arrow.triangle.2.circlepath"
-                            )
-                        }
-                        .help(selectedServerGroup == nil ? "Mount Now" : "Mount all shares on this server")
-                    }
+                Button {
+                    Task { await mountSelectedShares() }
+                } label: {
+                    Label(
+                        selectedServerGroup == nil ? "Mount Now" : "Mount All",
+                        systemImage: "arrow.triangle.2.circlepath"
+                    )
                 }
+                .disabled(selectedShares.isEmpty || areAllSelectedSharesConnected)
+                .help(mountSelectedSharesHelp)
+
+                Button(action: showSelectedSharesInFinder) {
+                    Label(
+                        selectedServerGroup == nil ? "Show in Finder" : "Show All in Finder",
+                        systemImage: "finder"
+                    )
+                }
+                .disabled(!canDisconnectSelectedShares)
+                .help(canDisconnectSelectedShares
+                      ? (selectedServerGroup == nil ? "Show in Finder" : "Show connected shares in Finder")
+                      : "Available once a share is connected")
 
                 Button {
                     Task { await disconnectSelectedShares() }
@@ -135,23 +139,29 @@ struct ShareManagementView: View {
                 } else if let selectedServerGroup {
                     ShareGroupPauseMenu(shares: selectedServerGroup.shares)
                 }
+            }
 
-                if let selectedShare {
-                    Button {
-                        appModel.requestEditShare(selectedShare)
-                    } label: {
-                        Label("Settings…", systemImage: "gearshape")
-                    }
-                    .disabled(settings.isManagedShare(id: selectedShare.id))
-                    .help("Share Settings")
-                } else if let selectedServerGroup {
+            ToolbarItemGroup {
+                if let selectedServerGroup {
                     Button {
                         editAllShares(in: selectedServerGroup)
                     } label: {
-                        Label("Edit All Shares…", systemImage: "gearshape.2")
+                        Label("Edit All Shares…", systemImage: "gearshape")
                     }
                     .disabled(editableShares(in: selectedServerGroup).isEmpty)
                     .help("Edit every share on this server")
+                } else {
+                    Button {
+                        if let selectedShare {
+                            appModel.requestEditShare(selectedShare)
+                        }
+                    } label: {
+                        Label("Settings…", systemImage: "gearshape")
+                    }
+                    .disabled(selectedShare.map { settings.isManagedShare(id: $0.id) } ?? true)
+                    .help(selectedShare.map { settings.isManagedShare(id: $0.id) } == true
+                          ? "This share is managed by your organization"
+                          : "Share Settings")
                 }
 
                 Button {
@@ -161,13 +171,28 @@ struct ShareManagementView: View {
                 }
                 .help("Activity Log")
 
-                Button {
-                    isShowingConnectionDoctor = true
-                } label: {
-                    Label("Connection Doctor", systemImage: "stethoscope")
+                if let selectedServerGroup {
+                    // Connection Doctor checks one share at a time; on a server
+                    // let the user pick which one rather than disabling it.
+                    Menu {
+                        ForEach(selectedServerGroup.shares) { share in
+                            Button(share.displayName) {
+                                connectionDoctorShare = share
+                            }
+                        }
+                    } label: {
+                        Label("Connection Doctor", systemImage: "stethoscope")
+                    }
+                    .help("Run Connection Doctor on a share")
+                } else {
+                    Button {
+                        connectionDoctorShare = selectedShare
+                    } label: {
+                        Label("Connection Doctor", systemImage: "stethoscope")
+                    }
+                    .disabled(selectedShare == nil)
+                    .help("Run Connection Doctor")
                 }
-                .disabled(selectedShare == nil)
-                .help("Run Connection Doctor")
             }
         }
         .sheet(isPresented: $isShowingActivityLog) {
@@ -177,10 +202,23 @@ struct ShareManagementView: View {
                 includedSharesLabel: selectedServerGroup?.serverName
             )
         }
-        .sheet(isPresented: $isShowingConnectionDoctor) {
-            if let selectedShare {
-                ConnectionDoctorView(share: selectedShare)
+        .confirmationDialog(
+            "Remove “\(shareToRemove?.displayName ?? "Share")”?",
+            isPresented: Binding(
+                get: { shareToRemove != nil },
+                set: { if !$0 { shareToRemove = nil } }
+            ),
+            presenting: shareToRemove
+        ) { share in
+            Button("Remove Share", role: .destructive) {
+                removeShare(share)
             }
+            Button("Cancel", role: .cancel) { }
+        } message: { _ in
+            Text("Otter will stop keeping this share connected. If it's mounted now, it stays mounted until you eject it.")
+        }
+        .sheet(item: $connectionDoctorShare) { share in
+            ConnectionDoctorView(share: share)
         }
         .sheet(isPresented: $isShowingOnboarding) {
             OnboardingView {
@@ -275,6 +313,10 @@ struct ShareManagementView: View {
             VStack(spacing: 0) {
                 sidebarRows
 
+                if !shares.isEmpty {
+                    SidebarStatusFooter(shares: shares)
+                }
+
                 Divider()
 
                 HStack(spacing: 2) {
@@ -289,7 +331,7 @@ struct ShareManagementView: View {
                     .accessibilityLabel("Add Share")
 
                     Button {
-                        removeSelectedShare()
+                        shareToRemove = selectedShare
                     } label: {
                         Image(systemName: "minus")
                             .frame(width: 24, height: 22)
@@ -311,7 +353,7 @@ struct ShareManagementView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Shares")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 12)
                     .padding(.bottom, 2)
@@ -423,6 +465,13 @@ struct ShareManagementView: View {
         !selectedShares.isEmpty && selectedShares.allSatisfy { monitor.status(for: $0) == .connected }
     }
 
+    private var mountSelectedSharesHelp: String {
+        if areAllSelectedSharesConnected {
+            return selectedServerGroup == nil ? "Already connected" : "All shares on this server are connected"
+        }
+        return selectedServerGroup == nil ? "Mount Now" : "Mount all shares on this server"
+    }
+
     private var canDisconnectSelectedShares: Bool {
         selectedShares.contains { monitor.status(for: $0) == .connected }
     }
@@ -455,12 +504,11 @@ struct ShareManagementView: View {
             && !settings.isManagedShare(id: selectedShare.id)
     }
 
-    private func removeSelectedShare() {
-        guard let selectedShare,
-              let selectedIndex = settings.shares.firstIndex(where: { $0.id == selectedShare.id })
+    private func removeShare(_ share: NetworkShare) {
+        guard let selectedIndex = settings.shares.firstIndex(where: { $0.id == share.id })
         else { return }
 
-        settings.removeShare(id: selectedShare.id)
+        settings.removeShare(id: share.id)
         guard !settings.shares.isEmpty else {
             selection = nil
             return
@@ -574,11 +622,61 @@ struct ShareManagementView: View {
     }
 }
 
+/// Overall health at a glance, mirroring what the menu bar icon reports, so
+/// the sidebar's spare space answers "is everything OK?" without a click.
+private struct SidebarStatusFooter: View {
+    @EnvironmentObject private var monitor: ShareMonitor
+    @EnvironmentObject private var networkService: NetworkReachabilityService
+    let shares: [NetworkShare]
+
+    var body: some View {
+        let connectedCount = shares.filter { monitor.status(for: $0) == .connected }.count
+        let allConnected = connectedCount == shares.count
+
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 5) {
+                Image(systemName: allConnected ? "checkmark.circle.fill" : "circle.lefthalf.filled")
+                    .foregroundStyle(allConnected ? .green : .orange)
+                    .accessibilityHidden(true)
+                Text(allConnected
+                     ? (shares.count == 1 ? "Connected" : "All connected")
+                     : "\(connectedCount) of \(shares.count) connected")
+                    .foregroundStyle(.primary)
+            }
+            Text(networkSummary)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .font(.caption)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var networkSummary: String {
+        var parts: [String] = []
+        if let wifi = networkService.currentWiFiNetworkName {
+            parts.append("Wi-Fi: \(wifi)")
+        } else {
+            parts.append(networkService.isOnline ? "Network available" : "No network")
+        }
+        if networkService.isVPNConnected || networkService.hasUnidentifiedTunnel {
+            parts.append("VPN: \(networkService.currentVPNDisplayName)")
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
 private struct ServerListHeader: View {
+    @EnvironmentObject private var settings: SettingsStore
     let group: NetworkShareServerGroup
     let isSelected: Bool
     let selectionHighlightNamespace: Namespace.ID
     let action: () -> Void
+    @State private var isRenaming = false
+    @State private var draftName = ""
 
     var body: some View {
         HStack(spacing: 8) {
@@ -586,6 +684,7 @@ private struct ServerListHeader: View {
                 .font(.body)
                 .foregroundStyle(isSelected ? .primary : .secondary)
                 .frame(width: 24)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(group.serverName)
@@ -593,7 +692,7 @@ private struct ServerListHeader: View {
                     .fontWeight(.semibold)
                     .lineLimit(1)
 
-                Text("\(group.shares.count) shares")
+                Text(String.counted(group.shares.count, "share"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -611,7 +710,36 @@ private struct ServerListHeader: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { action() }
+        .contextMenu {
+            Button {
+                action()
+                draftName = settings.customServerName(for: representativeShare) ?? group.serverName
+                isRenaming = true
+            } label: {
+                Label("Rename Server…", systemImage: "character.cursor.ibeam")
+            }
+        }
+        .alert("Rename Server", isPresented: $isRenaming) {
+            TextField("Server name", text: $draftName)
+            Button("Save") {
+                settings.setCustomServerName(draftName, for: representativeShare)
+            }
+            if settings.customServerName(for: representativeShare) != nil {
+                Button("Use Address Name", role: .destructive) {
+                    settings.setCustomServerName(nil, for: representativeShare)
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This name is shown only in Otter and applies to every share on this server. Its network address remains \(representativeShare.host ?? "unchanged").")
+        }
         .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction { action() }
+    }
+
+    private var representativeShare: NetworkShare {
+        group.shares[0]
     }
 }
 
@@ -989,11 +1117,11 @@ private struct AdvancedPreferencesView: View {
                 Button {
                     exportSupportPackage()
                 } label: {
-                    Label("Export Support Package\u{2026}", systemImage: "lifepreserver")
+                    Label("Export Diagnostic Logs\u{2026}", systemImage: "lifepreserver")
                 }
                 .tahoeSecondaryActionButton()
 
-                SettingsSecondaryText("Creates a redacted diagnostic file. Server, share, network, VPN, account, and password details are not included.")
+                SettingsSecondaryText("Creates a readable report with live share state, retry timing, health history, and recent events. Identifying details are removed.")
 
                 if let supportPackageMessage {
                     Text(supportPackageMessage)
@@ -1046,7 +1174,7 @@ private struct AdvancedPreferencesView: View {
         let seconds = Int(value)
         if seconds % 60 == 0 {
             let minutes = seconds / 60
-            return "\(minutes) minute\(minutes == 1 ? "" : "s")"
+            return .counted(minutes, "minute")
         }
 
         return "\(seconds) seconds"
@@ -1073,7 +1201,7 @@ private struct AdvancedPreferencesView: View {
         Task { @MainActor in
             switch await appModel.exportSupportPackage() {
             case .success(.some):
-                supportPackageMessage = "Support package exported with identifying details removed."
+                supportPackageMessage = "Diagnostic logs exported with identifying details removed."
             case .success(.none):
                 break
             case let .failure(error):
@@ -1131,7 +1259,7 @@ private struct AdvancedPreferencesView: View {
                 settings.configurationArchive(), credentials: credentials, password: password
             )
             try data.write(to: url, options: .atomic)
-            configurationMessage = "Protected backup exported with \(credentials.count) SMB credential\(credentials.count == 1 ? "" : "s"). Keep its password safe."
+            configurationMessage = "Protected backup exported with \(String.counted(credentials.count, "SMB credential")). Keep its password safe."
         } catch {
             configurationMessage = "Protected backup failed: \(error.localizedDescription)"
         }
@@ -1157,7 +1285,7 @@ private struct AdvancedPreferencesView: View {
 
     private func importArchive(_ archive: OtterConfigurationArchive, credentials: [PortableCredential] = []) {
         let alert = NSAlert()
-        alert.messageText = "Import \(archive.shares.count) Share\(archive.shares.count == 1 ? "" : "s")?"
+        alert.messageText = "Import \(String.counted(archive.shares.count, "Share"))?"
         alert.informativeText = credentials.isEmpty
             ? "Merge updates matching network addresses and keeps other shares. Replace removes the current share list first."
             : "Merge updates matching network addresses and keeps other shares. Eligible SMB Keychain credentials are restored after the import."
@@ -1178,7 +1306,7 @@ private struct AdvancedPreferencesView: View {
         let restored = settings.importPortableCredentials(credentials.filter {
             allowedCredentialHosts.contains($0.host)
         })
-        configurationMessage = "Imported: \(result.added) added, \(result.updated) updated, \(result.removed) removed.\(credentials.isEmpty ? "" : " Restored \(restored) credential\(restored == 1 ? "" : "s").")"
+        configurationMessage = "Imported: \(result.added) added, \(result.updated) updated, \(result.removed) removed.\(credentials.isEmpty ? "" : " Restored \(String.counted(restored, "credential")).")"
     }
 
     private func backupPassword(confirm: Bool) -> String? {
@@ -1408,6 +1536,13 @@ private struct ShareListRow: View {
         )
         .contentShape(Rectangle())
         .onTapGesture { action() }
+        // Rows are drawn by hand rather than with List, so describe them to
+        // VoiceOver as selectable buttons.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(share.displayName)
+        .accessibilityValue(status.label)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction { action() }
     }
 
 }

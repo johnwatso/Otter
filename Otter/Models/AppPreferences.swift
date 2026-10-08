@@ -159,8 +159,8 @@ struct AppPreferences: Codable, Equatable {
     var hasCompletedOnboarding: Bool = false
     var autoUpdateInstallPolicy: AutoUpdateInstallPolicy = .whenIdle
     var autoUpdateInstallHour: Int = 3
-    /// Names the user gave servers Otter only knows by address, keyed by
-    /// `NetworkShare.serverIdentity`.
+    /// Custom display names the user gave servers, keyed by
+    /// `NetworkShare.serverIdentity`. These do not change network addresses.
     var serverNames: [String: String] = [:]
 
     init(
