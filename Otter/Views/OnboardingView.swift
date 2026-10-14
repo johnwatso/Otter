@@ -24,17 +24,10 @@ struct OnboardingView: View {
     var body: some View {
         VStack(spacing: 0) {
             Group {
-                switch step {
-                case 0:
+                if step == 0 {
                     welcomePage
-                case 1:
-                    permissionsPage
-                case 2:
-                    presencePage
-                case 3:
+                } else {
                     findSharesPage
-                default:
-                    finishPage
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -59,27 +52,15 @@ struct OnboardingView: View {
 
                 Spacer()
 
-                if step < 4 {
+                if step == 0 {
                     Button {
-                        switch step {
-                        case 0:
-                            step = 1
-                        case 1:
-                            step = 2
-                        case 2:
-                            step = 3
-                            beginDiscovery()
-                        default:
-                            refreshMountedShares(
-                                advanceToFinish: true
-                            )
-                        }
+                        step = 1
+                        beginDiscovery()
                     } label: {
-                        Text(step == 0 ? "Get Started" : "Continue")
+                        Text("Get Started")
                     }
                     .onboardingPrimaryActionButton()
                     .keyboardShortcut(.defaultAction)
-                    .disabled(step == 3 && isRefreshingMountedShares)
                 } else {
                     Button {
                         finish()
@@ -124,94 +105,31 @@ struct OnboardingView: View {
                 onboardingFeature("lock.shield", "Respects network rules")
             }
             .padding(.top, 8)
+
+            VStack(spacing: 0) {
+                onboardingToggleRow("Start Otter at login", isOn: Binding(
+                    get: { loginItemService.isEnabled },
+                    set: { loginItemService.setEnabled($0) }
+                ))
+
+                Divider()
+
+                onboardingToggleRow("Notify me about connection changes and problems", isOn: Binding(
+                    get: { settings.preferences.notificationsEnabled },
+                    set: { enabled in
+                        settings.updatePreferences { $0.notificationsEnabled = enabled }
+                    }
+                ))
+            }
+            .padding(.horizontal, 14)
+            .background(Color(NSColor.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.primary.opacity(0.07)))
+            .padding(.top, 10)
+            .frame(maxWidth: 420)
         }
         .padding(36)
-    }
-
-    private var presencePage: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Where should Otter live?")
-                    .font(.title2.bold())
-                Text("Choose how you want to reach Otter after setup. You can change this later in Preferences.")
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(spacing: 10) {
-                ForEach(AppPresenceMode.allCases) { mode in
-                    presenceChoice(mode)
-                }
-            }
-
-            Label("Otter stays visible in both the Dock and menu bar until onboarding is finished.", systemImage: "info.circle")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-
-            Spacer()
-        }
-        .padding(34)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private var permissionsPage: some View {
-        VStack {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Permissions")
-                        .font(.largeTitle.bold())
-                    Text("Choose the optional macOS access Otter can use while it sets up your shares.")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                }
-
-                VStack(spacing: 18) {
-                    OnboardingPermissionRow(
-                        symbol: "network",
-                        tint: .cyan,
-                        title: "Local Network",
-                        detail: localNetworkPermissionDetail,
-                        isOn: discovery.localNetworkAuthorizationStatus.isAllowed,
-                        onEnable: enableLocalNetworkAccess
-                    )
-
-                    OnboardingPermissionRow(
-                        symbol: "bell.badge.fill",
-                        tint: .blue,
-                        title: "Notifications",
-                        detail: notificationsPermissionDetail,
-                        isOn: notificationsPermissionIsEnabled,
-                        onEnable: enableNotificationAccess
-                    )
-
-                    OnboardingPermissionRow(
-                        symbol: "location.fill",
-                        tint: .purple,
-                        title: "Location",
-                        detail: locationPermissionDetail,
-                        isOn: networkService.locationAuthorizationStatus == .authorizedAlways,
-                        onEnable: enableLocationAccess
-                    )
-                }
-
-                Text("Otter checks these macOS permissions when this page opens. You can change them later in System Settings.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(32)
-            .frame(maxWidth: 540, alignment: .leading)
-            .background(.background, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .strokeBorder(.separator.opacity(0.22), lineWidth: 1)
-            }
-        }
-        .padding(32)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
-            discovery.checkLocalNetworkAuthorization()
-            networkService.refreshLocationAuthorizationStatus()
-            Task { await notificationService.refreshAuthorizationStatus() }
+            loginItemService.refresh()
         }
     }
 
@@ -380,59 +298,22 @@ struct OnboardingView: View {
         .padding(24)
     }
 
-    private var finishPage: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Keep Otter ready")
-                    .font(.title2.bold())
-                Text("These defaults make reconnection automatic while keeping alerts under your control.")
-                    .foregroundStyle(.secondary)
-            }
-
-            GroupBox {
-                VStack(alignment: .leading, spacing: 14) {
-                    Toggle("Start Otter at login", isOn: Binding(
-                        get: { loginItemService.isEnabled },
-                        set: { loginItemService.setEnabled($0) }
-                    ))
-
-                    Toggle("Notify me about connection changes and problems", isOn: Binding(
-                        get: { settings.preferences.notificationsEnabled },
-                        set: { enabled in
-                            settings.updatePreferences { $0.notificationsEnabled = enabled }
-                            if enabled {
-                                Task { await notificationService.requestAuthorization() }
-                            }
-                        }
-                    ))
-                }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            if settings.shares.isEmpty {
-                Label("No shares were added. Go Back to add one, or finish and add one later.", systemImage: "info.circle")
-                    .foregroundStyle(.secondary)
-            } else {
-                Label("\(String.counted(settings.shares.count, "share")) ready for Otter to monitor.", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            }
-
-            Spacer()
-        }
-        .padding(34)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear {
-            loginItemService.refresh()
-        }
-    }
-
     private var discoveryMessage: String {
         if case let .failed(message) = discovery.state {
             return "Discovery unavailable: \(message)"
         }
         return "No SMB servers found yet."
+    }
+
+    private func onboardingToggleRow(_ title: String, isOn: Binding<Bool>) -> some View {
+        HStack(spacing: 12) {
+            Text(title)
+            Spacer(minLength: 8)
+            Toggle(title, isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        }
+        .padding(.vertical, 10)
     }
 
     private func onboardingFeature(_ symbol: String, _ title: String) -> some View {
@@ -452,9 +333,7 @@ struct OnboardingView: View {
         refreshSavedSMBShares()
     }
 
-    private func refreshMountedShares(
-        advanceToFinish: Bool = false
-    ) {
+    private func refreshMountedShares() {
         guard !isRefreshingMountedShares else { return }
         isRefreshingMountedShares = true
         Task {
@@ -464,9 +343,6 @@ struct OnboardingView: View {
             mountedShares = suggestions
 
             isRefreshingMountedShares = false
-            if advanceToFinish {
-                step = 4
-            }
         }
     }
 
@@ -564,99 +440,14 @@ struct OnboardingView: View {
         importedPaths.insert(suggestion.mountPath)
     }
 
-    private func enableLocalNetworkAccess() {
-        if discovery.localNetworkAuthorizationStatus == .denied {
-            openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork")
-        } else {
-            discovery.checkLocalNetworkAuthorization()
-        }
-    }
-
-    private func enableNotificationAccess() {
-        Task { await notificationService.requestAuthorization() }
-    }
-
-    private func enableLocationAccess() {
-        if networkService.canRequestLocationAuthorization {
-            networkService.requestLocationAuthorization()
-        } else if networkService.locationAuthorizationStatus != .authorizedAlways {
-            openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices")
-        }
-    }
-
-    private var notificationsPermissionIsEnabled: Bool {
-        switch notificationService.authorizationStatus {
-        case .authorized, .provisional, .ephemeral:
-            true
-        case .notDetermined, .denied:
-            false
-        @unknown default:
-            false
-        }
-    }
-
-    private func openSystemSettings(_ urlString: String) {
-        guard let url = URL(string: urlString) else { return }
-        NSWorkspace.shared.open(url)
-    }
-
-    private var localNetworkPermissionDetail: String {
-        switch discovery.localNetworkAuthorizationStatus {
-        case .checking:
-            "Checking macOS permission…"
-        case .allowed:
-            "Otter can find nearby SMB servers and communicate with local shares."
-        case .denied:
-            "Disabled in System Settings. Enable Otter under Privacy & Security > Local Network."
-        case .unknown:
-            "MacOS has not confirmed whether Otter can access your local network yet."
-        }
-    }
-
-    private var notificationsPermissionDetail: String {
-        switch notificationService.authorizationStatus {
-        case .authorized:
-            "Otter can alert you about connection changes and problems."
-        case .notDetermined:
-            "MacOS has not asked for notification permission yet."
-        case .denied:
-            "Disabled in System Settings."
-        case .provisional:
-            "Otter can deliver notifications quietly."
-        case .ephemeral:
-            "Otter has temporary notification access."
-        @unknown default:
-            "MacOS has not confirmed notification access."
-        }
-    }
-
-    private var locationPermissionDetail: String {
-        switch networkService.locationAuthorizationStatus {
-        case .authorizedAlways:
-            "Otter can show the Wi-Fi name when you create a network rule for a share."
-        case .notDetermined:
-            "MacOS has not asked for location permission yet."
-        case .denied, .restricted:
-            "Disabled in System Settings."
-        case .authorizedWhenInUse:
-            "Otter has limited location access. Allow it in System Settings to use Wi-Fi network rules."
-        @unknown default:
-            "MacOS has not confirmed location access."
-        }
-    }
-
     private func finish() {
         settings.completeOnboarding()
+        if settings.preferences.notificationsEnabled {
+            Task { await notificationService.requestAuthorization() }
+        }
         dismiss()
     }
 
-    private func presenceChoice(_ mode: AppPresenceMode) -> some View {
-        let isSelected = settings.preferences.appPresenceMode == mode
-
-        return AppPresenceChoice(mode: mode, isSelected: isSelected) {
-            settings.updatePreferences { $0.appPresenceMode = mode }
-        }
-    }
 }
 
 private extension View {
@@ -694,109 +485,6 @@ private extension View {
                 .buttonBorderShape(.roundedRectangle(radius: 11))
                 .controlSize(.large)
         }
-    }
-}
-
-private struct OnboardingPermissionRow: View {
-    let symbol: String
-    let tint: Color
-    let title: String
-    let detail: String
-    let isOn: Bool
-    let onEnable: () -> Void
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 16) {
-            Image(systemName: symbol)
-                .font(.title2)
-                .foregroundStyle(tint)
-                .frame(width: 58, height: 58)
-                .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.headline)
-                Text(detail)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 12)
-
-            Toggle(title, isOn: Binding(
-                get: { isOn },
-                set: { enabled in
-                    if enabled {
-                        onEnable()
-                    }
-                }
-            ))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .accessibilityLabel(title)
-                .accessibilityHint(detail)
-        }
-    }
-}
-
-private struct AppPresenceChoice: View {
-    let mode: AppPresenceMode
-    let isSelected: Bool
-    let action: () -> Void
-
-    private var secondaryColor: Color {
-        Color(nsColor: .secondaryLabelColor)
-    }
-
-    private var tertiaryColor: Color {
-        Color(nsColor: .tertiaryLabelColor)
-    }
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: mode.systemImage)
-                    .font(.title2)
-                    .foregroundStyle(isSelected ? Color.accentColor : secondaryColor)
-                    .frame(width: 32)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(mode.title)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                    Text(mode.detail)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.leading)
-                }
-
-                Spacer()
-
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
-                    .foregroundStyle(isSelected ? Color.accentColor : tertiaryColor)
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(choiceBackground)
-            .overlay(choiceBorder)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(mode.title)
-        .accessibilityHint(mode.detail)
-        .accessibilityValue(isSelected ? "Selected" : "Not selected")
-    }
-
-    private var choiceBackground: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(isSelected ? Color.accentColor.opacity(0.10) : secondaryColor.opacity(0.06))
-    }
-
-    private var choiceBorder: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .stroke(isSelected ? Color.accentColor.opacity(0.65) : secondaryColor.opacity(0.12))
     }
 }
 

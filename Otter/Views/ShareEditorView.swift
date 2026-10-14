@@ -310,7 +310,6 @@ struct ShareEditorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 availableSharesSection
-                quickActions
 
                 Divider()
 
@@ -323,7 +322,29 @@ struct ShareEditorView: View {
 
     private var availableSharesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("Available Shares")
+            HStack {
+                sectionTitle("Available Shares")
+
+                Spacer()
+
+                Button {
+                    refreshMountedShares()
+                    discovery.restart()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Scan for available shares")
+                .accessibilityLabel("Scan for available shares")
+
+                Button {
+                    chooseMountedShare()
+                } label: {
+                    Label("Choose Mounted Volume…", systemImage: "folder")
+                }
+                .tahoeCompactActionButton()
+                .help("Add from an already mounted volume")
+            }
 
             if shareBrowserServers.isEmpty {
                 HStack(spacing: 8) {
@@ -360,27 +381,6 @@ struct ShareEditorView: View {
                 Text(shareBrowserMessage)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private var quickActions: some View {
-        HStack(spacing: 10) {
-            discoveryAction(
-                title: "Choose Mounted Volume…",
-                subtitle: "Add from an already mounted volume",
-                image: "folder"
-            ) {
-                chooseMountedShare()
-            }
-
-            discoveryAction(
-                title: "Refresh",
-                subtitle: "Scan for available shares",
-                image: "arrow.clockwise"
-            ) {
-                refreshMountedShares()
-                discovery.restart()
             }
         }
     }
@@ -459,34 +459,6 @@ struct ShareEditorView: View {
     private func sectionTitle(_ title: String) -> some View {
         Text(title)
             .font(.headline)
-    }
-
-    private func discoveryAction(
-        title: String,
-        subtitle: String,
-        image: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(alignment: .center, spacing: 10) {
-                Image(systemName: image)
-                    .font(.title3)
-                    .frame(width: 22)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.callout.weight(.medium))
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
-        }
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.roundedRectangle)
-        .controlSize(.large)
     }
 
     private func savedConnectionRow(_ savedShare: SavedSMBShare) -> some View {
