@@ -1460,14 +1460,20 @@ private struct ShareListRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(share.displayName)
                     .lineLimit(1)
-                Text(status.label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Image(systemName: status.circleSymbol)
+                        .font(.caption2)
+                        .foregroundStyle(status.color)
+                        .accessibilityHidden(true)
+                    Text(status.label)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
         } icon: {
             Image(systemName: "externaldrive.fill")
-                .foregroundStyle(status.color)
+                .foregroundStyle(.secondary)
                 .frame(width: 22)
         }
         .padding(.vertical, 3)
