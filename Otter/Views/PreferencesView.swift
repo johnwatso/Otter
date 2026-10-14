@@ -64,11 +64,6 @@ struct ShareManagementView: View {
     @State private var shareToRemove: NetworkShare?
     @State private var isShowingOnboarding = false
     @State private var editingServerShareIDs: [NetworkShare.ID] = []
-    @Namespace private var selectionHighlightNamespace
-    @State private var rowFrames: [NetworkShare.ID: CGRect] = [:]
-
-    fileprivate static let dragCoordinateSpace = "shareSelectorDrag"
-
     private var shares: [NetworkShare] {
         appModel.screenshotDemoShares ?? settings.shares
     }
@@ -255,15 +250,29 @@ struct ShareManagementView: View {
         appModel.shouldPresentOnboarding = false
     }
 
-    // Custom rows instead of List(selection:) so the selection is a sliding
-    // material pill (ported from SwiftMiner) rather than the accent-color bar.
+    // A native sidebar list, so selection, material and focus rings follow the
+    // system. Server rows are selectable headings for the shares beneath them.
     private var sidebar: some View {
-        ZStack {
-            SidebarMaterialBackground()
+        List(selection: $selection) {
+            ForEach(shareGroups) { group in
+                if group.isGrouped {
+                    ServerListHeader(group: group)
+                        .tag(ShareManagementSelection.server(group.id))
 
+                    ForEach(group.shares) { share in
+                        ShareListRow(share: share)
+                            .tag(ShareManagementSelection.share(share.id))
+                            .listRowInsets(EdgeInsets(top: 2, leading: 22, bottom: 2, trailing: 8))
+                    }
+                } else if let share = group.shares.first {
+                    ShareListRow(share: share)
+                        .tag(ShareManagementSelection.share(share.id))
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
-                sidebarRows
-
                 if !shares.isEmpty {
                     SidebarStatusFooter(shares: shares)
                 }
@@ -297,77 +306,6 @@ struct ShareManagementView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
             }
-        }
-    }
-
-    private var sidebarRows: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Shares")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 2)
-
-                ForEach(shareGroups) { group in
-                    if group.isGrouped {
-                        ServerListHeader(
-                            group: group,
-                            isSelected: selection == .server(group.id),
-                            selectionHighlightNamespace: selectionHighlightNamespace
-                        ) {
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                selection = .server(group.id)
-                            }
-                        }
-
-                        ForEach(group.shares) { share in
-                            ShareListRow(
-                                share: share,
-                                isSelected: selection == .share(share.id),
-                                selectionHighlightNamespace: selectionHighlightNamespace
-                            ) {
-                                withAnimation(.easeInOut(duration: 0.18)) {
-                                    selection = .share(share.id)
-                                }
-                            }
-                            .padding(.leading, 14)
-                        }
-                    } else if let share = group.shares.first {
-                        ShareListRow(
-                            share: share,
-                            isSelected: selection == .share(share.id),
-                            selectionHighlightNamespace: selectionHighlightNamespace
-                        ) {
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                selection = .share(share.id)
-                            }
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.top, 10)
-            .coordinateSpace(name: Self.dragCoordinateSpace)
-            .onPreferenceChange(ShareRowFramesKey.self) { rowFrames = $0 }
-            .gesture(selectionDragGesture)
-        }
-    }
-
-    private var selectionDragGesture: some Gesture {
-        DragGesture(minimumDistance: 6, coordinateSpace: .named(Self.dragCoordinateSpace))
-            .onChanged { value in
-                updateSelection(forDragLocation: value.location)
-            }
-    }
-
-    private func updateSelection(forDragLocation point: CGPoint) {
-        guard let target = shares.first(where: { rowFrames[$0.id]?.contains(point) ?? false }),
-              selection != .share(target.id)
-        else { return }
-
-        withAnimation(.easeInOut(duration: 0.18)) {
-            selection = .share(target.id)
         }
     }
 
@@ -675,47 +613,28 @@ private struct SidebarStatusFooter: View {
 private struct ServerListHeader: View {
     @EnvironmentObject private var settings: SettingsStore
     let group: NetworkShareServerGroup
-    let isSelected: Bool
-    let selectionHighlightNamespace: Namespace.ID
-    let action: () -> Void
+    @EnvironmentObject private var monitor: ShareMonitor
     @State private var isRenaming = false
     @State private var draftName = ""
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "server.rack")
-                .font(.body)
-                .foregroundStyle(isSelected ? .primary : .secondary)
-                .frame(width: 24)
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 1) {
+        Label {
+            HStack(spacing: 6) {
                 Text(group.serverName)
-                    .font(.body)
                     .fontWeight(.semibold)
                     .lineLimit(1)
-
-                Text(String.counted(group.shares.count, "share"))
-                    .font(.caption)
+                Spacer(minLength: 0)
+                Text("\(connectedCount)/\(group.shares.count)")
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
-
-            Spacer(minLength: 0)
+        } icon: {
+            Image(systemName: "server.rack")
+                .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 7)
-        .padding(.bottom, 3)
-        .background {
-            if isSelected {
-                SidebarSelectionHighlight()
-                    .matchedGeometryEffect(id: "sidebarSelectionHighlight", in: selectionHighlightNamespace)
-            }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { action() }
+        .padding(.top, 6)
         .contextMenu {
             Button {
-                action()
                 draftName = settings.customServerName(for: representativeShare) ?? group.serverName
                 isRenaming = true
             } label: {
@@ -737,8 +656,11 @@ private struct ServerListHeader: View {
             Text("This name is shown only in Otter and applies to every share on this server. Its network address remains \(representativeShare.host ?? "unchanged").")
         }
         .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityAction { action() }
+        .accessibilityValue("\(connectedCount) of \(group.shares.count) connected")
+    }
+
+    private var connectedCount: Int {
+        group.shares.filter { monitor.status(for: $0) == .connected }.count
     }
 
     private var representativeShare: NetworkShare {
@@ -1436,138 +1358,26 @@ private struct EmptyShareDetailView: View {
 private struct ShareListRow: View {
     @EnvironmentObject private var monitor: ShareMonitor
     let share: NetworkShare
-    let isSelected: Bool
-    let selectionHighlightNamespace: Namespace.ID
-    let action: () -> Void
 
     var body: some View {
         let status = monitor.status(for: share)
 
-        HStack(spacing: 8) {
-            Image(systemName: isSelected ? "externaldrive.fill" : "externaldrive")
-                .font(.title3)
-                .foregroundStyle(isSelected ? .primary : .secondary)
-                .frame(width: 24)
-
+        Label {
             VStack(alignment: .leading, spacing: 1) {
                 Text(share.displayName)
-                    .font(.body)
-                    .fontWeight(isSelected ? .semibold : .medium)
                     .lineLimit(1)
-
-                HStack(spacing: 4) {
-                    Image(systemName: status.circleSymbol)
-                        .font(.caption2)
-                        .foregroundStyle(status.color)
-                    Text(status.label)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text(status.label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-
-            Spacer(minLength: 0)
+        } icon: {
+            Image(systemName: "externaldrive.fill")
+                .foregroundStyle(status.color)
         }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background {
-            if isSelected {
-                SidebarSelectionHighlight()
-                    .matchedGeometryEffect(id: "sidebarSelectionHighlight", in: selectionHighlightNamespace)
-            }
-        }
-        .background(
-            GeometryReader { geo in
-                Color.clear.preference(
-                    key: ShareRowFramesKey.self,
-                    value: [share.id: geo.frame(in: .named(ShareManagementView.dragCoordinateSpace))]
-                )
-            }
-        )
-        .contentShape(Rectangle())
-        .onTapGesture { action() }
-        // Rows are drawn by hand rather than with List, so describe them to
-        // VoiceOver as selectable buttons.
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(share.displayName)
+        .padding(.vertical, 3)
+        .accessibilityElement(children: .combine)
         .accessibilityValue(status.label)
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityAction { action() }
-    }
-
-}
-
-// Flat, column-like sidebar material (Apple Music style), ported from
-// SwiftMiner. Gives the selection pill enough backdrop contrast to read.
-private struct SidebarMaterialBackground: View {
-    var body: some View {
-        VisualEffectMaterialView(material: .sidebar)
-            .overlay {
-                LinearGradient(
-                    colors: [
-                        Color.white.opacity(0.10),
-                        Color.clear
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            }
-            .overlay(alignment: .trailing) {
-                Rectangle()
-                    .fill(Color.black.opacity(0.10))
-                    .frame(width: 1)
-            }
-            .clipShape(Rectangle())
-            .ignoresSafeArea()
-    }
-}
-
-private struct VisualEffectMaterialView: NSViewRepresentable {
-    let material: NSVisualEffectView.Material
-    var blendingMode: NSVisualEffectView.BlendingMode = .withinWindow
-
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.state = .active
-        view.material = material
-        view.blendingMode = blendingMode
-        return view
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
-        nsView.material = material
-        nsView.blendingMode = blendingMode
-        nsView.state = .active
-    }
-}
-
-// Frosted material selection pill, ported from SwiftMiner's sidebar.
-private struct SidebarSelectionHighlight: View {
-    @Environment(\.controlActiveState) private var controlActiveState
-
-    private var highlightMaterial: Material {
-        controlActiveState == .active ? .ultraThinMaterial : .bar
-    }
-
-    private var strokeOpacity: Double {
-        controlActiveState == .active ? 0.16 : 0.10
-    }
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: 11, style: .continuous)
-            .fill(highlightMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .strokeBorder(.white.opacity(strokeOpacity), lineWidth: 1)
-            )
-    }
-}
-
-private struct ShareRowFramesKey: PreferenceKey {
-    static var defaultValue: [NetworkShare.ID: CGRect] { [:] }
-    static func reduce(value: inout [NetworkShare.ID: CGRect], nextValue: () -> [NetworkShare.ID: CGRect]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
     }
 }
 
