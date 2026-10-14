@@ -517,3 +517,21 @@ enum ScreenshotDemo {
     }
 }
 #endif
+
+
+/// Brings Otter and one of its windows to the front.
+///
+/// Asking to activate while a menu bar menu is still closing is ignored, and
+/// `openWindow` does nothing for a window that is already open behind other
+/// apps. Repeating the request on the next turn, and ordering the window
+/// forward explicitly, makes both cases land.
+@MainActor
+func bringOtterToFront(windowTitled title: String? = nil) {
+    NSApp.activate(ignoringOtherApps: true)
+    DispatchQueue.main.async {
+        NSApp.activate(ignoringOtherApps: true)
+        if let title {
+            NSApp.windows.first { $0.title == title }?.makeKeyAndOrderFront(nil)
+        }
+    }
+}

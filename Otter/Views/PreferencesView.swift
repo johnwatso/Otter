@@ -252,21 +252,44 @@ struct ShareManagementView: View {
 
     // A native sidebar list, so selection, material and focus rings follow the
     // system. Server rows are selectable headings for the shares beneath them.
+    private struct SidebarSection: Identifiable {
+        let groups: [NetworkShareServerGroup]
+        var id: String { groups.map(\.id).joined(separator: "|") }
+    }
+
+    private var sidebarSections: [SidebarSection] {
+        var sections: [[NetworkShareServerGroup]] = []
+        for group in shareGroups {
+            if !group.isGrouped, let last = sections.last, last.allSatisfy({ !$0.isGrouped }) {
+                sections[sections.count - 1].append(group)
+            } else {
+                sections.append([group])
+            }
+        }
+        return sections.map(SidebarSection.init)
+    }
+
     private var sidebar: some View {
         List(selection: $selection) {
-            ForEach(shareGroups) { group in
-                if group.isGrouped {
-                    ServerListHeader(group: group)
-                        .tag(ShareManagementSelection.server(group.id))
+            // One section per server keeps a consistent gap between groups;
+            // neighbouring single shares share a section so they sit together.
+            ForEach(sidebarSections) { section in
+                Section {
+                    ForEach(section.groups) { group in
+                        if group.isGrouped {
+                            ServerListHeader(group: group)
+                                .tag(ShareManagementSelection.server(group.id))
 
-                    ForEach(group.shares) { share in
-                        ShareListRow(share: share)
-                            .tag(ShareManagementSelection.share(share.id))
-                            .listRowInsets(EdgeInsets(top: 2, leading: 22, bottom: 2, trailing: 8))
+                            ForEach(group.shares) { share in
+                                ShareListRow(share: share)
+                                    .tag(ShareManagementSelection.share(share.id))
+                                    .listRowInsets(EdgeInsets(top: 2, leading: 18, bottom: 2, trailing: 8))
+                            }
+                        } else if let share = group.shares.first {
+                            ShareListRow(share: share)
+                                .tag(ShareManagementSelection.share(share.id))
+                        }
                     }
-                } else if let share = group.shares.first {
-                    ShareListRow(share: share)
-                        .tag(ShareManagementSelection.share(share.id))
                 }
             }
         }
@@ -631,8 +654,9 @@ private struct ServerListHeader: View {
         } icon: {
             Image(systemName: "server.rack")
                 .foregroundStyle(.secondary)
+                .frame(width: 22)
         }
-        .padding(.top, 6)
+        .padding(.vertical, 3)
         .contextMenu {
             Button {
                 draftName = settings.customServerName(for: representativeShare) ?? group.serverName
@@ -1045,7 +1069,7 @@ private struct AdvancedPreferencesView: View {
                 Button {
                     appModel.requestOnboarding()
                     openWindow(id: AppModel.sharesWindowID)
-                    NSApp.activate(ignoringOtherApps: true)
+                    bringOtterToFront(windowTitled: "Manage Shares")
                 } label: {
                     Label("Run Onboarding Again", systemImage: "arrow.counterclockwise")
                 }
@@ -1374,6 +1398,7 @@ private struct ShareListRow: View {
         } icon: {
             Image(systemName: "externaldrive.fill")
                 .foregroundStyle(status.color)
+                .frame(width: 22)
         }
         .padding(.vertical, 3)
         .accessibilityElement(children: .combine)

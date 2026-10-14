@@ -174,7 +174,7 @@ private struct MenuBarLabel: View {
             .onReceive(appModel.$shouldOpenSharesWindow) { shouldOpen in
                 if shouldOpen {
                     openWindow(id: AppModel.sharesWindowID)
-                    NSApp.activate(ignoringOtherApps: true)
+                    bringOtterToFront(windowTitled: "Manage Shares")
                     appModel.shouldOpenSharesWindow = false
                 }
             }
@@ -189,7 +189,7 @@ private struct MenuBarLabel: View {
             try? await Task.sleep(nanoseconds: 400_000_000)
             guard settings.shares.isEmpty else { return }
             openWindow(id: AppModel.sharesWindowID)
-            NSApp.activate(ignoringOtherApps: true)
+            bringOtterToFront(windowTitled: "Manage Shares")
         }
     }
 }

@@ -126,13 +126,13 @@ struct MenuBarView: View {
     }
 
     private func showPreferences() {
-        NSApp.activate(ignoringOtherApps: true)
         openSettings()
+        bringOtterToFront()
     }
 
     private func showShares() {
         openWindow(id: AppModel.sharesWindowID)
-        NSApp.activate(ignoringOtherApps: true)
+        bringOtterToFront(windowTitled: "Manage Shares")
     }
 }
 
@@ -184,7 +184,7 @@ private struct DetectedShareMenu: View {
 
     private func showShares() {
         openWindow(id: AppModel.sharesWindowID)
-        NSApp.activate(ignoringOtherApps: true)
+        bringOtterToFront(windowTitled: "Manage Shares")
     }
 }
 
