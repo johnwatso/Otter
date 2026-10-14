@@ -15,12 +15,6 @@ struct PreferencesView: View {
                 }
                 .tag(PreferencesTab.general)
 
-            NotificationsPreferencesView()
-                .tabItem {
-                    PreferencesTabItem(tab: .notifications)
-                }
-                .tag(PreferencesTab.notifications)
-
             AdvancedPreferencesView()
                 .tabItem {
                     PreferencesTabItem(tab: .advanced)
@@ -156,7 +150,7 @@ struct ShareManagementView: View {
                             appModel.requestEditShare(selectedShare)
                         }
                     } label: {
-                        Label("Settings…", systemImage: "gearshape")
+                        Label("Share Settings…", systemImage: "gearshape")
                     }
                     .disabled(selectedShare.map { settings.isManagedShare(id: $0.id) } ?? true)
                     .help(selectedShare.map { settings.isManagedShare(id: $0.id) } == true
@@ -745,7 +739,6 @@ private struct ServerListHeader: View {
 
 private enum PreferencesTab: String, CaseIterable, Hashable, Identifiable {
     case general
-    case notifications
     case advanced
     case updates
 
@@ -755,8 +748,6 @@ private enum PreferencesTab: String, CaseIterable, Hashable, Identifiable {
         switch self {
         case .general:
             "General"
-        case .notifications:
-            "Notifications"
         case .advanced:
             "Advanced"
         case .updates:
@@ -768,8 +759,6 @@ private enum PreferencesTab: String, CaseIterable, Hashable, Identifiable {
         switch self {
         case .general:
             "gearshape"
-        case .notifications:
-            "bell"
         case .advanced:
             "wrench.and.screwdriver"
         case .updates:
@@ -858,6 +847,8 @@ private struct GeneralPreferencesView: View {
             } header: {
                 Text("New Shares")
             }
+
+            NotificationsPreferencesSections()
         }
         .compactPreferencesForm()
     }
@@ -894,12 +885,12 @@ private struct GeneralPreferencesView: View {
     }
 }
 
-private struct NotificationsPreferencesView: View {
+private struct NotificationsPreferencesSections: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var notificationService: NotificationService
 
     var body: some View {
-        Form {
+        Group {
             Section {
                 Toggle("Notifications", isOn: notificationsEnabledBinding)
                 SettingsSecondaryText("Uses temporary banners by default.")
@@ -932,7 +923,6 @@ private struct NotificationsPreferencesView: View {
                 Text("Permission")
             }
         }
-        .compactPreferencesForm()
         .onAppear {
             Task { await notificationService.refreshAuthorizationStatus() }
         }
@@ -970,6 +960,7 @@ private struct AdvancedPreferencesView: View {
     @EnvironmentObject private var networkService: NetworkReachabilityService
     @State private var configurationMessage: String?
     @State private var supportPackageMessage: String?
+    @State private var isShowingNetworkDetails = false
 
     var body: some View {
         Form {
@@ -1008,98 +999,78 @@ private struct AdvancedPreferencesView: View {
             }
 
             Section {
-                LabeledContent("Current Wi-Fi", value: networkService.currentWiFiNetworkName ?? "Unavailable")
+                DisclosureGroup("Wi-Fi and VPN status", isExpanded: $isShowingNetworkDetails) {
+                    LabeledContent("Current Wi-Fi", value: networkService.currentWiFiNetworkName ?? "Unavailable")
 
-                if networkService.wifiNameRequiresLocationPermission {
-                    Label("macOS requires Location Services access to show the Wi-Fi network name.", systemImage: "location.slash")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if networkService.wifiNameRequiresLocationPermission {
+                        Label("macOS requires Location Services access to show the Wi-Fi network name.", systemImage: "location.slash")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
 
-                    Button {
-                        if networkService.canRequestLocationAuthorization {
-                            networkService.requestLocationAuthorization()
-                        } else {
-                            openLocationPrivacySettings()
+                        Button {
+                            if networkService.canRequestLocationAuthorization {
+                                networkService.requestLocationAuthorization()
+                            } else {
+                                openLocationPrivacySettings()
+                            }
+                        } label: {
+                            Label(
+                                networkService.canRequestLocationAuthorization ? "Allow Location Access" : "Open Location Settings",
+                                systemImage: "location"
+                            )
                         }
-                    } label: {
-                        Label(
-                            networkService.canRequestLocationAuthorization ? "Allow Location Access" : "Open Location Settings",
-                            systemImage: "location"
-                        )
+                        .tahoeSecondaryActionButton()
                     }
-                    .tahoeSecondaryActionButton()
-                }
 
-                LabeledContent("Active VPN", value: activeVPNLabel)
+                    LabeledContent("Active VPN", value: activeVPNLabel)
 
-                if networkService.isVPNNameUnavailable {
-                    Label("An unidentified tunnel is active. It does not satisfy VPN share rules.", systemImage: "info.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                    if networkService.isVPNNameUnavailable {
+                        Label("An unidentified tunnel is active. It does not satisfy VPN share rules.", systemImage: "info.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
 
-                if networkService.knownVPNNames.isEmpty {
-                    Label("No VPNs found", systemImage: "lock.slash")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    LabeledContent("VPNs in System Settings") {
-                        VStack(alignment: .trailing, spacing: 4) {
-                            ForEach(networkService.knownVPNNames, id: \.self) { vpnName in
-                                HStack(spacing: 5) {
-                                    Text(vpnName)
-                                    if !networkService.canControlVPN(named: vpnName) {
-                                        Text("Manual")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
+                    if networkService.knownVPNNames.isEmpty {
+                        Label("No VPNs found", systemImage: "lock.slash")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        LabeledContent("VPNs in System Settings") {
+                            VStack(alignment: .trailing, spacing: 4) {
+                                ForEach(networkService.knownVPNNames, id: \.self) { vpnName in
+                                    HStack(spacing: 5) {
+                                        Text(vpnName)
+                                        if !networkService.canControlVPN(named: vpnName) {
+                                            Text("Manual")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
 
-                Button {
-                    networkService.refreshNetworkDetails()
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
+                    Button {
+                        networkService.refreshNetworkDetails()
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .tahoeSecondaryActionButton()
                 }
-                .tahoeSecondaryActionButton()
             } header: {
                 Text("Network")
             }
 
             Section {
-                HStack {
-                    Button {
-                        exportConfiguration()
-                    } label: {
-                        Label("Export Configuration…", systemImage: "square.and.arrow.up")
-                    }
-                    .tahoeSecondaryActionButton()
-
-                    Button {
-                        importConfiguration()
-                    } label: {
-                        Label("Import Configuration…", systemImage: "square.and.arrow.down")
-                    }
-                    .tahoeSecondaryActionButton()
-                }
-
-                HStack {
-                    Button {
-                        exportProtectedBackup()
-                    } label: {
-                        Label("Export Protected Backup…", systemImage: "lock.square.stack")
-                    }
-                    .tahoeSecondaryActionButton()
-
-                    Button {
-                        importProtectedBackup()
-                    } label: {
-                        Label("Restore Protected Backup…", systemImage: "lock.open")
-                    }
-                    .tahoeSecondaryActionButton()
+                Menu {
+                    Button("Export Configuration…", action: exportConfiguration)
+                    Button("Import Configuration…", action: importConfiguration)
+                    Divider()
+                    Button("Export Protected Backup…", action: exportProtectedBackup)
+                    Button("Restore Protected Backup…", action: importProtectedBackup)
+                } label: {
+                    Label("Backup & Restore", systemImage: "square.and.arrow.up.on.square")
                 }
 
                 SettingsSecondaryText("Standard exports are safe templates and never include credentials. Protected backups encrypt eligible SMB Keychain credentials with a password you choose.")
@@ -1372,8 +1343,6 @@ private struct UpdatesPreferencesView: View {
                 .tahoeSecondaryActionButton()
                 .disabled(!updaterViewModel.canCheckForUpdates)
 
-                SettingsSecondaryText("Updates are delivered by Sparkle and installed in place.")
-
                 if !updaterViewModel.isConfigured {
                     Label("This build has no update feed or signing key, so updates are unavailable.", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
@@ -1381,34 +1350,6 @@ private struct UpdatesPreferencesView: View {
                 }
             } header: {
                 Text("Updates")
-            }
-
-            if updaterViewModel.automaticallyDownloadsUpdates {
-                Section {
-                    Picker("Install", selection: installPolicyBinding) {
-                        ForEach(AutoUpdateInstallPolicy.allCases) { policy in
-                            Text(policy.label).tag(policy)
-                        }
-                    }
-
-                    if settings.preferences.autoUpdateInstallPolicy == .scheduled {
-                        Picker("At", selection: installHourBinding) {
-                            ForEach(0..<24, id: \.self) { hour in
-                                Text(Self.hourLabel(hour)).tag(hour)
-                            }
-                        }
-                    }
-
-                    SettingsSecondaryText(installPolicyDetail)
-
-                    if let pendingInstallDescription = updaterViewModel.pendingInstallDescription {
-                        Label(pendingInstallDescription, systemImage: "clock.arrow.circlepath")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("Install Timing")
-                }
             }
         }
         .compactPreferencesForm()

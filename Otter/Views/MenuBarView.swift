@@ -95,13 +95,6 @@ struct MenuBarView: View {
         .keyboardShortcut(",")
 
         Button {
-            updaterViewModel.checkForUpdates()
-        } label: {
-            Label("Check for Updates…", systemImage: "arrow.down.circle")
-        }
-        .disabled(!updaterViewModel.canCheckForUpdates)
-
-        Button {
             NSApp.terminate(nil)
         } label: {
             Label("Quit Otter", systemImage: "power")
@@ -215,8 +208,6 @@ private struct ServerShareMenu: View {
                 Label("Mount All Shares", systemImage: "arrow.triangle.2.circlepath")
             }
 
-            ShareGroupPauseMenu(shares: group.shares)
-
             Button {
                 Task {
                     for share in group.shares {
@@ -270,16 +261,6 @@ private struct ShareMenu: View {
                 Label("Mount Now", systemImage: "arrow.triangle.2.circlepath")
             }
 
-            if share.wakeOnLAN.isEnabled {
-                Button {
-                    Task { await monitor.wake(share) }
-                } label: {
-                    Label("Wake Server", systemImage: "power")
-                }
-            }
-
-            SharePauseMenu(share: share)
-
             Button {
                 Task {
                     await monitor.disconnect(
@@ -290,15 +271,6 @@ private struct ShareMenu: View {
             } label: {
                 Label(share.connectsAutomatically ? "Disconnect & Pause" : "Disconnect", systemImage: "eject")
             }
-
-            Button {
-                appModel.requestEditShare(share)
-                openWindow(id: AppModel.sharesWindowID)
-                NSApp.activate(ignoringOtherApps: true)
-            } label: {
-                Label("Edit", systemImage: "pencil")
-            }
-            .disabled(settings.isManagedShare(id: share.id))
 
             if case .connected = monitor.status(for: share) {
                 Button {
