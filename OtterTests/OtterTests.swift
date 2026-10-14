@@ -4853,7 +4853,7 @@ extension NASDiagnosticsTests {
         let before = healthyNASResult()
         var calls: [URL?] = []
         var collectCount = 0
-        var sizes: [Int] = []
+        var sizes: [Int64] = []
         let ip = URL(string: "smb://10.11.1.241/Vault")!
         let outcome = await DiagnosticComparisonService.run(before: before, kind: .ipAddress, targetURL: ip,
             reconnect: { calls.append($0); return true }, collect: {
@@ -4865,7 +4865,7 @@ extension NASDiagnosticsTests {
         XCTAssertEqual(calls.count, 2)
         XCTAssertEqual(calls.first!, ip)
         XCTAssertNil(calls.last!)
-        XCTAssertEqual(sizes, [5])
+        XCTAssertEqual(sizes, [5_000_000_000])
         XCTAssertEqual(outcome.comparison?.originalConnectionRestored, true)
         XCTAssertEqual(outcome.current?.mount.connectedUsing, "Hostname")
         XCTAssertNil(outcome.error)

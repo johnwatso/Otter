@@ -14,7 +14,7 @@ enum DiagnosticComparisonService {
     static func run(before: NASDiagnosticResult, kind: DiagnosticComparisonKind, targetURL: URL?,
                     reconnect: @escaping @MainActor (URL?) async -> Bool,
                     collect: @escaping @MainActor () async throws -> NASDiagnosticResult,
-                    benchmark: @escaping @MainActor (MountDiagnostic, Int) async throws -> PerformanceDiagnostic,
+                    benchmark: @escaping @MainActor (MountDiagnostic, Int64) async throws -> PerformanceDiagnostic,
                     status: @escaping @MainActor (String) -> Void) async -> DiagnosticComparisonOutcome {
         var outcome = DiagnosticComparisonOutcome()
         guard before.isComplete, before.mount.mountPath != nil else {
@@ -43,9 +43,8 @@ enum DiagnosticComparisonService {
             if let performance = before.performance {
                 try Task.checkCancellation()
                 status("Repeating the same performance test…")
-                let size = Int(performance.bytes / 1_000_000_000)
-                guard (1...5).contains(size), Int64(size) * 1_000_000_000 == performance.bytes else { throw ComparisonError.testSize }
-                after.performance = try await benchmark(after.mount, size)
+                guard SharePerformanceTester.isSupportedTestSize(performance.bytes) else { throw ComparisonError.testSize }
+                after.performance = try await benchmark(after.mount, performance.bytes)
             }
             try Task.checkCancellation()
             outcome.current = after

@@ -83,7 +83,11 @@ struct PerformanceDiagnostic: Sendable {
     var readSamples: [ThroughputSample] = []
     var write: ThroughputDiagnostic { .init(averageMBps: writeMBps, samples: writeSamples) }
     var read: ThroughputDiagnostic { .init(averageMBps: readMBps, samples: readSamples) }
-    var sizeText: String { String(format: "%.1f GB", Double(bytes) / 1_000_000_000) }
+    var sizeText: String {
+        bytes < 1_000_000_000
+            ? String(format: "%.0f MB", Double(bytes) / 1_000_000)
+            : String(format: "%.1f GB", Double(bytes) / 1_000_000_000)
+    }
 }
 
 struct NASDiagnosticResult: Sendable {

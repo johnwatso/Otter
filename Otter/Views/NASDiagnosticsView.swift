@@ -109,35 +109,45 @@ final class NASDiagnosticsViewModel: ObservableObject {
             }
             if Task.isCancelled { status = "Diagnostics cancelled — partial results" }
             running = false
+            // Every check ends with a quick speed test, so there is no separate
+            // step to find. Larger tests stay available below the results.
+            if !Task.isCancelled, result?.mount.mountPath != nil {
+                await measurePerformance(bytes: SharePerformanceTester.quickTestBytes)
+            }
             task = nil
         }
         return task
     }
 
     func test(gigabytes: Int) {
-        guard !running, !testing, !comparing, !restoring, let mount = result?.mount, mount.mountPath != nil else { return }
+        guard !running, !testing, !comparing, !restoring, result?.mount.mountPath != nil else { return }
+        task = Task {
+            await measurePerformance(bytes: Int64(gigabytes) * 1_000_000_000)
+            task = nil
+        }
+    }
+
+    private func measurePerformance(bytes: Int64) async {
+        guard let mount = result?.mount, mount.mountPath != nil else { return }
         testing = true
         progress = 0
         error = nil
         result?.performance = nil
         performanceStatus = "Preparing temporary file…"
-        task = Task {
-            do {
-                let performance = try await SharePerformanceTester().test(mount: mount, gigabytes: gigabytes) { [weak self] value, label in
-                    self?.progress = value
-                    self?.performanceStatus = label
-                }
-                result?.performance = performance
-                performanceStatus = "Performance test complete"
-            } catch is CancellationError {
-                performanceStatus = "Performance test cancelled"
-            } catch {
-                self.error = error.localizedDescription
-                performanceStatus = "Performance test could not finish"
+        do {
+            let performance = try await SharePerformanceTester().test(mount: mount, bytes: bytes) { [weak self] value, label in
+                self?.progress = value
+                self?.performanceStatus = label
             }
-            testing = false
-            task = nil
+            result?.performance = performance
+            performanceStatus = "Speed test complete"
+        } catch is CancellationError {
+            performanceStatus = "Speed test cancelled"
+        } catch {
+            self.error = error.localizedDescription
+            performanceStatus = "Speed test could not finish"
         }
+        testing = false
     }
 
     func compare(kind: DiagnosticComparisonKind, share: NetworkShare, service: MountService, monitor: ShareMonitor) {
@@ -162,7 +172,7 @@ final class NASDiagnosticsViewModel: ObservableObject {
                     self.testing = true
                     self.progress = 0
                     defer { self.testing = false }
-                    return try await SharePerformanceTester().test(mount: mount, gigabytes: size) { value, label in
+                    return try await SharePerformanceTester().test(mount: mount, bytes: size) { value, label in
                         self.progress = value
                         self.performanceStatus = label
                     }
@@ -418,7 +428,7 @@ private struct NASShareDiagnosticsPanel: View {
                         }
                         Text("Reports include server names and local IP addresses. Review before sharing.").font(.caption).foregroundStyle(.secondary)
                     } else {
-                        Text("Run a short check to understand this share’s connection. Performance testing is optional and starts separately.").foregroundStyle(.secondary)
+                        Text("Run a check to understand this share’s connection. It includes a quick 256 MB speed test using a temporary file on the share, removed when finished.").foregroundStyle(.secondary)
                     }
                     if let comparison = model.comparison { comparisonView(comparison) }
                     if model.restorationRequired {
@@ -438,7 +448,7 @@ private struct NASShareDiagnosticsPanel: View {
         .onChange(of: model.running) { _, running in
             if running { copied = false }
         }
-        .alert("Test Share Performance?", isPresented: $showPerformanceConfirmation) {
+        .alert("Run Larger Speed Test?", isPresented: $showPerformanceConfirmation) {
             Button("Cancel", role: .cancel) { }
             Button("Start Test") { model.test(gigabytes: gigabytes) }
         } message: {
@@ -531,7 +541,7 @@ private struct NASShareDiagnosticsPanel: View {
 
     private func performance(_ r: NASDiagnosticResult) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Share Performance").font(.headline)
+            Text("Speed Test").font(.headline)
             if let p = r.performance {
                 DetailRow(label: "Expected maximum", value: DiagnosticReportBuilder.expectedText(r.expectedMaxMBps))
                 DetailRow(label: "Write", value: diagnosticNumber(p.writeMBps, suffix: " MB/s") + " · " + diagnosticPercent(p.write.utilisation(expected: r.expectedMaxMBps)) + " utilisation")
@@ -541,13 +551,13 @@ private struct NASShareDiagnosticsPanel: View {
             } else { Text(model.performanceStatus).font(.callout).foregroundStyle(.secondary) }
             if model.testing { Text(model.performanceStatus).font(.caption); ProgressView(value: model.progress) }
             HStack {
-                Picker("Test size", selection: $gigabytes) {
+                Picker("Larger test", selection: $gigabytes) {
                     ForEach(1...5, id: \.self) { Text("\($0) GB").tag($0) }
                 }.frame(width: 180).disabled(busy)
-                Button("Test Share Performance") { showPerformanceConfirmation = true }
+                Button("Run Larger Test") { showPerformanceConfirmation = true }
                     .tahoeSecondaryActionButton().disabled(busy || r.mount.mountPath == nil)
             }
-            Text("Creates a temporary file on the share and removes it when finished. Cancellation waits for any pending network I/O before cleanup.")
+            Text("The quick test runs with every check. A larger test is steadier on fast networks; it creates a temporary file on the share and removes it when finished.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

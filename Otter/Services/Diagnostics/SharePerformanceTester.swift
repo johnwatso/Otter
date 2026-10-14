@@ -14,10 +14,23 @@ struct SharePerformanceTester {
         }
     }
 
+    /// The size run automatically with every diagnostic check.
+    static let quickTestBytes: Int64 = 256_000_000
+
+    /// Whether `bytes` is a size the tester offers: the quick test or 1–5 GB.
+    static func isSupportedTestSize(_ bytes: Int64) -> Bool {
+        bytes == quickTestBytes || (1...5).contains { Int64($0) * 1_000_000_000 == bytes }
+    }
+
     func test(mount: MountDiagnostic, gigabytes: Int,
               progress: @escaping @MainActor @Sendable (Double, String) -> Void) async throws -> PerformanceDiagnostic {
+        try await test(mount: mount, bytes: Int64(min(5, max(1, gigabytes))) * 1_000_000_000, progress: progress)
+    }
+
+    func test(mount: MountDiagnostic, bytes: Int64,
+              progress: @escaping @MainActor @Sendable (Double, String) -> Void) async throws -> PerformanceDiagnostic {
         let worker = Task.detached(priority: .utility) {
-            try await Self.perform(mount: mount, bytes: Int64(min(5, max(1, gigabytes))) * 1_000_000_000, progress: progress)
+            try await Self.perform(mount: mount, bytes: bytes, progress: progress)
         }
         return try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
     }
