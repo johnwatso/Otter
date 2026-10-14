@@ -2,28 +2,6 @@ import AppKit
 import Combine
 import SwiftUI
 
-struct NASDiagnosticsSection: View {
-    let shares: [NetworkShare]
-    var serverName: String?
-    @State private var isPresented = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            DetailSectionHeader("Diagnostics")
-            Text(shares.count > 1
-                 ? "Check the network path, SMB connections, and performance of \(shares.count == 2 ? "both shares" : "all \(shares.count) shares") on this server."
-                 : "Check the network path, SMB connection, and share performance.")
-                .font(.caption).foregroundStyle(.secondary)
-            Button { isPresented = true } label: {
-                Label("Open Diagnostics", systemImage: "waveform.path.ecg")
-            }
-            .tahoeSecondaryActionButton()
-            .disabled(shares.isEmpty)
-        }
-        .sheet(isPresented: $isPresented) { NASDiagnosticsView(shares: shares, title: serverName) }
-    }
-}
-
 /// The diagnostics for every share in one sheet. Each share keeps its own
 /// results while the user switches between them.
 @MainActor

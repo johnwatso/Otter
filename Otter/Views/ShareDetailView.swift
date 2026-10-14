@@ -9,8 +9,6 @@ struct ShareDetailView: View {
     @EnvironmentObject private var eventLog: ShareEventLog
     let share: NetworkShare
 
-    @State private var isShowingConditions = false
-
     var body: some View {
         let status = monitor.status(for: currentShare)
         let runtimeState = monitor.runtimeState(for: currentShare)
@@ -106,15 +104,8 @@ struct ShareDetailView: View {
                         } else {
                             DetailRow(label: "Server", value: currentShare.host ?? "Unknown")
                         }
-                        ForEach(currentShare.orderedCachedIPAddresses, id: \.self) { address in
-                            DetailRow(
-                                label: NetworkShare.isIPv4Address(address) ? "IPv4 address" : "IPv6 address",
-                                value: address
-                            )
-                        }
                         DetailRow(label: "Share", value: NetworkShare.inferredShareName(from: currentShare.urlString) ?? currentShare.displayName)
                         DetailRow(label: "Mount location", value: currentShare.mountPath)
-                        DetailRow(label: "Protocol", value: currentShare.connectionProtocol?.title ?? "Unknown")
                         DetailStatusRow(
                             label: "Keychain credentials",
                             isOn: hasKeychainCredentials,
@@ -147,103 +138,41 @@ struct ShareDetailView: View {
                         }
                     }
                 }
-                
-                Divider()
-                
-                NASDiagnosticsSection(
-                    shares: diagnosticShares,
-                    serverName: diagnosticShares.count > 1
-                        ? currentShare.serverDisplayName(customNames: settings.preferences.serverNames)
-                        : nil
-                )
 
                 Divider()
 
-                // Configuration Section (Read-Only)
+                // Connection Section (Read-Only). Everything here is changed in
+                // the share editor.
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
-                        DetailSectionHeader("Configuration")
+                        DetailSectionHeader("Connection")
                         if settings.isManagedShare(id: currentShare.id) {
                             Label("Managed", systemImage: "checkmark.shield.fill")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    
+
                     VStack(spacing: 6) {
-                        DetailRow(label: "Connection mode", value: currentShare.connectionMode.title)
+                        DetailRow(label: "Connects", value: currentShare.connectionMode.summaryTitle)
                         if let pauseState = settings.effectivePauseState(for: currentShare) {
                             DetailRow(label: "Automatic mounting", value: pauseDescription(pauseState))
                         }
                         if currentShare.connectionMode.usesRemoteAccess,
                            let vpnName = currentShare.rules.requiredVPNName {
-                            DetailRow(label: "Remote access", value: vpnName)
+                            DetailRow(label: "VPN", value: "\(vpnName) · \(currentShare.rules.shouldConnectVPNAutomatically ? "starts automatically" : "connect manually")")
                         }
                         if currentShare.wakeOnLAN.isEnabled {
                             ConfigStatusRow(label: "Wake sleeping server")
                         }
-                        DetailRow(label: "Address preference", value: currentShare.prefersIPv4 ? "IPv4 first" : "IPv6 first")
                     }
                 }
-                
-                Divider()
-                
-                // Conditions Section (Read-Only). Collapsed by default: the
-                // one-line summary in the label answers the usual question.
-                DisclosureGroup(isExpanded: $isShowingConditions) {
-                    VStack(spacing: 6) {
-                        if currentShare.rules.hasNetworkRule || currentShare.rules.hasVPNRule {
-                            if !currentShare.rules.registeredSubnets.isEmpty {
-                                DetailRow(label: "Network", value: currentShare.rules.registeredSubnets.joined(separator: ", "))
-                            }
-                            if let ssid = currentShare.rules.requiredWiFiNetworkName {
-                                DetailRow(label: "Wi-Fi", value: ssid)
-                            }
-                            if currentShare.rules.hasVPNRule {
-                                DetailRow(label: "VPN", value: currentShare.rules.requiredVPNName ?? "Selection required")
-                                DetailRow(
-                                    label: "VPN startup",
-                                    value: currentShare.rules.shouldConnectVPNAutomatically ? "Automatic" : "Manual"
-                                )
-                            }
-                        } else {
-                            DetailRow(label: "Network", value: "No restrictions")
-                        }
-                    }
-                    .padding(.top, 8)
-                } label: {
-                    HStack {
-                        DetailSectionHeader("Conditions")
-                        Spacer()
-                        Text(connectionConditionLabel)
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        withAnimation(.easeInOut(duration: 0.18)) { isShowingConditions.toggle() }
-                    }
-                }
-                
             }
             .padding(20)
         }
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
             networkService.refreshNetworkDetails()
-        }
-    }
-
-    private var connectionConditionLabel: String {
-        switch (currentShare.rules.hasNetworkRule, currentShare.rules.hasVPNRule) {
-        case (true, true):
-            return "Registered network or VPN"
-        case (true, false):
-            return "Registered network"
-        case (false, true):
-            return "VPN connection"
-        case (false, false):
-            return "Any network"
         }
     }
 
@@ -396,15 +325,11 @@ struct ServerDetailView: View {
 
                 Divider()
 
-                NASDiagnosticsSection(shares: currentShares, serverName: group.serverName)
-
-                Divider()
-
                 VStack(alignment: .leading, spacing: 10) {
                     DetailSectionHeader("Configuration Summary")
 
                     VStack(spacing: 6) {
-                        DetailRow(label: "Connection mode", value: connectionModeSummary)
+                        DetailRow(label: "Connects", value: connectionModeSummary)
                         ServerConfigSummaryRow(
                             label: "Wake sleeping server",
                             enabledCount: currentShares.filter { $0.wakeOnLAN.isEnabled }.count,
@@ -425,7 +350,7 @@ struct ServerDetailView: View {
     private var connectionModeSummary: String {
         let modes = Set(currentShares.map(\.connectionMode))
         guard let mode = modes.first, modes.count == 1 else { return "Mixed" }
-        return mode.title
+        return mode.summaryTitle
     }
 
     private var connectionDropCount: Int {

@@ -69,6 +69,16 @@ enum ConnectionMode: String, Codable, CaseIterable, Hashable, Sendable {
         }
     }
 
+    /// The wording the editor uses, where Adaptive is Keep Connected plus a VPN.
+    var summaryTitle: String {
+        switch self {
+        case .keepConnected: "Keep connected"
+        case .adaptive: "Keep connected, VPN when away"
+        case .manual: "Only when I ask"
+        case .connectOnce: "Connect once at launch"
+        }
+    }
+
     /// Whether the share's VPN configuration participates in connecting it.
     /// Keep Connected is deliberately not location aware, so its saved remote
     /// access settings are preserved but inert.

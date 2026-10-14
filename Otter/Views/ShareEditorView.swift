@@ -23,6 +23,9 @@ struct ShareEditorView: View {
     @State private var isDiscoveringWakeOnLANSettings = false
     @State private var wakeOnLANDiscoveryMessage: String?
     @State private var stage: EditorStage
+    @State private var isShowingWakeOnLAN = false
+    @State private var isShowingHealthChecks = false
+    @State private var isShowingAddressing = false
     @State private var isShowingSavedConnectionHelp = false
     @FocusState private var focusedField: ValidationField?
 
@@ -69,6 +72,8 @@ struct ShareEditorView: View {
             initialDraft.mountPath = prefill.mountPath
         }
         _draft = State(initialValue: initialDraft)
+        _isShowingWakeOnLAN = State(initialValue: initialDraft.wakeOnLANEnabled)
+        _isShowingHealthChecks = State(initialValue: initialDraft.healthCheck.isEnabled)
         // Adding a share starts by choosing one. Editing, or arriving with a
         // share already picked, skips straight to its settings.
         _stage = State(initialValue: share == nil && prefill == nil ? .discovery : .configure)
@@ -80,7 +85,6 @@ struct ShareEditorView: View {
     private enum EditorStage: Hashable {
         case discovery
         case configure
-        case advanced
     }
 
     var body: some View {
@@ -96,8 +100,6 @@ struct ShareEditorView: View {
                         discoveryForm
                     case .configure:
                         configureForm
-                    case .advanced:
-                        advancedForm
                     }
                 }
                 .formStyle(.grouped)
@@ -143,7 +145,7 @@ struct ShareEditorView: View {
         VStack(alignment: .leading, spacing: 6) {
             if let backTitle = backNavigationTitle {
                 Button {
-                    navigate(to: stage == .advanced ? .configure : .discovery)
+                    navigate(to: .discovery)
                 } label: {
                     HStack(spacing: 3) {
                         Image(systemName: "chevron.backward")
@@ -174,10 +176,6 @@ struct ShareEditorView: View {
                             .truncationMode(.middle)
                     }
                 }
-            case .advanced:
-                Text("Advanced")
-                    .font(.title2)
-                    .fontWeight(.bold)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -216,8 +214,6 @@ struct ShareEditorView: View {
             nil
         case .configure:
             isEditing || appliesToShareCount != nil ? nil : "Available Shares"
-        case .advanced:
-            headerTitle
         }
     }
 
@@ -241,22 +237,60 @@ struct ShareEditorView: View {
         return trimmedURL.isEmpty ? nil : trimmedURL
     }
 
-    /// Animates the mode change itself so the Remote Access section fades in
-    /// and out instead of the sheet snapping to a new height.
+    /// Adaptive is Keep Connected plus a VPN, so the picker offers one
+    /// "keep connected" choice and the VPN toggle decides between the two.
+    /// Connect Once is only listed for a share that already uses it.
     private var connectionModeSelection: Binding<ConnectionMode> {
         Binding {
-            draft.connectionMode
+            draft.connectionMode == .adaptive ? .keepConnected : draft.connectionMode
         } set: { mode in
             withAnimation(.easeInOut(duration: 0.22)) {
-                draft.connectionMode = mode
+                draft.connectionMode = mode == .keepConnected && draft.usesVPNRule ? .adaptive : mode
             }
-            if !mode.usesRemoteAccess {
-                if validationIssue?.field == .vpn {
-                    validationIssue = nil
-                }
-                vpnVerification = nil
-            }
+            clearRemoteAccessIssuesIfHidden()
         }
+    }
+
+    private var selectableConnectionModes: [ConnectionMode] {
+        draft.connectionMode == .connectOnce
+            ? [.keepConnected, .manual, .connectOnce]
+            : [.keepConnected, .manual]
+    }
+
+    private func connectionModeTitle(_ mode: ConnectionMode) -> String {
+        switch mode {
+        case .keepConnected, .adaptive: "Keep connected"
+        case .manual: "Only when I ask"
+        case .connectOnce: "Connect once at launch"
+        }
+    }
+
+    private var connectionModeDetail: String {
+        switch draft.connectionMode {
+        case .keepConnected: "Always keep this share mounted on this network."
+        case .adaptive: "Keep this share mounted on this network, or over the VPN when away."
+        case .manual: "Connect only when requested."
+        case .connectOnce: ConnectionMode.connectOnce.detail
+        }
+    }
+
+    private var usesVPNWhenAway: Binding<Bool> {
+        Binding {
+            draft.connectionMode == .adaptive
+        } set: { enabled in
+            withAnimation(.easeInOut(duration: 0.22)) {
+                draft.connectionMode = enabled ? .adaptive : .keepConnected
+            }
+            clearRemoteAccessIssuesIfHidden()
+        }
+    }
+
+    private func clearRemoteAccessIssuesIfHidden() {
+        guard !draft.showsRemoteAccess else { return }
+        if validationIssue?.field == .vpn {
+            validationIssue = nil
+        }
+        vpnVerification = nil
     }
 
     private func navigate(to destination: EditorStage) {
@@ -494,20 +528,47 @@ struct ShareEditorView: View {
 
     private var configureForm: some View {
         Form {
+            if appliesToShareCount == nil {
+                Section("Share Details") {
+                    TextField("Name", text: $draft.displayName, prompt: Text(inferredDisplayName ?? "OtterNAS"))
+                        .focused($focusedField, equals: .shareName)
+                        .id(ValidationField.shareName)
+
+                    TextField("Network address", text: $draft.urlString, prompt: Text(selectedProtocol.exampleURL))
+                        .focused($focusedField, equals: .address)
+                        .id(ValidationField.address)
+                    validationNotice(for: .address)
+
+                    if isEditing {
+                        Button {
+                            chooseMountedShare()
+                        } label: {
+                            Label("Auto-fill details from Finder…", systemImage: "arrow.down.doc.fill")
+                        }
+                        .tahoeCompactActionButton()
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+
             Section("Connection") {
-                Picker("Connection mode", selection: connectionModeSelection) {
-                    ForEach(ConnectionMode.allCases, id: \.self) { mode in
-                        Text(mode.title).tag(mode)
+                Picker("Connect", selection: connectionModeSelection) {
+                    ForEach(selectableConnectionModes, id: \.self) { mode in
+                        Text(connectionModeTitle(mode)).tag(mode)
                     }
                 }
                 .pickerStyle(.menu)
 
-                Text(draft.connectionMode.detail)
+                Text(connectionModeDetail)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .id(draft.connectionMode)
                     .transition(.opacity)
+
+                if draft.connectionMode.maintainsConnection {
+                    Toggle("Use a VPN when away from this network", isOn: usesVPNWhenAway)
+                }
             }
 
             // Keep Connected expects the server on the current network, so
@@ -522,31 +583,21 @@ struct ShareEditorView: View {
             }
 
             Section {
-                Button {
-                    navigate(to: .advanced)
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.body.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 22)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Advanced")
-                                .font(.body.weight(.medium))
-                            Text(advancedSummary)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Spacer()
-
-                        rowChevron
-                    }
-                    .contentShape(Rectangle())
+                DisclosureGroup("Wake-on-LAN", isExpanded: $isShowingWakeOnLAN) {
+                    wakeOnLANSettings
                 }
-                .buttonStyle(.plain)
-                .accessibilityHint("Open advanced share settings")
+
+                DisclosureGroup("Health Checks", isExpanded: $isShowingHealthChecks) {
+                    healthCheckSettings
+                }
+
+                if appliesToShareCount == nil {
+                    DisclosureGroup("Protocol & Addressing", isExpanded: $isShowingAddressing) {
+                        addressingSettings
+                    }
+                }
+            } header: {
+                Text("More Options")
             }
 
             if isEditing && appliesToShareCount == nil {
@@ -555,79 +606,33 @@ struct ShareEditorView: View {
         }
     }
 
-    private var advancedSummary: String {
-        if appliesToShareCount != nil {
-            return "Network access, Wake-on-LAN, health checks"
+    @ViewBuilder
+    private var addressingSettings: some View {
+        Picker("Protocol", selection: protocolSelection) {
+            ForEach(NetworkShareProtocol.allCases, id: \.self) { protocolKind in
+                Text(protocolKind.title).tag(protocolKind)
+            }
         }
-        return "Share details, network access, Wake-on-LAN, health checks"
-    }
 
-    // MARK: - Advanced
+        Toggle("Prefer IPv4", isOn: $draft.prefersIPv4)
+        Text("Otter caches both IPv4 and IPv6 addresses and tries the preferred family first. If it is unavailable, Otter automatically tries the other family.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
 
-    private var advancedForm: some View {
-        Form {
-            if appliesToShareCount == nil {
-                Section("Share Details") {
-                    TextField("Name", text: $draft.displayName, prompt: Text(inferredDisplayName ?? "OtterNAS"))
-                        .focused($focusedField, equals: .shareName)
-                        .id(ValidationField.shareName)
+        // Learned fallbacks are reference material, not something to act on.
+        ForEach(draft.orderedCachedIPAddresses, id: \.self) { address in
+            LabeledContent(
+                NetworkShare.isIPv4Address(address) ? "IPv4 fallback" : "IPv6 fallback",
+                value: fallbackURLString(for: address) ?? address
+            )
+        }
 
-                    TextField("Network address", text: $draft.urlString, prompt: Text(selectedProtocol.exampleURL))
-                        .focused($focusedField, equals: .address)
-                        .id(ValidationField.address)
-                    validationNotice(for: .address)
-
-                    Picker("Protocol", selection: protocolSelection) {
-                        ForEach(NetworkShareProtocol.allCases, id: \.self) { protocolKind in
-                            Text(protocolKind.title).tag(protocolKind)
-                        }
-                    }
-
-                    if isEditing {
-                        Button {
-                            chooseMountedShare()
-                        } label: {
-                            Label("Auto-fill details from Finder…", systemImage: "arrow.down.doc.fill")
-                        }
-                        .tahoeCompactActionButton()
-                        .padding(.vertical, 2)
-                    }
-                }
-
-                Section("Addressing") {
-                    Toggle("Prefer IPv4", isOn: $draft.prefersIPv4)
-                    Text("Otter caches both IPv4 and IPv6 addresses and tries the preferred family first. If it is unavailable, Otter automatically tries the other family.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-
-                    // Learned fallbacks are reference material, not something
-                    // to act on, so they live here rather than in the main
-                    // settings screen.
-                    ForEach(draft.orderedCachedIPAddresses, id: \.self) { address in
-                        LabeledContent(
-                            NetworkShare.isIPv4Address(address) ? "IPv4 fallback" : "IPv6 fallback",
-                            value: fallbackURLString(for: address) ?? address
-                        )
-                    }
-
-                    if !draft.orderedCachedIPAddresses.isEmpty,
-                       let host = hostFromURL,
-                       !NetworkShare.isIPAddress(host) {
-                        Text("Otter learns these while you are on the same network and tries them when the hostname does not resolve. Stable addresses improve fallback reliability.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-            }
-
-            Section("Wake-on-LAN") {
-                wakeOnLANSettings
-            }
-
-            Section("Health Checks") {
-                healthCheckSettings
-            }
+        if !draft.orderedCachedIPAddresses.isEmpty,
+           let host = hostFromURL,
+           !NetworkShare.isIPAddress(host) {
+            Text("Otter learns these while you are on the same network and tries them when the hostname does not resolve. Stable addresses improve fallback reliability.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -698,7 +703,7 @@ struct ShareEditorView: View {
     // the user can still cancel.
     @ViewBuilder
     private var diagnosticsSections: some View {
-        Section("Credentials") {
+        Section("Connection Check") {
             HStack(spacing: 8) {
                 Image(systemName: hasKeychainCredentials ? "checkmark.circle.fill" : "minus.circle")
                     .foregroundStyle(hasKeychainCredentials ? .green : .secondary)
@@ -711,9 +716,7 @@ struct ShareEditorView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-        }
 
-        Section("Connection Readiness") {
             Button {
                 testSetup()
             } label: {
@@ -775,9 +778,11 @@ struct ShareEditorView: View {
     /// Scrolls the offending control into view and focuses it where it can take
     /// focus.
     private func revealField(_ field: ValidationField, using proxy: ScrollViewProxy) {
-        navigate(to: stage(containing: field))
+        if field == .wakeOnLAN {
+            isShowingWakeOnLAN = true
+        }
 
-        // The destination screen may have just been swapped in, so let it mount
+        // A collapsed section may have just been expanded, so let it mount
         // before asking the scroll view to find the row.
         Task { @MainActor in
             await Task.yield()
@@ -791,15 +796,6 @@ struct ShareEditorView: View {
             case .vpn, .wakeOnLAN:
                 break
             }
-        }
-    }
-
-    private func stage(containing field: ValidationField) -> EditorStage {
-        switch field {
-        case .vpn:
-            .configure
-        case .shareName, .address, .wakeOnLAN:
-            .advanced
         }
     }
 

@@ -181,17 +181,17 @@ struct ShareManagementView: View {
                             }
                         }
                     } label: {
-                        Label("Connection Doctor", systemImage: "stethoscope")
+                        Label("Diagnose", systemImage: "stethoscope")
                     }
-                    .help("Run Connection Doctor on a share")
+                    .help("Diagnose a share")
                 } else {
                     Button {
                         connectionDoctorShare = selectedShare
                     } label: {
-                        Label("Connection Doctor", systemImage: "stethoscope")
+                        Label("Diagnose", systemImage: "stethoscope")
                     }
                     .disabled(selectedShare == nil)
-                    .help("Run Connection Doctor")
+                    .help("Diagnose")
                 }
             }
         }

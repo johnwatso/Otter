@@ -12,6 +12,7 @@ struct ConnectionDoctorView: View {
     @State private var repairStep: ConnectionDiagnosticStep?
     @State private var isRunning = false
     @State private var didCopy = false
+    @State private var isShowingAdvanced = false
 
     private var currentShare: NetworkShare {
         settings.share(id: share.id) ?? share
@@ -24,7 +25,7 @@ struct ConnectionDoctorView: View {
                     .font(.title2)
                     .foregroundStyle(.blue)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Connection Doctor")
+                    Text("Diagnose")
                         .font(.title3.bold())
                     Text(currentShare.displayName)
                         .font(.subheadline)
@@ -85,6 +86,14 @@ struct ConnectionDoctorView: View {
                     .disabled(isRunning)
                     .help("Run diagnostics again")
 
+                    Button {
+                        isShowingAdvanced = true
+                    } label: {
+                        Label("Advanced…", systemImage: "waveform.path.ecg")
+                    }
+                    .tahoeSecondaryActionButton()
+                    .help("Network path, SMB channels, latency and optional performance test")
+
                     Spacer()
 
                     if report?.hasRepairableItems == true {
@@ -112,6 +121,12 @@ struct ConnectionDoctorView: View {
         .frame(minWidth: 560, idealWidth: 600, maxWidth: .infinity, minHeight: 540, idealHeight: 600, maxHeight: .infinity)
         .task {
             await runDoctorNow()
+        }
+        .sheet(isPresented: $isShowingAdvanced) {
+            NASDiagnosticsView(
+                shares: NetworkShareServerGroup.diagnosticShares(containing: currentShare, in: settings.shares),
+                title: nil
+            )
         }
     }
 
