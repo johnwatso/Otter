@@ -434,20 +434,15 @@ struct ShareManagementView: View {
                     }
                 }
             }
-            if !areAllSelectedSharesConnected, canDisconnectSelectedShares {
-                Button(action: showSelectedSharesInFinder) {
-                    Label("Show Connected in Finder", systemImage: "finder")
-                }
-            }
         } label: {
-            Image(systemName: "ellipsis")
-                .frame(width: 20)
+            Image(systemName: areAllAutomaticSelectedSharesPaused ? "play.fill" : "pause.fill")
+                .frame(width: 20, height: 16)
         }
         .menuStyle(.button)
         .tahoeSecondaryActionButton()
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("More actions")
+        .help(areAllAutomaticSelectedSharesPaused ? "Resume automatic mounting" : "Pause automatic mounting")
     }
 
     private var selectedShare: NetworkShare? {
