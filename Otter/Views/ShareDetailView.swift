@@ -1,179 +1,146 @@
 import AppKit
 import SwiftUI
 
-struct ShareDetailView: View {
+struct ShareDetailView<Actions: View>: View {
     @EnvironmentObject private var appModel: AppModel
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var monitor: ShareMonitor
     @EnvironmentObject private var networkService: NetworkReachabilityService
     @EnvironmentObject private var eventLog: ShareEventLog
     let share: NetworkShare
+    @ViewBuilder let actions: () -> Actions
 
     var body: some View {
         let status = monitor.status(for: currentShare)
         let runtimeState = monitor.runtimeState(for: currentShare)
 
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                
-                // Status Section
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Image(systemName: status.circleSymbol)
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(status.color)
-                            .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 18) {
+                DetailHeroHeader(
+                    symbol: "externaldrive.fill",
+                    badge: status.circleSymbol,
+                    color: status.color,
+                    title: currentShare.displayName,
+                    subtitle: currentShare.serverDisplayName(customNames: settings.preferences.serverNames),
+                    statusText: status.label,
+                    lines: statusLines(status: status, runtimeState: runtimeState),
+                    warning: dropWarning,
+                    actions: actions
+                )
 
-                        Text(status.label)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
+                if status.offersVPNSettingsAction {
+                    Button {
+                        openVPNSettings()
+                    } label: {
+                        Label("Open VPN Settings", systemImage: "gearshape")
                     }
-                    
-                    VStack(alignment: .leading, spacing: 1) {
-                        if case .connected = status {
-                            if let mountedAt = runtimeState.mountedAt {
-                                Text("Mounted since \(Self.relativeDayTime(mountedAt))")
-                            }
-                        } else {
-                            if let detail = status.detail {
-                                Text(detail)
-                            } else {
-                                Text("Retrying automatically")
-                            }
-                        }
-                        
-                        if let lastConnected = runtimeState.lastConnectedAt {
-                            Text("Last connected \(Self.relativeDayTime(lastConnected))")
-                        }
-
-                        let dropCount = appModel.screenshotDemoDropCount(for: currentShare.id)
-                            ?? eventLog.connectionDropCount(for: currentShare.id)
-                        if dropCount > 0 {
-                            Text("Connection dropped ^[\(dropCount) time](inflect: true) in the last 24 hours")
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 14)
-                    .accessibilityElement(children: .combine)
-
-                    if status.offersVPNSettingsAction {
-                        Button {
-                            openVPNSettings()
-                        } label: {
-                            Label("Open VPN Settings", systemImage: "gearshape")
-                        }
-                        .tahoeSecondaryActionButton()
-                        .padding(.top, 8)
-                        .padding(.leading, 14)
-                    }
+                    .tahoeSecondaryActionButton()
                 }
-                
-                Divider()
 
                 // Reliability sits next to the status it explains, ahead of
                 // the static configuration below.
-                VStack(alignment: .leading, spacing: 10) {
-                    DetailSectionHeader("Reliability")
+                DetailCard("Reliability") {
                     let summary = eventLog.reliabilitySummary(for: currentShare.id)
-                    VStack(spacing: 6) {
-                        DetailRow(label: "Last 7 days", value: summary.isStable
-                            ? "No recorded problems"
-                            : "\(String.counted(summary.connectionDrops, "drop")) · \(String.counted(summary.failures, "failure")) · \(String.counted(summary.healthFailures, "health warning"))")
-                        if let lastProblemAt = summary.lastProblemAt {
-                            DetailRow(label: "Last problem", value: lastProblemAt.formatted(date: .abbreviated, time: .shortened))
-                        }
-                        DetailRow(
-                            label: "Health checks",
-                            value: currentShare.healthCheck.isEnabled ? healthCheckDescription : "Off"
-                        )
+                    DetailRow(label: "Last 7 days", value: summary.isStable
+                        ? "No recorded problems"
+                        : "\(String.counted(summary.connectionDrops, "drop")) · \(String.counted(summary.failures, "failure")) · \(String.counted(summary.healthFailures, "health warning"))")
+                    if let lastProblemAt = summary.lastProblemAt {
+                        DetailRow(label: "Last problem", value: lastProblemAt.formatted(date: .abbreviated, time: .shortened))
                     }
+                    DetailRow(
+                        label: "Health checks",
+                        value: currentShare.healthCheck.isEnabled ? healthCheckDescription : "Off"
+                    )
                 }
 
-                Divider()
-                
-                // Server / Connection Details Section
-                VStack(alignment: .leading, spacing: 10) {
-                    DetailSectionHeader("Details")
-
-                    VStack(spacing: 6) {
-                        if let customServerName = settings.customServerName(for: currentShare) {
-                            DetailRow(label: "Server", value: customServerName)
-                            DetailRow(label: "Address", value: currentShare.host ?? "Unknown")
-                        } else {
-                            DetailRow(label: "Server", value: currentShare.host ?? "Unknown")
-                        }
-                        DetailRow(label: "Share", value: NetworkShare.inferredShareName(from: currentShare.urlString) ?? currentShare.displayName)
-                        DetailRow(label: "Mount location", value: currentShare.mountPath)
-                        DetailStatusRow(
-                            label: "Keychain credentials",
-                            isOn: hasKeychainCredentials,
-                            onText: "Saved",
-                            offText: "Not found"
-                        )
-
-                        ServerNameButton(share: currentShare)
-
-                        if runtimeState.needsCredentials {
-                            Button {
-                                refreshCredentials()
-                            } label: {
-                                Label("Refresh Credentials in Finder", systemImage: "key.fill")
-                            }
-                            .tahoeSecondaryActionButton()
-                        }
-
-                        if currentShare.hasUnstableIPAddress() {
-                            HStack(alignment: .top, spacing: 7) {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(.orange)
-                                    .accessibilityLabel("Warning")
-                                Text("The LAN address has changed repeatedly this month. Otter still connects by hostname first; a DHCP reservation may improve fallback reliability.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                            }
-                            .padding(.top, 3)
-                        }
+                DetailCard("Details") {
+                    if let customServerName = settings.customServerName(for: currentShare) {
+                        DetailRow(label: "Server", value: customServerName)
+                        DetailRow(label: "Address", value: currentShare.host ?? "Unknown")
+                    } else {
+                        DetailRow(label: "Server", value: currentShare.host ?? "Unknown")
                     }
-                }
+                    DetailRow(label: "Share", value: NetworkShare.inferredShareName(from: currentShare.urlString) ?? currentShare.displayName)
+                    DetailRow(label: "Mount location", value: currentShare.mountPath)
+                    DetailStatusRow(
+                        label: "Keychain credentials",
+                        isOn: hasKeychainCredentials,
+                        onText: "Saved",
+                        offText: "Not found"
+                    )
 
-                Divider()
+                    if runtimeState.needsCredentials {
+                        Button {
+                            refreshCredentials()
+                        } label: {
+                            Label("Refresh Credentials in Finder", systemImage: "key.fill")
+                        }
+                        .tahoeSecondaryActionButton()
+                    }
 
-                // Connection Section (Read-Only). Everything here is changed in
-                // the share editor.
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        DetailSectionHeader("Connection")
-                        if settings.isManagedShare(id: currentShare.id) {
-                            Label("Managed", systemImage: "checkmark.shield.fill")
+                    if currentShare.hasUnstableIPAddress() {
+                        HStack(alignment: .top, spacing: 7) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .accessibilityLabel("Warning")
+                            Text("The LAN address has changed repeatedly this month. Otter still connects by hostname first; a DHCP reservation may improve fallback reliability.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                            Spacer()
                         }
                     }
+                } accessory: {
+                    ServerNameButton(share: currentShare)
+                }
 
-                    VStack(spacing: 6) {
-                        DetailRow(label: "Connects", value: currentShare.connectionMode.summaryTitle)
-                        if let pauseState = settings.effectivePauseState(for: currentShare) {
-                            DetailRow(label: "Automatic mounting", value: pauseDescription(pauseState))
-                        }
-                        if currentShare.connectionMode.usesRemoteAccess,
-                           let vpnName = currentShare.rules.requiredVPNName {
-                            DetailRow(label: "VPN", value: "\(vpnName) · \(currentShare.rules.shouldConnectVPNAutomatically ? "starts automatically" : "connect manually")")
-                        }
-                        if currentShare.wakeOnLAN.isEnabled {
-                            ConfigStatusRow(label: "Wake sleeping server")
-                        }
+                // Read-only. Everything here is changed in the share editor.
+                DetailCard("Connection") {
+                    DetailRow(label: "Connects", value: currentShare.connectionMode.summaryTitle)
+                    if let pauseState = settings.effectivePauseState(for: currentShare) {
+                        DetailRow(label: "Automatic mounting", value: pauseDescription(pauseState))
+                    }
+                    if currentShare.connectionMode.usesRemoteAccess,
+                       let vpnName = currentShare.rules.requiredVPNName {
+                        DetailRow(label: "VPN", value: "\(vpnName) · \(currentShare.rules.shouldConnectVPNAutomatically ? "starts automatically" : "connect manually")")
+                    }
+                    if currentShare.wakeOnLAN.isEnabled {
+                        ConfigStatusRow(label: "Wake sleeping server")
+                    }
+                } accessory: {
+                    if settings.isManagedShare(id: currentShare.id) {
+                        Label("Managed", systemImage: "checkmark.shield.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
-            .padding(20)
+            .padding(24)
         }
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
             networkService.refreshNetworkDetails()
         }
+    }
+
+    private func statusLines(status: ShareStatus, runtimeState: ShareRuntimeState) -> [String] {
+        var lines: [String] = []
+        if case .connected = status {
+            if let mountedAt = runtimeState.mountedAt {
+                lines.append("Mounted since \(Self.relativeDayTime(mountedAt))")
+            }
+        } else {
+            lines.append(status.detail ?? "Retrying automatically")
+        }
+        if let lastConnected = runtimeState.lastConnectedAt {
+            lines.append("Last connected \(Self.relativeDayTime(lastConnected))")
+        }
+        return lines
+    }
+
+    private var dropWarning: String? {
+        let dropCount = appModel.screenshotDemoDropCount(for: currentShare.id)
+            ?? eventLog.connectionDropCount(for: currentShare.id)
+        return dropCount > 0 ? "Connection dropped \(String.counted(dropCount, "time")) in the last 24 hours" : nil
     }
 
     /// "today at 10:05 AM", "yesterday at 9:12 PM", "on Oct 3 at 8:40 AM" —
@@ -255,90 +222,62 @@ struct ShareDetailView: View {
 
 }
 
-struct ServerDetailView: View {
+struct ServerDetailView<Actions: View>: View {
     @EnvironmentObject private var appModel: AppModel
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var monitor: ShareMonitor
     @EnvironmentObject private var eventLog: ShareEventLog
     let group: NetworkShareServerGroup
+    @ViewBuilder let actions: () -> Actions
 
     var body: some View {
         let summary = statusSummary
 
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Image(systemName: summary.symbol)
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(summary.color)
-                            .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 18) {
+                DetailHeroHeader(
+                    symbol: "server.rack",
+                    badge: summary.symbol,
+                    color: summary.color,
+                    title: group.serverName,
+                    subtitle: group.shareCountLabel,
+                    statusText: summary.label,
+                    lines: [summary.detail],
+                    warning: connectionDropCount > 0
+                        ? "Connection dropped \(String.counted(connectionDropCount, "time")) across this server in the last 24 hours"
+                        : nil,
+                    actions: actions
+                )
 
-                        Text(summary.label)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                    }
-
-                    Text(summary.detail)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 14)
-
-                    if connectionDropCount > 0 {
-                        Text("Connection dropped ^[\(connectionDropCount) time](inflect: true) across this server in the last 24 hours")
-                            .font(.subheadline)
-                            .foregroundStyle(.orange)
-                            .padding(.leading, 14)
+                DetailCard("Shares") {
+                    ForEach(currentShares) { share in
+                        ServerShareStatusRow(share: share)
                     }
                 }
 
-                Divider()
-
-                VStack(alignment: .leading, spacing: 10) {
-                    DetailSectionHeader("Details")
-
-                    VStack(spacing: 6) {
-                        DetailRow(label: "Server", value: group.serverName)
-                        if let host = currentShares.first?.host,
-                           host.localizedCaseInsensitiveCompare(group.serverName) != .orderedSame {
-                            DetailRow(label: "Address", value: host)
-                        }
-                        DetailRow(label: "Protocol", value: "SMB")
-
-                        if let share = currentShares.first {
-                            ServerNameButton(share: share)
-                        }
+                DetailCard("Details") {
+                    DetailRow(label: "Server", value: group.serverName)
+                    if let host = currentShares.first?.host,
+                       host.localizedCaseInsensitiveCompare(group.serverName) != .orderedSame {
+                        DetailRow(label: "Address", value: host)
+                    }
+                    DetailRow(label: "Protocol", value: "SMB")
+                } accessory: {
+                    if let share = currentShares.first {
+                        ServerNameButton(share: share)
                     }
                 }
 
-                Divider()
-
-                VStack(alignment: .leading, spacing: 10) {
-                    DetailSectionHeader("Shares")
-
-                    VStack(spacing: 8) {
-                        ForEach(currentShares) { share in
-                            ServerShareStatusRow(share: share)
-                        }
-                    }
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 10) {
-                    DetailSectionHeader("Configuration Summary")
-
-                    VStack(spacing: 6) {
-                        DetailRow(label: "Connects", value: connectionModeSummary)
-                        ServerConfigSummaryRow(
-                            label: "Wake sleeping server",
-                            enabledCount: currentShares.filter { $0.wakeOnLAN.isEnabled }.count,
-                            totalCount: currentShares.count
-                        )
-                    }
+                DetailCard("Connection") {
+                    DetailRow(label: "Connects", value: connectionModeSummary)
+                    ServerConfigSummaryRow(
+                        label: "Wake sleeping server",
+                        enabledCount: currentShares.filter { $0.wakeOnLAN.isEnabled }.count,
+                        totalCount: currentShares.count
+                    )
                 }
             }
-            .padding(20)
+            .padding(24)
         }
         .background(Color(NSColor.windowBackgroundColor))
     }
@@ -503,6 +442,124 @@ private struct ServerConfigSummaryRow: View {
     }
 }
 
+/// The top of a detail pane: what this is, whether it is healthy, and what the
+/// user can do about it, so the answer to "is it OK?" is the first thing seen.
+struct DetailHeroHeader<Actions: View>: View {
+    let symbol: String
+    let badge: String
+    let color: Color
+    let title: String
+    var subtitle: String?
+    let statusText: String
+    var lines: [String] = []
+    var warning: String?
+    @ViewBuilder let actions: () -> Actions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .center, spacing: 16) {
+                ZStack(alignment: .bottomTrailing) {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(color.opacity(0.14))
+                        .frame(width: 64, height: 64)
+                        .overlay {
+                            Image(systemName: symbol)
+                                .font(.system(size: 28, weight: .medium))
+                                .foregroundStyle(color)
+                        }
+
+                    Image(systemName: badge)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(color)
+                        .background(Circle().fill(Color(NSColor.windowBackgroundColor)).padding(-2))
+                        .offset(x: 5, y: 5)
+                }
+                .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.title2.weight(.semibold))
+                        .lineLimit(1)
+                    Text(statusText)
+                        .font(.headline)
+                        .foregroundStyle(color)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+
+            if !lines.isEmpty || warning != nil {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(lines, id: \.self) { line in
+                        Text(line).foregroundStyle(.secondary)
+                    }
+                    if let warning {
+                        Text(warning).foregroundStyle(.orange)
+                    }
+                }
+                .font(.subheadline)
+            }
+
+            HStack(spacing: 8) {
+                actions()
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// A titled group of rows on a raised, rounded surface.
+struct DetailCard<Content: View, Accessory: View>: View {
+    let title: String
+    @ViewBuilder let content: () -> Content
+    @ViewBuilder let accessory: () -> Accessory
+
+    init(
+        _ title: String,
+        @ViewBuilder content: @escaping () -> Content,
+        @ViewBuilder accessory: @escaping () -> Accessory
+    ) {
+        self.title = title
+        self.content = content
+        self.accessory = accessory
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                DetailSectionHeader(title)
+                Spacer()
+                accessory()
+            }
+
+            VStack(alignment: .leading, spacing: 9) {
+                content()
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(NSColor.controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.07))
+        )
+    }
+}
+
+extension DetailCard where Accessory == EmptyView {
+    init(_ title: String, @ViewBuilder content: @escaping () -> Content) {
+        self.init(title, content: content, accessory: { EmptyView() })
+    }
+}
+
 struct DetailRow: View {
     let label: String
     let value: String
@@ -514,8 +571,10 @@ struct DetailRow: View {
                 .foregroundStyle(.secondary)
             Spacer()
             Text(value)
-                .font(.subheadline)
+                .font(.subheadline.weight(.medium))
                 .foregroundStyle(.primary)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
         }
         .padding(.vertical, 1)
@@ -532,9 +591,7 @@ struct DetailSectionHeader: View {
 
     var body: some View {
         Text(title)
-            .font(.subheadline)
-            .fontWeight(.bold)
-            .foregroundStyle(.secondary)
+            .font(.headline)
             .accessibilityAddTraits(.isHeader)
     }
 }

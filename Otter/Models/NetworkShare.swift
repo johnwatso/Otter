@@ -73,7 +73,7 @@ enum ConnectionMode: String, Codable, CaseIterable, Hashable, Sendable {
     var summaryTitle: String {
         switch self {
         case .keepConnected: "Keep connected"
-        case .adaptive: "Keep connected, VPN when away"
+        case .adaptive: "Keep connected + VPN"
         case .manual: "Only when I ask"
         case .connectOnce: "Connect once at launch"
         }

@@ -92,49 +92,6 @@ struct ShareManagementView: View {
         }
         .toolbar(removing: .sidebarToggle)
         .toolbar {
-            // Every button keeps its slot regardless of status, so the
-            // toolbar doesn't reshuffle as shares connect and disconnect.
-            ToolbarItemGroup {
-                Button {
-                    Task { await mountSelectedShares() }
-                } label: {
-                    Label(
-                        selectedServerGroup == nil ? "Mount Now" : "Mount All",
-                        systemImage: "arrow.triangle.2.circlepath"
-                    )
-                }
-                .disabled(selectedShares.isEmpty || areAllSelectedSharesConnected)
-                .help(mountSelectedSharesHelp)
-
-                Button(action: showSelectedSharesInFinder) {
-                    Label(
-                        selectedServerGroup == nil ? "Show in Finder" : "Show All in Finder",
-                        systemImage: "finder"
-                    )
-                }
-                .disabled(!canDisconnectSelectedShares)
-                .help(canDisconnectSelectedShares
-                      ? (selectedServerGroup == nil ? "Show in Finder" : "Show connected shares in Finder")
-                      : "Available once a share is connected")
-
-                Button {
-                    Task { await disconnectSelectedShares() }
-                } label: {
-                    Label(
-                        disconnectSelectedSharesLabel,
-                        systemImage: "eject"
-                    )
-                }
-                .disabled(!canDisconnectSelectedShares)
-                .help(disconnectSelectedSharesHelp)
-
-                if let selectedShare {
-                    SharePauseMenu(share: selectedShare)
-                } else if let selectedServerGroup {
-                    ShareGroupPauseMenu(shares: selectedServerGroup.shares)
-                }
-            }
-
             ToolbarItemGroup {
                 if let selectedServerGroup {
                     Button {
@@ -430,12 +387,64 @@ struct ShareManagementView: View {
                 .tahoePrimaryActionButton()
             }
         } else if let selectedServerGroup {
-            ServerDetailView(group: selectedServerGroup)
+            ServerDetailView(group: selectedServerGroup) { heroActions }
         } else if let selectedShare {
-            ShareDetailView(share: selectedShare)
+            ShareDetailView(share: selectedShare) { heroActions }
         } else {
             EmptyShareDetailView()
         }
+    }
+
+    /// The things to do with the selection, shown under its status. Mounting
+    /// leads until everything is connected, then Finder takes over.
+    @ViewBuilder
+    private var heroActions: some View {
+        let isServer = selectedServerGroup != nil
+
+        if areAllSelectedSharesConnected {
+            Button(action: showSelectedSharesInFinder) {
+                Label(isServer ? "Show All in Finder" : "Show in Finder", systemImage: "finder")
+            }
+            .tahoePrimaryActionButton()
+        } else {
+            Button {
+                Task { await mountSelectedShares() }
+            } label: {
+                Label(isServer ? "Mount All" : "Mount Now", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .tahoePrimaryActionButton()
+            .disabled(selectedShares.isEmpty)
+        }
+
+        Button {
+            Task { await disconnectSelectedShares() }
+        } label: {
+            Label(disconnectSelectedSharesLabel, systemImage: "eject")
+        }
+        .tahoeSecondaryActionButton()
+        .disabled(!canDisconnectSelectedShares)
+        .help(disconnectSelectedSharesHelp)
+
+        Menu {
+            if let selectedShare {
+                SharePauseMenu(share: selectedShare)
+            } else if let selectedServerGroup {
+                ShareGroupPauseMenu(shares: selectedServerGroup.shares)
+            }
+            if !areAllSelectedSharesConnected, canDisconnectSelectedShares {
+                Button(action: showSelectedSharesInFinder) {
+                    Label("Show Connected in Finder", systemImage: "finder")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .frame(width: 20)
+        }
+        .menuStyle(.button)
+        .tahoeSecondaryActionButton()
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("More actions")
     }
 
     private var selectedShare: NetworkShare? {
