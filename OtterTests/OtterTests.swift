@@ -4985,3 +4985,23 @@ extension NASDiagnosticsTests {
         XCTAssertTrue(session.isCancellable)
     }
 }
+
+@MainActor
+final class ShareEventLogDailyCountsTests: XCTestCase {
+    func testDailyProblemCountsBucketByDayAndIgnoreNonProblems() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "daily-counts-\(UUID().uuidString)"))
+        let calendar = Calendar(identifier: .gregorian)
+        let now = Date()
+        let log = ShareEventLog(defaults: defaults)
+        let share = NetworkShare(displayName: "Vault", urlString: "smb://nas/Vault", mountPath: "/Volumes/Vault")
+
+        log.record(.connectionLost, for: share)
+        log.record(.mounted, for: share)
+
+        let counts = log.dailyProblemCounts(for: share.id, days: 7, at: now, calendar: calendar)
+        XCTAssertEqual(counts.count, 7)
+        XCTAssertEqual(counts.last, 1)
+        XCTAssertEqual(counts.dropLast().reduce(0, +), 0)
+        XCTAssertEqual(log.dailyProblemCounts(for: UUID(), at: now, calendar: calendar).reduce(0, +), 0)
+    }
+}

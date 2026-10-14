@@ -63,6 +63,9 @@ struct ShareManagementView: View {
     @State private var connectionDoctorShare: NetworkShare?
     @State private var shareToRemove: NetworkShare?
     @State private var isAskingPauseDuration = false
+    @State private var collapsedServerIDs = Set<String>()
+    @State private var renamingServerShare: NetworkShare?
+    @State private var serverNameDraft = ""
     @State private var isShowingOnboarding = false
     @State private var editingServerShareIDs: [NetworkShare.ID] = []
     private var shares: [NetworkShare] {
@@ -163,6 +166,27 @@ struct ShareManagementView: View {
             Button("Cancel", role: .cancel) { }
         } message: { _ in
             Text("Otter will stop keeping this share connected. If it's mounted now, it stays mounted until you eject it.")
+        }
+        .alert(renameServerAlertTitle, isPresented: Binding(
+            get: { renamingServerShare != nil },
+            set: { if !$0 { renamingServerShare = nil } }
+        )) {
+            TextField("Server name", text: $serverNameDraft)
+            Button("Save") {
+                if let share = renamingServerShare {
+                    settings.setCustomServerName(serverNameDraft, for: share)
+                }
+                renamingServerShare = nil
+            }
+            if let share = renamingServerShare, settings.customServerName(for: share) != nil {
+                Button("Use Address Name", role: .destructive) {
+                    settings.setCustomServerName(nil, for: share)
+                    renamingServerShare = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { renamingServerShare = nil }
+        } message: {
+            Text("This name is shown only in Otter and applies to every share on this server. Its network address remains \(renamingServerShare?.host ?? "unchanged").")
         }
         .confirmationDialog(
             pauseDurationTitle,
@@ -272,45 +296,23 @@ struct ShareManagementView: View {
     }
 
     // A native sidebar list, so selection, material and focus rings follow the
-    // system. Server rows are selectable headings for the shares beneath them.
-    private struct SidebarSection: Identifiable {
-        let groups: [NetworkShareServerGroup]
-        var id: String { groups.map(\.id).joined(separator: "|") }
-    }
-
-    private var sidebarSections: [SidebarSection] {
-        var sections: [[NetworkShareServerGroup]] = []
-        for group in shareGroups {
-            if !group.isGrouped, let last = sections.last, last.allSatisfy({ !$0.isGrouped }) {
-                sections[sections.count - 1].append(group)
-            } else {
-                sections.append([group])
-            }
-        }
-        return sections.map(SidebarSection.init)
-    }
-
+    // system. A server is a collapsible, selectable heading for its shares.
     private var sidebar: some View {
         List(selection: $selection) {
-            // One section per server keeps a consistent gap between groups;
-            // neighbouring single shares share a section so they sit together.
-            ForEach(sidebarSections) { section in
-                Section {
-                    ForEach(section.groups) { group in
-                        if group.isGrouped {
-                            ServerListHeader(group: group)
-                                .tag(ShareManagementSelection.server(group.id))
-
-                            ForEach(group.shares) { share in
-                                ShareListRow(share: share)
-                                    .tag(ShareManagementSelection.share(share.id))
-                                    .listRowInsets(EdgeInsets(top: 2, leading: 18, bottom: 2, trailing: 8))
-                            }
-                        } else if let share = group.shares.first {
+            ForEach(shareGroups) { group in
+                if group.isGrouped {
+                    DisclosureGroup(isExpanded: expansionBinding(for: group.id)) {
+                        ForEach(group.shares) { share in
                             ShareListRow(share: share)
                                 .tag(ShareManagementSelection.share(share.id))
                         }
+                    } label: {
+                        ServerListHeader(group: group)
                     }
+                    .tag(ShareManagementSelection.server(group.id))
+                } else if let share = group.shares.first {
+                    ShareListRow(share: share)
+                        .tag(ShareManagementSelection.share(share.id))
                 }
             }
         }
@@ -353,6 +355,18 @@ struct ShareManagementView: View {
         }
     }
 
+    private func expansionBinding(for serverID: String) -> Binding<Bool> {
+        Binding {
+            !collapsedServerIDs.contains(serverID)
+        } set: { isExpanded in
+            if isExpanded {
+                collapsedServerIDs.remove(serverID)
+            } else {
+                collapsedServerIDs.insert(serverID)
+            }
+        }
+    }
+
     @ViewBuilder
     private var detail: some View {
         if shares.isEmpty {
@@ -369,7 +383,13 @@ struct ShareManagementView: View {
                 .tahoePrimaryActionButton()
             }
         } else if let selectedServerGroup {
-            ServerDetailView(group: selectedServerGroup) { heroActions }
+            ServerDetailView(
+                group: selectedServerGroup,
+                onSelectShare: { share in
+                    withAnimation(.easeInOut(duration: 0.18)) { selection = .share(share.id) }
+                },
+                onAddShare: { appModel.requestNewShare() }
+            ) { heroActions }
         } else if let selectedShare {
             ShareDetailView(share: selectedShare) { heroActions }
         } else {
@@ -377,45 +397,41 @@ struct ShareManagementView: View {
         }
     }
 
-    /// The things to do with the selection, shown under its status. Mounting
-    /// leads until everything is connected, then Finder takes over.
+    /// The things to do with the selection, shown under its status. Connecting
+    /// leads until everything is mounted, then Open in Finder takes over.
     @ViewBuilder
     private var heroActions: some View {
         let isServer = selectedServerGroup != nil
 
-        // Mounting is the one action worth a label; the rest are icons whose
-        // tooltips and accessibility labels carry the words.
-        if !areAllSelectedSharesConnected {
+        if areAllSelectedSharesConnected {
+            Button(action: showSelectedSharesInFinder) {
+                Label(isServer ? "Open in Finder" : "Open in Finder", systemImage: "folder")
+            }
+            .tahoePrimaryActionButton()
+            .help(isServer ? "Show the mounted shares in Finder" : "Show in Finder")
+        } else {
             Button {
                 Task { await mountSelectedShares() }
             } label: {
-                Label(isServer ? "Mount All" : "Mount", systemImage: "arrow.triangle.2.circlepath")
+                Label(connectActionTitle, systemImage: "arrow.triangle.2.circlepath")
             }
             .tahoePrimaryActionButton()
             .disabled(selectedShares.isEmpty)
         }
 
-        Button(action: showSelectedSharesInFinder) {
-            heroIcon("finder")
-        }
-        .tahoeSecondaryActionButton()
-        .disabled(!canDisconnectSelectedShares)
-        .help(isServer ? "Show connected shares in Finder" : "Show in Finder")
-        .accessibilityLabel(isServer ? "Show connected shares in Finder" : "Show in Finder")
-
-        Button {
-            if selectedSharesNeedPausePrompt {
-                isAskingPauseDuration = true
-            } else {
-                Task { await disconnectSelectedShares(pausingUntil: nil) }
+        if canDisconnectSelectedShares {
+            Button {
+                if selectedSharesNeedPausePrompt {
+                    isAskingPauseDuration = true
+                } else {
+                    Task { await disconnectSelectedShares(pausingUntil: nil) }
+                }
+            } label: {
+                Label(isServer ? "Disconnect All" : "Disconnect", systemImage: "eject")
             }
-        } label: {
-            heroIcon("eject")
+            .tahoeSecondaryActionButton()
+            .help(disconnectSelectedSharesHelp)
         }
-        .tahoeSecondaryActionButton()
-        .disabled(!canDisconnectSelectedShares)
-        .help(disconnectSelectedSharesHelp)
-        .accessibilityLabel(isServer ? "Disconnect all shares" : "Disconnect")
 
         Menu {
             if !automaticSelectedShares.isEmpty {
@@ -439,16 +455,59 @@ struct ShareManagementView: View {
                         }
                     }
                 }
+                Divider()
+            }
+
+            if let selectedServerGroup {
+                Button {
+                    editAllShares(in: selectedServerGroup)
+                } label: {
+                    Label("Edit All Shares…", systemImage: "gearshape")
+                }
+                .disabled(editableShares(in: selectedServerGroup).isEmpty)
+            } else if let selectedShare {
+                Button {
+                    appModel.requestEditShare(selectedShare)
+                } label: {
+                    Label("Share Settings…", systemImage: "gearshape")
+                }
+                .disabled(settings.isManagedShare(id: selectedShare.id))
+            }
+
+            if let representative = selectedShares.first {
+                Button {
+                    serverNameDraft = settings.customServerName(for: representative) ?? representative.serverDisplayName
+                    renamingServerShare = representative
+                } label: {
+                    Label(
+                        settings.customServerName(for: representative) == nil && representative.isAddressedByIP
+                            ? "Add Server Name…" : "Rename Server…",
+                        systemImage: "character.cursor.ibeam"
+                    )
+                }
             }
         } label: {
-            heroIcon(areAllAutomaticSelectedSharesPaused ? "play.fill" : "pause.fill")
+            Image(systemName: "ellipsis")
+                .frame(width: 20, height: 16)
         }
-        .disabled(automaticSelectedShares.isEmpty)
         .menuStyle(.button)
         .tahoeSecondaryActionButton()
         .menuIndicator(.hidden)
         .fixedSize()
-        .help(areAllAutomaticSelectedSharesPaused ? "Resume automatic mounting" : "Pause automatic mounting")
+        .help("More actions")
+        .accessibilityLabel("More actions")
+    }
+
+    private var connectActionTitle: String {
+        if selectedServerGroup != nil { return "Connect All" }
+        let hasConnectedBefore = selectedShare.map { monitor.runtimeState(for: $0).lastConnectedAt != nil } ?? false
+        return hasConnectedBefore ? "Reconnect" : "Connect"
+    }
+
+    /// Hosts the rename dialog so it can be opened from the actions menu.
+    private var renameServerAlertTitle: String {
+        guard let share = renamingServerShare else { return "Rename Server" }
+        return settings.customServerName(for: share) == nil && share.isAddressedByIP ? "Add Server Name" : "Rename Server"
     }
 
     private var selectedShare: NetworkShare? {
@@ -494,11 +553,6 @@ struct ShareManagementView: View {
             let current = settings.share(id: share.id) ?? share
             return current.connectsAutomatically && !current.pauseState.isActive()
         }
-    }
-
-    private func heroIcon(_ systemName: String) -> some View {
-        Image(systemName: systemName)
-            .frame(width: 20, height: 16)
     }
 
     private var automaticSelectedShares: [NetworkShare] {
@@ -667,40 +721,32 @@ private struct SidebarStatusFooter: View {
     var body: some View {
         let connectedCount = shares.filter { monitor.status(for: $0) == .connected }.count
         let allConnected = connectedCount == shares.count
+        let noneConnected = connectedCount == 0
 
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 5) {
-                Image(systemName: allConnected ? "checkmark.circle.fill" : "circle.lefthalf.filled")
-                    .foregroundStyle(allConnected ? .green : .orange)
-                    .accessibilityHidden(true)
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: allConnected ? "checkmark.circle.fill" : (noneConnected ? "minus.circle.fill" : "exclamationmark.circle.fill"))
+                .foregroundStyle(allConnected ? Color.green : (noneConnected ? Color.secondary : Color.orange))
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
                 Text(allConnected
-                     ? (shares.count == 1 ? "Connected" : "All connected")
-                     : "\(connectedCount) of \(shares.count) connected")
-                    .foregroundStyle(.primary)
+                     ? (shares.count == 1 ? "Share connected" : "All shares connected")
+                     : (noneConnected ? "No shares connected" : "Some shares disconnected"))
+                    .fontWeight(.medium)
+                Text(networkService.isOnline
+                     ? "\(connectedCount) of \(shares.count) mounted"
+                     : "Network unavailable · \(connectedCount) of \(shares.count) mounted")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            Text(networkSummary)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            Spacer(minLength: 0)
         }
-        .font(.caption)
+        .font(.subheadline)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .accessibilityElement(children: .combine)
-    }
-
-    private var networkSummary: String {
-        var parts: [String] = []
-        if let wifi = networkService.currentWiFiNetworkName {
-            parts.append("Wi-Fi: \(wifi)")
-        } else {
-            parts.append(networkService.isOnline ? "Network available" : "No network")
-        }
-        if networkService.isVPNConnected || networkService.hasUnidentifiedTunnel {
-            parts.append("VPN: \(networkService.currentVPNDisplayName)")
-        }
-        return parts.joined(separator: " · ")
     }
 }
 
@@ -1457,21 +1503,24 @@ private struct ShareListRow: View {
     var body: some View {
         let status = monitor.status(for: share)
 
-        // An HStack rather than Label so the icon centres on both lines of
-        // text instead of sitting on the first line's baseline.
-        HStack(alignment: .center, spacing: 8) {
+        HStack(spacing: 8) {
             Image(systemName: "externaldrive.fill")
                 .foregroundStyle(.secondary)
-                .frame(width: 22)
+                .frame(width: 20)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(share.displayName)
-                    .lineLimit(1)
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
+                    Text(share.displayName)
+                        .lineLimit(1)
                     Image(systemName: status.circleSymbol)
                         .font(.caption2)
-                        .foregroundStyle(status.color)
+                        .foregroundStyle(status.tint)
                         .accessibilityHidden(true)
+                }
+
+                // A healthy share needs no caption; anything else says why.
+                if status != .connected {
                     Text(status.label)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1481,7 +1530,7 @@ private struct ShareListRow: View {
 
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
         .accessibilityValue(status.label)
     }

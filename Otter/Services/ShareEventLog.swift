@@ -88,6 +88,35 @@ final class ShareEventLog: ObservableObject {
             .count
     }
 
+    private static func isProblem(_ kind: ShareEventKind) -> Bool {
+        switch kind {
+        case .connectionLost, .mountFailed, .unresponsiveDetected, .healthCheckFailed, .credentialsRequired:
+            true
+        default:
+            false
+        }
+    }
+
+    /// Problems recorded on each of the last `days` days, oldest first and
+    /// ending with the day of `date`. A zero means no problem was recorded,
+    /// not that the share was proven reachable all day.
+    func dailyProblemCounts(
+        for shareID: NetworkShare.ID,
+        days: Int = 7,
+        at date: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [Int] {
+        let today = calendar.startOfDay(for: date)
+        return (0..<days).reversed().map { offset in
+            guard let start = calendar.date(byAdding: .day, value: -offset, to: today),
+                  let end = calendar.date(byAdding: .day, value: 1, to: start)
+            else { return 0 }
+            return events.filter {
+                $0.shareID == shareID && Self.isProblem($0.kind) && $0.date >= start && $0.date < end
+            }.count
+        }
+    }
+
     func reliabilitySummary(
         for shareID: NetworkShare.ID,
         within interval: TimeInterval = 7 * 24 * 60 * 60,
@@ -95,14 +124,7 @@ final class ShareEventLog: ObservableObject {
     ) -> ShareReliabilitySummary {
         let cutoff = date.addingTimeInterval(-interval)
         let recent = events.filter { $0.shareID == shareID && $0.date >= cutoff }
-        let problems = recent.filter { event in
-            switch event.kind {
-            case .connectionLost, .mountFailed, .unresponsiveDetected, .healthCheckFailed, .credentialsRequired:
-                true
-            default:
-                false
-            }
-        }
+        let problems = recent.filter { Self.isProblem($0.kind) }
         return ShareReliabilitySummary(
             connectionDrops: recent.filter { $0.kind == .connectionLost }.count,
             failures: recent.filter { $0.kind == .mountFailed || $0.kind == .credentialsRequired }.count,
