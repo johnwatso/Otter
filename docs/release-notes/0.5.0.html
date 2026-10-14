@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Improve NAS diagnostics and connection reliability - Release Notes</title>
+  <title>Improve diagnostics export and share UX - Release Notes</title>
   <style>
     :root { color-scheme: light dark; }
     body {
@@ -39,17 +39,11 @@
 </head>
 <body>
   <main>
-    <h1>Improve NAS diagnostics and connection reliability</h1>
+    <h1>Improve diagnostics export and share UX</h1>
     <p class="meta">Version 0.5.0</p>
-    <p>Improve NAS diagnostics and connection reliability</p>
-<p>Release notes:</p>
-<p>- Run server-wide diagnostics across every configured share, with per-share status and a combined report.</p>
-<p>- Add custom display names for servers configured by IP address.</p>
-<p>- Make fast-link performance findings more realistic and keep reported throughput ranges consistent with their averages.</p>
-<p>- Extend reachability and Connection Doctor support across SMB, NFS, and WebDAV.</p>
-<p>- Harden writable-volume checks, duplicate-address detection, CLI request handling, and detected-share notification cleanup.</p>
-<p>- Expand regression coverage and documentation, and archive the shelved NFS diagnostics implementation for future work.</p>
-    <p><strong>Commit:</strong> <a href="https://github.com/johnwatso/Otter/commit/ba5ef9d37c16ee61ed299c05adac57a420c59176">ba5ef9d</a></p>
+    <p>Improve diagnostics export and share UX</p>
+<p>This change replaces the JSON support package with a readable redacted diagnostic report, keeps server/share context in the output, and fixes remount and duplicate-share edge cases on macOS. It also improves share management flows, server renaming, accessibility labels, and diagnostics views while keeping identifying details stripped from exported data.</p>
+    <p><strong>Commit:</strong> <a href="https://github.com/johnwatso/Otter/commit/fbc142044605c68ad7e0cb95c944d330d480f1dd">fbc1420</a></p>
   </main>
 </body>
 </html>
