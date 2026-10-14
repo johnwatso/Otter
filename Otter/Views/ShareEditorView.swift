@@ -23,8 +23,6 @@ struct ShareEditorView: View {
     @State private var isDiscoveringWakeOnLANSettings = false
     @State private var wakeOnLANDiscoveryMessage: String?
     @State private var stage: EditorStage
-    @State private var isShowingWakeOnLAN = false
-    @State private var isShowingHealthChecks = false
     @State private var isShowingAddressing = false
     @State private var isShowingSavedConnectionHelp = false
     @FocusState private var focusedField: ValidationField?
@@ -72,8 +70,6 @@ struct ShareEditorView: View {
             initialDraft.mountPath = prefill.mountPath
         }
         _draft = State(initialValue: initialDraft)
-        _isShowingWakeOnLAN = State(initialValue: initialDraft.wakeOnLANEnabled)
-        _isShowingHealthChecks = State(initialValue: initialDraft.healthCheck.isEnabled)
         // Adding a share starts by choosing one. Editing, or arriving with a
         // share already picked, skips straight to its settings.
         _stage = State(initialValue: share == nil && prefill == nil ? .discovery : .configure)
@@ -555,17 +551,32 @@ struct ShareEditorView: View {
             }
 
             Section {
-                DisclosureGroup("Wake-on-LAN", isExpanded: $isShowingWakeOnLAN) {
-                    wakeOnLANSettings
-                }
+                BehaviourRow(
+                    symbol: "moon.fill",
+                    title: "Wake sleeping server",
+                    subtitle: "Send wake-on-LAN before connecting.",
+                    isOn: $draft.wakeOnLANEnabled
+                )
+                .id(ValidationField.wakeOnLAN)
+                wakeOnLANSettings
 
-                DisclosureGroup("Health Checks", isExpanded: $isShowingHealthChecks) {
-                    healthCheckSettings
-                }
+                BehaviourRow(
+                    symbol: "stethoscope",
+                    title: "Check mounted volume",
+                    subtitle: "Catch disconnected or read-only volumes early.",
+                    isOn: $draft.healthCheck.isEnabled
+                )
+                healthCheckSettings
 
                 if appliesToShareCount == nil {
-                    DisclosureGroup("Protocol & Addressing", isExpanded: $isShowingAddressing) {
+                    DisclosureGroup(isExpanded: $isShowingAddressing) {
                         addressingSettings
+                    } label: {
+                        BehaviourRowLabel(
+                            symbol: "network",
+                            title: "Protocol & addressing",
+                            subtitle: "Protocol, IP version and fallback addresses."
+                        )
                     }
                 }
             } header: {
@@ -610,9 +621,6 @@ struct ShareEditorView: View {
 
     @ViewBuilder
     private var wakeOnLANSettings: some View {
-        Toggle("Wake this server before connecting", isOn: $draft.wakeOnLANEnabled)
-            .id(ValidationField.wakeOnLAN)
-
         if draft.wakeOnLANEnabled {
             TextField("MAC address", text: $draft.wakeOnLANMACAddress, prompt: Text("AA:BB:CC:DD:EE:FF"))
             TextField(
@@ -656,12 +664,6 @@ struct ShareEditorView: View {
 
     @ViewBuilder
     private var healthCheckSettings: some View {
-        Toggle("Check mounted volume", isOn: $draft.healthCheck.isEnabled)
-
-        Text("Otter periodically confirms the mounted volume responds. Enable this for important shares, especially backups, to catch disconnected or read-only volumes early.")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-
         if draft.healthCheck.isEnabled {
             Toggle("Require writable volume", isOn: $draft.healthCheck.requiresWritableVolume)
             TextField("Expected file (optional)", text: $draft.healthCheck.sentinelRelativePath, prompt: Text(".otter-health"))
@@ -750,10 +752,6 @@ struct ShareEditorView: View {
     /// Scrolls the offending control into view and focuses it where it can take
     /// focus.
     private func revealField(_ field: ValidationField, using proxy: ScrollViewProxy) {
-        if field == .wakeOnLAN {
-            isShowingWakeOnLAN = true
-        }
-
         // A collapsed section may have just been expanded, so let it mount
         // before asking the scroll view to find the row.
         Task { @MainActor in

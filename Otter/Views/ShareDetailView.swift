@@ -498,11 +498,12 @@ private struct ConnectionBehaviourRows: View {
     }
 }
 
-private struct BehaviourRow: View {
+/// The icon, title and subtitle of a behaviour row, without its control, for
+/// rows that disclose more settings instead of toggling one.
+struct BehaviourRowLabel: View {
     let symbol: String
     let title: String
     let subtitle: String
-    @Binding var isOn: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -520,6 +521,20 @@ private struct BehaviourRow: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+struct BehaviourRow: View {
+    let symbol: String
+    let title: String
+    let subtitle: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            BehaviourRowLabel(symbol: symbol, title: title, subtitle: subtitle)
 
             Spacer(minLength: 12)
 
@@ -527,7 +542,7 @@ private struct BehaviourRow: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 4)
     }
 }
 
