@@ -119,6 +119,8 @@ struct ShareDetailView<Actions: View>: View {
             VStack(alignment: .leading, spacing: 4) {
                 if let responseText = responseTimeText(latency) {
                     Text(responseText)
+                } else {
+                    Text("Response times appear after Otter's next few checks.")
                 }
                 if let lastProblemAt = summary.lastProblemAt {
                     Text("Last problem \(lastProblemAt.formatted(date: .abbreviated, time: .shortened))")
