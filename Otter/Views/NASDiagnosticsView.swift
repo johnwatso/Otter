@@ -103,9 +103,11 @@ final class NASDiagnosticsViewModel: ObservableObject {
         status = "Checking connection…"
         performanceStatus = "Not tested"
         task = Task {
-            await NASDiagnosticsService().run(share: share, mountService: service) { [weak self] result, status in
-                self?.result = result
-                self?.status = status
+            // The task already holds self, so the callback does not need a weak
+            // reference of its own.
+            await NASDiagnosticsService().run(share: share, mountService: service) { result, status in
+                self.result = result
+                self.status = status
             }
             if Task.isCancelled { status = "Diagnostics cancelled — partial results" }
             running = false
