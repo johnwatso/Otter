@@ -1456,7 +1456,13 @@ private struct ShareListRow: View {
     var body: some View {
         let status = monitor.status(for: share)
 
-        Label {
+        // An HStack rather than Label so the icon centres on both lines of
+        // text instead of sitting on the first line's baseline.
+        HStack(alignment: .center, spacing: 8) {
+            Image(systemName: "externaldrive.fill")
+                .foregroundStyle(.secondary)
+                .frame(width: 22)
+
             VStack(alignment: .leading, spacing: 1) {
                 Text(share.displayName)
                     .lineLimit(1)
@@ -1471,10 +1477,8 @@ private struct ShareListRow: View {
                         .lineLimit(1)
                 }
             }
-        } icon: {
-            Image(systemName: "externaldrive.fill")
-                .foregroundStyle(.secondary)
-                .frame(width: 22)
+
+            Spacer(minLength: 0)
         }
         .padding(.vertical, 3)
         .accessibilityElement(children: .combine)
