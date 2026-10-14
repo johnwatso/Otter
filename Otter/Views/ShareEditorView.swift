@@ -535,7 +535,12 @@ struct ShareEditorView: View {
                     .transition(.opacity)
 
                 if draft.connectionMode.maintainsConnection {
-                    Toggle("Use a VPN when away from this network", isOn: usesVPNWhenAway)
+                    BehaviourRow(
+                        symbol: "lock.shield",
+                        title: "Use a VPN when away",
+                        subtitle: "Connect through your VPN when you're off this network.",
+                        isOn: usesVPNWhenAway
+                    )
                 }
             }
 
@@ -666,7 +671,13 @@ struct ShareEditorView: View {
     private var healthCheckSettings: some View {
         if draft.healthCheck.isEnabled {
             Toggle("Require writable volume", isOn: $draft.healthCheck.requiresWritableVolume)
-            TextField("Expected file (optional)", text: $draft.healthCheck.sentinelRelativePath, prompt: Text(".otter-health"))
+
+            // An expected file is a niche check that needs a file created on the
+            // share, so it is only shown for shares that already use one — where
+            // it can still be changed or cleared.
+            if !draft.healthCheck.sentinelRelativePath.isEmpty {
+                TextField("Expected file", text: $draft.healthCheck.sentinelRelativePath, prompt: Text("Leave empty to skip"))
+            }
         }
     }
 
