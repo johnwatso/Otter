@@ -5004,3 +5004,90 @@ final class ShareEventLogDailyCountsTests: XCTestCase {
         XCTAssertEqual(log.dailyProblemCounts(for: UUID(), at: now, calendar: calendar).reduce(0, +), 0)
     }
 }
+
+@MainActor
+final class ShareLatencyHistoryTests: XCTestCase {
+    private func makeDefaults(_ name: String) throws -> UserDefaults {
+        let suite = "OtterTests.ShareLatencyHistory.\(name)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        return defaults
+    }
+
+    func testSamplesRollUpPerDayAndMissingDaysAreNil() throws {
+        let history = ShareLatencyHistory(defaults: try makeDefaults("RollUp"))
+        let calendar = Calendar(identifier: .gregorian)
+        let now = Date()
+        let shareID = UUID()
+
+        history.record(milliseconds: 10, for: shareID, at: now, calendar: calendar)
+        history.record(milliseconds: 30, for: shareID, at: now, calendar: calendar)
+
+        let week = history.recent(for: shareID, days: 7, at: now, calendar: calendar)
+        XCTAssertEqual(week.count, 7)
+        XCTAssertNil(week[0])
+        let today = try XCTUnwrap(week[6])
+        XCTAssertEqual(today.sampleCount, 2)
+        XCTAssertEqual(today.averageMilliseconds, 20, accuracy: 0.001)
+        XCTAssertEqual(today.slowestMilliseconds, 30, accuracy: 0.001)
+    }
+
+    func testHistoryPersistsDropsOldDaysAndPrunesDeletedShares() throws {
+        let defaults = try makeDefaults("Persist")
+        let calendar = Calendar(identifier: .gregorian)
+        let now = Date()
+        let kept = UUID()
+        let removed = UUID()
+
+        let history = ShareLatencyHistory(defaults: defaults)
+        let old = calendar.date(byAdding: .day, value: -(ShareLatencyHistory.retentionDays + 5), to: now) ?? now
+        history.record(milliseconds: 5, for: kept, at: old, calendar: calendar)
+        history.record(milliseconds: 8, for: kept, at: now, calendar: calendar)
+        history.record(milliseconds: 9, for: removed, at: now, calendar: calendar)
+
+        XCTAssertEqual(history.history[kept]?.count, 1, "Samples past the retention window are dropped")
+
+        history.pruneShares(keeping: [kept])
+        XCTAssertNil(history.history[removed])
+
+        let reloaded = ShareLatencyHistory(defaults: defaults)
+        XCTAssertEqual(reloaded.history[kept]?.first?.sampleCount, 1)
+        XCTAssertNil(reloaded.history[removed])
+    }
+
+    func testIgnoresInvalidSamples() throws {
+        let history = ShareLatencyHistory(defaults: try makeDefaults("Invalid"))
+        let shareID = UUID()
+        history.record(milliseconds: -1, for: shareID)
+        history.record(milliseconds: .nan, for: shareID)
+        XCTAssertNil(history.history[shareID])
+    }
+
+    func testTimerHealthCheckRecordsAResponseTime() async throws {
+        let defaults = try makeDefaults("Monitor")
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        let share = NetworkShare(
+            displayName: "Media",
+            urlString: "smb://192.0.2.10/Media",
+            mountPath: "/Volumes/Media",
+            connectionMode: .keepConnected
+        )
+        settings.addShare(share)
+        let history = ShareLatencyHistory(defaults: defaults)
+        let monitor = ShareMonitor(
+            settings: settings,
+            mountService: StubMountService(mountedURL: URL(fileURLWithPath: "/Volumes/Media", isDirectory: true)),
+            mountHealthService: StubMountHealthService(result: .healthy),
+            wakeOnLANService: StubWakeOnLANService(),
+            networkService: StubNetworkReachability(isOnline: true, isReachable: true),
+            notificationService: RecordingNotificationService(),
+            eventLog: ShareEventLog(defaults: defaults),
+            latencyHistory: history,
+            defaults: defaults
+        )
+
+        await monitor.evaluate(share, reason: .timer)
+
+        XCTAssertEqual(history.recent(for: share.id).last??.sampleCount, 1)
+    }
+}

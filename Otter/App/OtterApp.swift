@@ -43,6 +43,7 @@ struct OtterApp: App {
                 .environmentObject(appModel.loginItemService)
                 .environmentObject(appModel.notificationService)
                 .environmentObject(appModel.eventLog)
+                .environmentObject(appModel.latencyHistory)
                 .environmentObject(appModel.discoveryService)
                 .environmentObject(appModel.newShareDetector)
                 .frame(minWidth: 660, minHeight: 560)

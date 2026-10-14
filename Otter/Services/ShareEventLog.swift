@@ -150,3 +150,96 @@ final class ShareEventLog: ObservableObject {
         defaults.set(data, forKey: Self.storageKey)
     }
 }
+
+/// One day's worth of volume response times for a share.
+struct DailyLatency: Codable, Equatable {
+    var day: Date
+    var sampleCount: Int
+    var totalMilliseconds: Double
+    var slowestMilliseconds: Double
+
+    var averageMilliseconds: Double {
+        sampleCount > 0 ? totalMilliseconds / Double(sampleCount) : 0
+    }
+}
+
+/// How long the periodic health check took to read each mounted volume,
+/// rolled up per day. Otter already runs that check every minute or so, so
+/// this costs nothing extra on the network. It is the time to read the volume,
+/// not a ping: it shows whether the share feels slow, which is what matters.
+@MainActor
+final class ShareLatencyHistory: ObservableObject {
+    @Published private(set) var history: [NetworkShare.ID: [DailyLatency]]
+
+    static let retentionDays = 30
+    private static let storageKey = "shareLatencyHistory"
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        if let data = defaults.data(forKey: Self.storageKey),
+           let stored = try? JSONDecoder().decode([NetworkShare.ID: [DailyLatency]].self, from: data) {
+            history = stored
+        } else {
+            history = [:]
+        }
+    }
+
+    func record(
+        milliseconds: Double,
+        for shareID: NetworkShare.ID,
+        at date: Date = Date(),
+        calendar: Calendar = .current
+    ) {
+        guard milliseconds.isFinite, milliseconds >= 0 else { return }
+        let day = calendar.startOfDay(for: date)
+        var days = history[shareID] ?? []
+
+        if let index = days.firstIndex(where: { $0.day == day }) {
+            days[index].sampleCount += 1
+            days[index].totalMilliseconds += milliseconds
+            days[index].slowestMilliseconds = max(days[index].slowestMilliseconds, milliseconds)
+        } else {
+            days.append(DailyLatency(
+                day: day,
+                sampleCount: 1,
+                totalMilliseconds: milliseconds,
+                slowestMilliseconds: milliseconds
+            ))
+        }
+
+        if let cutoff = calendar.date(byAdding: .day, value: -Self.retentionDays, to: day) {
+            days.removeAll { $0.day < cutoff }
+        }
+        history[shareID] = days
+        save()
+    }
+
+    /// The last `days` days ending with the day of `date`, oldest first. A day
+    /// Otter took no measurement on is `nil`.
+    func recent(
+        for shareID: NetworkShare.ID,
+        days: Int = 7,
+        at date: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [DailyLatency?] {
+        let today = calendar.startOfDay(for: date)
+        let stored = history[shareID] ?? []
+        return (0..<days).reversed().map { offset in
+            guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { return nil }
+            return stored.first { $0.day == day }
+        }
+    }
+
+    func pruneShares(keeping shareIDs: Set<NetworkShare.ID>) {
+        let pruned = history.filter { shareIDs.contains($0.key) }
+        guard pruned.count != history.count else { return }
+        history = pruned
+        save()
+    }
+
+    private func save() {
+        guard let data = try? JSONEncoder().encode(history) else { return }
+        defaults.set(data, forKey: Self.storageKey)
+    }
+}

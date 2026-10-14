@@ -9,6 +9,7 @@ struct ShareDetailView<Actions: View>: View {
     @EnvironmentObject private var monitor: ShareMonitor
     @EnvironmentObject private var networkService: NetworkReachabilityService
     @EnvironmentObject private var eventLog: ShareEventLog
+    @EnvironmentObject private var latencyHistory: ShareLatencyHistory
     let share: NetworkShare
     @ViewBuilder let actions: () -> Actions
 
@@ -95,7 +96,9 @@ struct ShareDetailView<Actions: View>: View {
 
     private func reliabilityCard(runtimeState: ShareRuntimeState) -> some View {
         let summary = eventLog.reliabilitySummary(for: currentShare.id)
-        let days = eventLog.dailyProblemCounts(for: currentShare.id)
+        let problems = eventLog.dailyProblemCounts(for: currentShare.id)
+        let latency = latencyHistory.recent(for: currentShare.id)
+        let days = zip(problems, latency).map { ReliabilityDay(problems: $0, latency: $1) }
 
         return DetailCard("Reliability") {
             HStack(spacing: 8) {
@@ -111,14 +114,14 @@ struct ShareDetailView<Actions: View>: View {
                     .foregroundStyle(.secondary)
             }
 
-            ReliabilityStrip(dailyProblems: days)
+            ReliabilityStrip(days: days)
 
             VStack(alignment: .leading, spacing: 4) {
+                if let responseText = responseTimeText(latency) {
+                    Text(responseText)
+                }
                 if let lastProblemAt = summary.lastProblemAt {
                     Text("Last problem \(lastProblemAt.formatted(date: .abbreviated, time: .shortened))")
-                }
-                if currentShare.healthCheck.isEnabled {
-                    Text("Health checks: \(healthCheckDescription)")
                 }
                 if let lastCheckedAt = runtimeState.lastCheckedAt {
                     Text("Last checked \(lastCheckedAt.formatted(.relative(presentation: .named)))")
@@ -127,6 +130,22 @@ struct ShareDetailView<Actions: View>: View {
             .font(.subheadline)
             .foregroundStyle(.secondary)
         }
+    }
+
+    /// "Response time 12 ms today · 14 ms over 7 days".
+    private func responseTimeText(_ latency: [DailyLatency?]) -> String? {
+        let measured = latency.compactMap { $0 }
+        guard !measured.isEmpty else { return nil }
+        let samples = measured.reduce(0) { $0 + $1.sampleCount }
+        let weekAverage = measured.reduce(0) { $0 + $1.totalMilliseconds } / Double(samples)
+        if let today = latency.last ?? nil {
+            return "Response time \(Self.milliseconds(today.averageMilliseconds)) today · \(Self.milliseconds(weekAverage)) over 7 days"
+        }
+        return "Response time \(Self.milliseconds(weekAverage)) over 7 days"
+    }
+
+    static func milliseconds(_ value: Double) -> String {
+        value < 10 ? String(format: "%.1f ms", value) : String(format: "%.0f ms", value)
     }
 
     // MARK: Status text
@@ -688,23 +707,61 @@ extension DetailCard where Accessory == EmptyView {
     }
 }
 
-/// Seven bars, oldest to newest. A tall green bar is a day with no recorded
-/// problem; orange is a day with at least one. Otter only knows what it
-/// recorded, so green means "nothing recorded", not "proven available".
+struct ReliabilityDay {
+    let problems: Int
+    let latency: DailyLatency?
+}
+
+/// Seven bars, oldest to newest. Green is a day Otter measured the share and
+/// recorded no problem, orange a day with at least one problem, and grey a day
+/// with no measurements at all (Otter was not running or the share was not
+/// mounted), so grey never claims the share was fine.
 private struct ReliabilityStrip: View {
-    let dailyProblems: [Int]
+    let days: [ReliabilityDay]
+
+    private var weekdaySymbols: [String] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        return (0..<days.count).reversed().map { offset in
+            let day = calendar.date(byAdding: .day, value: -offset, to: today) ?? today
+            return day.formatted(.dateTime.weekday(.narrow))
+        }
+    }
 
     var body: some View {
+        let symbols = weekdaySymbols
+
         HStack(spacing: 6) {
-            ForEach(Array(dailyProblems.enumerated()), id: \.offset) { _, problems in
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(problems == 0 ? Color.green.opacity(0.55) : Color.orange)
-                    .frame(height: 22)
+            ForEach(Array(days.enumerated()), id: \.offset) { index, day in
+                VStack(spacing: 4) {
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(color(for: day))
+                        .frame(height: 22)
+                    Text(symbols[index])
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .help(description(of: day))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(description(of: day))
             }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Problems per day over the last seven days")
-        .accessibilityValue(dailyProblems.map(String.init).joined(separator: ", "))
+    }
+
+    private func color(for day: ReliabilityDay) -> Color {
+        if day.problems > 0 { return .orange }
+        return day.latency == nil ? Color.primary.opacity(0.12) : Color.green.opacity(0.55)
+    }
+
+    private func description(of day: ReliabilityDay) -> String {
+        var parts: [String] = []
+        if let latency = day.latency {
+            parts.append("Response time \(ShareDetailView<EmptyView>.milliseconds(latency.averageMilliseconds)), slowest \(ShareDetailView<EmptyView>.milliseconds(latency.slowestMilliseconds))")
+        } else {
+            parts.append("No measurements")
+        }
+        parts.append(day.problems == 0 ? "no problems recorded" : String.counted(day.problems, "problem") + " recorded")
+        return parts.joined(separator: ", ")
     }
 }
 

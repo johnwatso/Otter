@@ -36,6 +36,7 @@ final class AppModel: ObservableObject {
     let loginItemService: LoginItemService
     let updaterViewModel: UpdaterViewModel
     let eventLog: ShareEventLog
+    let latencyHistory: ShareLatencyHistory
     let monitor: ShareMonitor
     let connectionDoctor: ConnectionDoctor
     let newShareDetector: NewShareDetectionService
@@ -126,6 +127,7 @@ final class AppModel: ObservableObject {
         let wakeOnLANService = WakeOnLANService()
         let notificationService = NotificationService(settings: settings)
         let eventLog = ShareEventLog(defaults: defaults)
+        let latencyHistory = ShareLatencyHistory(defaults: defaults)
         let monitor = ShareMonitor(
             settings: settings,
             mountService: mountService,
@@ -135,6 +137,7 @@ final class AppModel: ObservableObject {
             networkService: networkService,
             notificationService: notificationService,
             eventLog: eventLog,
+            latencyHistory: latencyHistory,
             defaults: defaults
         )
 
@@ -160,6 +163,7 @@ final class AppModel: ObservableObject {
             }
         )
         self.eventLog = eventLog
+        self.latencyHistory = latencyHistory
         self.monitor = monitor
         self.connectionDoctor = ConnectionDoctor(
             settings: settings,

@@ -49,6 +49,7 @@ final class ShareMonitor: ObservableObject {
     private let networkService: any NetworkReachabilityProviding
     private let notificationService: any ShareNotificationProviding
     private let eventLog: ShareEventLog
+    private let latencyHistory: ShareLatencyHistory?
     private let defaults: UserDefaults
     private let now: () -> Date
     private var cancellables = Set<AnyCancellable>()
@@ -90,6 +91,7 @@ final class ShareMonitor: ObservableObject {
         networkService: any NetworkReachabilityProviding,
         notificationService: any ShareNotificationProviding,
         eventLog: ShareEventLog,
+        latencyHistory: ShareLatencyHistory? = nil,
         defaults: UserDefaults = .standard,
         now: @escaping () -> Date = Date.init
     ) {
@@ -101,6 +103,7 @@ final class ShareMonitor: ObservableObject {
         self.networkService = networkService
         self.notificationService = notificationService
         self.eventLog = eventLog
+        self.latencyHistory = latencyHistory
         self.defaults = defaults
         self.now = now
         persistedConnectionTimes = Self.loadPersistedConnectionTimes(from: defaults)
@@ -664,11 +667,18 @@ final class ShareMonitor: ObservableObject {
         if isMounted {
             if let mountedURL {
                 if reason == .timer && (settings.preferences.recoverUnresponsiveMounts || share.healthCheck.isEnabled) {
+                    let checkStart = ContinuousClock.now
                     let health = await mountHealthService.checkPolicy(
                         at: mountedURL,
                         policy: share.healthCheck,
                         timeout: 3
                     )
+                    if health == .healthy {
+                        let elapsed = ContinuousClock.now - checkStart
+                        let milliseconds = Double(elapsed.components.seconds) * 1000
+                            + Double(elapsed.components.attoseconds) / 1e15
+                        latencyHistory?.record(milliseconds: milliseconds, for: share.id, at: now())
+                    }
                     if health == .unresponsive {
                         eventLog.record(
                             .unresponsiveDetected,
@@ -1205,6 +1215,7 @@ final class ShareMonitor: ObservableObject {
         }
 
         eventLog.pruneShares(keeping: shareIDs)
+        latencyHistory?.pruneShares(keeping: shareIDs)
     }
 }
 
