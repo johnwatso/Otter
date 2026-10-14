@@ -373,7 +373,6 @@ struct SupportShare: Codable, Equatable {
     let wakeOnLANEnabled: Bool
     let healthCheckEnabled: Bool
     let requiresWritableVolume: Bool
-    let hasSentinelCheck: Bool
     let failureCount: Int
     let needsCredentials: Bool
     let lastCheckedAt: Date?
@@ -433,7 +432,6 @@ enum SupportPackageService {
                 wakeOnLANEnabled: share.wakeOnLAN.isEnabled,
                 healthCheckEnabled: share.healthCheck.isEnabled,
                 requiresWritableVolume: share.healthCheck.requiresWritableVolume,
-                hasSentinelCheck: !share.healthCheck.sentinelRelativePath.isEmpty,
                 failureCount: runtime.failureCount,
                 needsCredentials: runtime.needsCredentials,
                 lastCheckedAt: runtime.lastCheckedAt,
@@ -526,7 +524,7 @@ enum SupportPackageService {
                 }
                 output += "  keepMounted=\(share.keepsMounted) mountAtLogin=\(share.mountsAtLogin) savedCredentials=\(share.hasSavedCredentials) cachedFallback=\(share.hasCachedFallbackAddress) addressChanges30d=\(share.recentAddressChangeCount)\n"
                 output += "  networkRule=\(share.usesRegisteredNetworkRule) VPNRule=\(share.usesNamedVPNRule) autoStartVPN=\(share.startsVPNAutomatically) VPNControllable=\(share.vpnCanBeStartedByOtter) wakeOnLAN=\(share.wakeOnLANEnabled)\n"
-                output += "  healthCheck=\(share.healthCheckEnabled) writableRequired=\(share.requiresWritableVolume) sentinelConfigured=\(share.hasSentinelCheck)\n"
+                output += "  healthCheck=\(share.healthCheckEnabled) writableRequired=\(share.requiresWritableVolume)\n"
                 let timestamps = [
                     timestamp("lastChecked", share.lastCheckedAt, reference: reference, formatter: formatter),
                     timestamp("nextRetry", share.nextRetryAt, reference: reference, formatter: formatter),
@@ -619,9 +617,6 @@ enum SupportPackageService {
         }
         if lowercased.contains("not writable") {
             return "The mounted volume is not writable."
-        }
-        if lowercased.contains("expected file") && lowercased.contains("missing") {
-            return "A configured sentinel file is missing."
         }
         if lowercased.contains("could not be read") || lowercased.contains("stopped responding") {
             return "The mounted volume could not be read or stopped responding."

@@ -54,12 +54,6 @@ final class MountHealthService: @unchecked Sendable {
             return .unavailable("The mounted volume is not writable.")
         }
 
-        if !policy.sentinelRelativePath.isEmpty {
-            let sentinel = url.appending(path: policy.sentinelRelativePath)
-            guard FileManager.default.fileExists(atPath: sentinel.path) else {
-                return .unavailable("Expected file “\(policy.sentinelRelativePath)” is missing.")
-            }
-        }
         return .healthy
     }
 

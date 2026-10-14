@@ -671,13 +671,6 @@ struct ShareEditorView: View {
     private var healthCheckSettings: some View {
         if draft.healthCheck.isEnabled {
             Toggle("Require writable volume", isOn: $draft.healthCheck.requiresWritableVolume)
-
-            // An expected file is a niche check that needs a file created on the
-            // share, so it is only shown for shares that already use one — where
-            // it can still be changed or cleared.
-            if !draft.healthCheck.sentinelRelativePath.isEmpty {
-                TextField("Expected file", text: $draft.healthCheck.sentinelRelativePath, prompt: Text("Leave empty to skip"))
-            }
         }
     }
 

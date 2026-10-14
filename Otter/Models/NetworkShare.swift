@@ -110,32 +110,17 @@ enum ConnectionMode: String, Codable, CaseIterable, Hashable, Sendable {
 struct ShareHealthCheckConfiguration: Codable, Hashable {
     var isEnabled: Bool
     var requiresWritableVolume: Bool
-    var sentinelRelativePath: String
 
     init(
         isEnabled: Bool = true,
-        requiresWritableVolume: Bool = false,
-        sentinelRelativePath: String = ""
+        requiresWritableVolume: Bool = false
     ) {
         self.isEnabled = isEnabled
         self.requiresWritableVolume = requiresWritableVolume
-        self.sentinelRelativePath = sentinelRelativePath
-        normalize()
-    }
-
-    mutating func normalize() {
-        sentinelRelativePath = sentinelRelativePath
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        // A sentinel must stay inside the mounted volume; never let a health
-        // check turn into an arbitrary filesystem probe.
-        if sentinelRelativePath.split(separator: "/").contains("..") {
-            sentinelRelativePath = ""
-        }
     }
 
     var hasCustomChecks: Bool {
-        requiresWritableVolume || !sentinelRelativePath.isEmpty
+        requiresWritableVolume
     }
 }
 
@@ -390,7 +375,6 @@ struct NetworkShare: Identifiable, Codable, Hashable {
         pauseState.clearIfExpired()
         wakeOnLAN.normalize()
         rules.normalize()
-        healthCheck.normalize()
         cachedIPAddresses = Self.uniqueValidIPAddresses(cachedIPAddresses)
         ipAddressChangeObservations = Array(
             ipAddressChangeObservations

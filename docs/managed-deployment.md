@@ -37,8 +37,7 @@ The payload format is version 2. Otter continues to accept version 1 payloads.
       },
       "healthCheck": {
         "isEnabled": true,
-        "requiresWritableVolume": false,
-        "sentinelRelativePath": ""
+        "requiresWritableVolume": false
       }
     }
   ],
@@ -51,7 +50,7 @@ The payload format is version 2. Otter continues to accept version 1 payloads.
 
 Use a stable, unique UUID for every share. A managed share replaces locally stored runtime data with the same UUID while preserving that runtime data. `monitoring` is optional; omit it to leave those preferences under user control.
 
-`urlString` must be an SMB, NFS, or WebDAV URL with a server and share path. Usernames and passwords in the URL cause the managed configuration to be rejected. `healthCheck` may require a writable volume or an expected file within the mounted volume. A VPN connection path is valid only when `vpnRuleEnabled` is `true` and `vpnName` names the VPN. Set `connectVPNAutomatically` to `true` to let Otter start the VPN when needed, or `false` to make Otter wait for the user or another app to connect it. Existing payloads that omit new keys receive safe defaults.
+`urlString` must be an SMB, NFS, or WebDAV URL with a server and share path. Usernames and passwords in the URL cause the managed configuration to be rejected. `healthCheck` may require a writable volume. Payloads from earlier versions that include `sentinelRelativePath` are still accepted; the key is ignored. A VPN connection path is valid only when `vpnRuleEnabled` is `true` and `vpnName` names the VPN. Set `connectVPNAutomatically` to `true` to let Otter start the VPN when needed, or `false` to make Otter wait for the user or another app to connect it. Existing payloads that omit new keys receive safe defaults.
 
 ## Configuration profile example
 

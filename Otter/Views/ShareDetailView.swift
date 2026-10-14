@@ -193,7 +193,6 @@ struct ShareDetailView<Actions: View>: View {
     private var healthCheckDescription: String {
         var parts = ["Responsive"]
         if currentShare.healthCheck.requiresWritableVolume { parts.append("Writable") }
-        if !currentShare.healthCheck.sentinelRelativePath.isEmpty { parts.append("Checks \(currentShare.healthCheck.sentinelRelativePath)") }
         return parts.joined(separator: " · ")
     }
 

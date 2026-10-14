@@ -34,8 +34,8 @@ protocol MountHealthChecking: Sendable {
 
 extension MountHealthChecking {
     // Test doubles and third-party implementations retain the original health
-    // contract. The system implementation adds the richer capacity, writability
-    // and sentinel checks.
+    // contract. The system implementation adds the richer capacity and
+    // writability checks.
     func checkPolicy(at url: URL, policy: ShareHealthCheckConfiguration, timeout: TimeInterval) async -> MountHealthResult {
         await checkMount(at: url, timeout: timeout)
     }

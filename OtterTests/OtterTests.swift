@@ -2510,8 +2510,7 @@ final class SettingsStoreTests: XCTestCase {
             urlString: "nfs://server.local/exports/archive",
             mountPath: "/Volumes/Archive",
             healthCheck: ShareHealthCheckConfiguration(
-                requiresWritableVolume: true,
-                sentinelRelativePath: ".otter-health"
+                requiresWritableVolume: true
             )
         )
         let archive = ConfigurationTransferService.archive(
