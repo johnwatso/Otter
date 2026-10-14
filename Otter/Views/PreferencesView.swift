@@ -383,20 +383,25 @@ struct ShareManagementView: View {
     private var heroActions: some View {
         let isServer = selectedServerGroup != nil
 
-        if areAllSelectedSharesConnected {
-            Button(action: showSelectedSharesInFinder) {
-                Label(isServer ? "Show All in Finder" : "Show in Finder", systemImage: "finder")
-            }
-            .tahoePrimaryActionButton()
-        } else {
+        // Mounting is the one action worth a label; the rest are icons whose
+        // tooltips and accessibility labels carry the words.
+        if !areAllSelectedSharesConnected {
             Button {
                 Task { await mountSelectedShares() }
             } label: {
-                Label(isServer ? "Mount All" : "Mount Now", systemImage: "arrow.triangle.2.circlepath")
+                Label(isServer ? "Mount All" : "Mount", systemImage: "arrow.triangle.2.circlepath")
             }
             .tahoePrimaryActionButton()
             .disabled(selectedShares.isEmpty)
         }
+
+        Button(action: showSelectedSharesInFinder) {
+            heroIcon("finder")
+        }
+        .tahoeSecondaryActionButton()
+        .disabled(!canDisconnectSelectedShares)
+        .help(isServer ? "Show connected shares in Finder" : "Show in Finder")
+        .accessibilityLabel(isServer ? "Show connected shares in Finder" : "Show in Finder")
 
         Button {
             if selectedSharesNeedPausePrompt {
@@ -405,11 +410,12 @@ struct ShareManagementView: View {
                 Task { await disconnectSelectedShares(pausingUntil: nil) }
             }
         } label: {
-            Label(disconnectSelectedSharesLabel, systemImage: "eject")
+            heroIcon("eject")
         }
         .tahoeSecondaryActionButton()
         .disabled(!canDisconnectSelectedShares)
         .help(disconnectSelectedSharesHelp)
+        .accessibilityLabel(isServer ? "Disconnect all shares" : "Disconnect")
 
         Menu {
             if !automaticSelectedShares.isEmpty {
@@ -435,9 +441,9 @@ struct ShareManagementView: View {
                 }
             }
         } label: {
-            Image(systemName: areAllAutomaticSelectedSharesPaused ? "play.fill" : "pause.fill")
-                .frame(width: 20, height: 16)
+            heroIcon(areAllAutomaticSelectedSharesPaused ? "play.fill" : "pause.fill")
         }
+        .disabled(automaticSelectedShares.isEmpty)
         .menuStyle(.button)
         .tahoeSecondaryActionButton()
         .menuIndicator(.hidden)
@@ -490,6 +496,11 @@ struct ShareManagementView: View {
         }
     }
 
+    private func heroIcon(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .frame(width: 20, height: 16)
+    }
+
     private var automaticSelectedShares: [NetworkShare] {
         selectedShares
             .map { settings.share(id: $0.id) ?? $0 }
@@ -503,11 +514,6 @@ struct ShareManagementView: View {
     private func pauseSelectedShares(until resumeAt: Date?) {
         let shares = automaticSelectedShares
         Task { for share in shares { await monitor.pause(share, until: resumeAt) } }
-    }
-
-    private var disconnectSelectedSharesLabel: String {
-        let suffix = selectedSharesNeedPausePrompt ? "…" : ""
-        return selectedServerGroup == nil ? "Disconnect\(suffix)" : "Disconnect All\(suffix)"
     }
 
     private var disconnectSelectedSharesHelp: String {
