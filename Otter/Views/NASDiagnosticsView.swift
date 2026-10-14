@@ -248,7 +248,7 @@ struct NASDiagnosticsView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading) {
-                    Text("NAS Diagnostics").font(.title2.bold())
+                    Text("Advanced Diagnostics").font(.title2.weight(.semibold))
                     Text(subtitle).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -361,72 +361,54 @@ private struct NASShareDiagnosticsPanel: View {
                     }
                     if let result = model.result {
                         summary(result)
-                        DisclosureGroup("Show Details") { details(result).padding(.top, 8) }
-                        Divider()
-                        performance(result)
-                        Divider()
+
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Findings").font(.headline)
                             ForEach(result.detailedFindings) { finding in
                                 Label(finding.message, systemImage: finding.severity == .good ? "checkmark.circle" : (finding.severity == .warning ? "exclamationmark.triangle" : "info.circle"))
                                     .foregroundStyle(finding.severity == .warning ? Color.orange : (finding.severity == .good ? Color.green : Color.secondary))
                                     .font(.callout).textSelection(.enabled)
                             }
                             if result.findings.isEmpty {
-                                Text("No obvious issues found in the available measurements. This does not rule out NAS storage or session limitations.").foregroundStyle(.secondary)
+                                Text("No obvious issues found in the available measurements.").foregroundStyle(.secondary).font(.callout)
                             }
                         }
+
                         Divider()
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Troubleshooting")
-                                .font(.headline)
+                        performance(result)
+                        Divider()
 
-                            LazyVGrid(
-                                columns: [
-                                    GridItem(.flexible(), spacing: 10),
-                                    GridItem(.flexible(), spacing: 10)
-                                ],
-                                alignment: .leading,
-                                spacing: 10
-                            ) {
-                                troubleshootingButton("Reconnect Share", systemImage: "arrow.clockwise") {
-                                    reconnect()
-                                }
-                                .disabled(busy)
+                        DisclosureGroup("Details") { details(result).padding(.top, 8) }
 
-                                troubleshootingButton("Compare After Reconnect", systemImage: "arrow.left.arrow.right") {
+                        HStack {
+                            Menu {
+                                Button { reconnect() } label: { Label("Reconnect Share", systemImage: "arrow.clockwise") }
+                                    .disabled(busy)
+                                Button {
                                     pendingComparison = .reconnect
                                     confirmComparison = true
-                                }
-                                .disabled(busy || !result.isComplete || result.mount.mountPath == nil || model.restorationRequired)
-
+                                } label: { Label("Compare After Reconnect", systemImage: "arrow.left.arrow.right") }
+                                    .disabled(busy || !result.isComplete || result.mount.mountPath == nil || model.restorationRequired)
                                 if result.mount.connectedUsing == "Hostname", let address = result.mount.resolvedIP,
                                    NASDiagnosticsService.temporaryIPURL(share: share, address: address) != nil {
-                                    troubleshootingButton("Compare Using IP Address", systemImage: "network") {
+                                    Button {
                                         pendingComparison = .ipAddress
                                         confirmComparison = true
-                                    }
-                                    .disabled(busy || !result.isComplete || model.restorationRequired)
+                                    } label: { Label("Compare Using IP Address (\(address))", systemImage: "network") }
+                                        .disabled(busy || !result.isComplete || model.restorationRequired)
                                 }
-
-                                troubleshootingButton(
-                                    copied ? "Copied" : "Copy Diagnostic Report",
-                                    systemImage: copied ? "checkmark" : "doc.on.doc"
-                                ) {
+                                Divider()
+                                Button {
                                     NSPasteboard.general.clearContents()
                                     NSPasteboard.general.setString(DiagnosticReportBuilder.build(result, comparison: model.comparison), forType: .string)
                                     copied = true
-                                }
+                                } label: { Label(copied ? "Copied" : "Copy Report (contains server names and IPs)", systemImage: "doc.on.doc") }
+                            } label: {
+                                Label("Tools", systemImage: "wrench.and.screwdriver")
                             }
-
-                            if result.mount.connectedUsing == "Hostname", let address = result.mount.resolvedIP,
-                               NASDiagnosticsService.temporaryIPURL(share: share, address: address) != nil {
-                                Label("Direct-IP comparison uses \(address) temporarily, then restores the configured connection.", systemImage: "info.circle")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                            .menuStyle(.borderlessButton)
+                            .fixedSize()
+                            Spacer()
                         }
-                        Text("Reports include server names and local IP addresses. Review before sharing.").font(.caption).foregroundStyle(.secondary)
                     } else {
                         Text("Run a check to understand this share’s connection. It includes a quick 256 MB speed test using a temporary file on the share, removed when finished.").foregroundStyle(.secondary)
                     }

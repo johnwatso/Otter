@@ -62,6 +62,7 @@ struct ShareManagementView: View {
     @State private var isShowingActivityLog = false
     @State private var connectionDoctorShare: NetworkShare?
     @State private var shareToRemove: NetworkShare?
+    @State private var isAskingPauseDuration = false
     @State private var isShowingOnboarding = false
     @State private var editingServerShareIDs: [NetworkShare.ID] = []
     private var shares: [NetworkShare] {
@@ -162,6 +163,26 @@ struct ShareManagementView: View {
             Button("Cancel", role: .cancel) { }
         } message: { _ in
             Text("Otter will stop keeping this share connected. If it's mounted now, it stays mounted until you eject it.")
+        }
+        .confirmationDialog(
+            pauseDurationTitle,
+            isPresented: $isAskingPauseDuration,
+            titleVisibility: .visible
+        ) {
+            Button("Pause for 1 Hour") {
+                Task { await disconnectSelectedShares(pausingUntil: Date().addingTimeInterval(60 * 60)) }
+            }
+            Button("Pause Until Tomorrow") {
+                let calendar = Calendar.current
+                let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date()))
+                Task { await disconnectSelectedShares(pausingUntil: tomorrow) }
+            }
+            Button("Pause Until I Resume") {
+                Task { await disconnectSelectedShares(pausingUntil: nil) }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Otter reconnects shares automatically. Choose how long to leave it paused.")
         }
         .sheet(item: $connectionDoctorShare) { share in
             ConnectionDoctorView(share: share)
@@ -378,7 +399,11 @@ struct ShareManagementView: View {
         }
 
         Button {
-            Task { await disconnectSelectedShares() }
+            if selectedSharesNeedPausePrompt {
+                isAskingPauseDuration = true
+            } else {
+                Task { await disconnectSelectedShares(pausingUntil: nil) }
+            }
         } label: {
             Label(disconnectSelectedSharesLabel, systemImage: "eject")
         }
@@ -387,10 +412,27 @@ struct ShareManagementView: View {
         .help(disconnectSelectedSharesHelp)
 
         Menu {
-            if let selectedShare {
-                SharePauseMenu(share: selectedShare)
-            } else if let selectedServerGroup {
-                ShareGroupPauseMenu(shares: selectedServerGroup.shares)
+            if !automaticSelectedShares.isEmpty {
+                if areAllAutomaticSelectedSharesPaused {
+                    Button {
+                        Task { for share in automaticSelectedShares { await monitor.resume(share) } }
+                    } label: {
+                        Label("Resume Automatic Mounting", systemImage: "play.fill")
+                    }
+                } else {
+                    Section("Pause Automatic Mounting") {
+                        Button("For 1 Hour") {
+                            pauseSelectedShares(until: Date().addingTimeInterval(60 * 60))
+                        }
+                        Button("Until Tomorrow") {
+                            let calendar = Calendar.current
+                            pauseSelectedShares(until: calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date())))
+                        }
+                        Button("Until I Resume") {
+                            pauseSelectedShares(until: nil)
+                        }
+                    }
+                }
             }
             if !areAllSelectedSharesConnected, canDisconnectSelectedShares {
                 Button(action: showSelectedSharesInFinder) {
@@ -444,22 +486,50 @@ struct ShareManagementView: View {
         selectedShares.contains(where: { $0.connectsAutomatically })
     }
 
-    private var disconnectSelectedSharesLabel: String {
-        let isGroup = selectedServerGroup != nil
-        if selectedSharesUseAutomaticMounting {
-            return isGroup ? "Disconnect & Pause All" : "Disconnect & Pause"
+    /// Shares that reconnect on their own would simply come back, so
+    /// disconnecting one asks how long Otter should leave it alone.
+    private var selectedSharesNeedPausePrompt: Bool {
+        selectedShares.contains { share in
+            let current = settings.share(id: share.id) ?? share
+            return current.connectsAutomatically && !current.pauseState.isActive()
         }
-        return isGroup ? "Disconnect All" : "Disconnect"
+    }
+
+    private var automaticSelectedShares: [NetworkShare] {
+        selectedShares
+            .map { settings.share(id: $0.id) ?? $0 }
+            .filter(\.connectsAutomatically)
+    }
+
+    private var areAllAutomaticSelectedSharesPaused: Bool {
+        !automaticSelectedShares.isEmpty && automaticSelectedShares.allSatisfy { $0.pauseState.isActive() }
+    }
+
+    private func pauseSelectedShares(until resumeAt: Date?) {
+        let shares = automaticSelectedShares
+        Task { for share in shares { await monitor.pause(share, until: resumeAt) } }
+    }
+
+    private var disconnectSelectedSharesLabel: String {
+        let suffix = selectedSharesNeedPausePrompt ? "…" : ""
+        return selectedServerGroup == nil ? "Disconnect\(suffix)" : "Disconnect All\(suffix)"
     }
 
     private var disconnectSelectedSharesHelp: String {
         let isGroup = selectedServerGroup != nil
-        if selectedSharesUseAutomaticMounting {
+        if selectedSharesNeedPausePrompt {
             return isGroup
-                ? "Disconnect every share and pause automatic mounting on this server"
-                : "Disconnect and pause automatic mounting"
+                ? "Disconnect every share on this server and choose how long to pause automatic mounting"
+                : "Disconnect and choose how long to pause automatic mounting"
         }
         return isGroup ? "Disconnect every share on this server" : "Disconnect this share"
+    }
+
+    private var pauseDurationTitle: String {
+        if let selectedShare {
+            return "Disconnect “\(selectedShare.displayName)”?"
+        }
+        return "Disconnect all shares on \(selectedServerGroup?.serverName ?? "this server")?"
     }
 
     private var canRemoveSelectedShare: Bool {
@@ -563,12 +633,12 @@ struct ShareManagementView: View {
         }
     }
 
-    private func disconnectSelectedShares() async {
+    private func disconnectSelectedShares(pausingUntil resumeAt: Date?) async {
         for share in selectedShares {
             if share.connectsAutomatically {
                 await monitor.pause(
                     share,
-                    until: nil,
+                    until: resumeAt,
                     disconnect: monitor.status(for: share) == .connected
                 )
             } else if monitor.status(for: share) == .connected {

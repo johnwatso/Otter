@@ -20,16 +20,13 @@ struct ConnectionDoctorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: "stethoscope")
-                    .font(.title2)
-                    .foregroundStyle(.blue)
-                VStack(alignment: .leading, spacing: 1) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text("Diagnose")
-                        .font(.title3.bold())
-                    Text(currentShare.displayName)
+                        .font(.title2.weight(.semibold))
+                    Text(summaryText)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(summaryColor)
                 }
                 Spacer()
                 if isRunning {
@@ -37,7 +34,8 @@ struct ConnectionDoctorView: View {
                         .controlSize(.small)
                 }
             }
-            .padding(16)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
 
             Divider()
 
@@ -56,69 +54,77 @@ struct ConnectionDoctorView: View {
                     }
                 }
                 .listStyle(.inset)
+                .frame(maxHeight: .infinity)
+            } else if isRunning {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Checking the network, server and volume…")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ContentUnavailableView {
                     Label("Ready to Check", systemImage: "stethoscope")
                 } description: {
                     Text("Otter will check the network, connection conditions, server reachability, and mounted-volume health.")
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
             Divider()
 
-            VStack(spacing: 12) {
-                HStack {
+            HStack(spacing: 12) {
+                Menu {
                     Button {
                         copyReport()
                     } label: {
-                        Label(didCopy ? "Copied" : "Copy Report", systemImage: didCopy ? "checkmark" : "doc.on.doc")
+                        Label(didCopy ? "Copied" : "Copy Report", systemImage: "doc.on.doc")
                     }
-                    .tahoeSecondaryActionButton()
                     .disabled(report == nil)
-                    .help("Copy redacted diagnostics")
 
                     Button {
                         runDoctor()
                     } label: {
-                        Image(systemName: "arrow.clockwise")
+                        Label("Run Again", systemImage: "arrow.clockwise")
                     }
-                    .tahoeSecondaryActionButton()
                     .disabled(isRunning)
-                    .help("Run diagnostics again")
+
+                    Divider()
 
                     Button {
                         isShowingAdvanced = true
                     } label: {
-                        Label("Advanced…", systemImage: "waveform.path.ecg")
+                        Label("Advanced Diagnostics…", systemImage: "waveform.path.ecg")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("More")
+
+                Spacer()
+
+                if report?.hasRepairableItems == true {
+                    Button("Repair") {
+                        attemptRepair()
                     }
                     .tahoeSecondaryActionButton()
-                    .help("Network path, SMB channels, latency and optional performance test")
-
-                    Spacer()
-
-                    if report?.hasRepairableItems == true {
-                        Button {
-                            attemptRepair()
-                        } label: {
-                            Label("Attempt Repair", systemImage: "wrench.and.screwdriver")
-                        }
-                        .tahoeSecondaryActionButton()
-                        .disabled(isRunning)
-                        .help("Reset retries and safely reconnect the share")
-                    }
-
-                    Button {
-                        dismiss()
-                    } label: {
-                        Label("Done", systemImage: "checkmark")
-                    }
-                    .tahoePrimaryActionButton()
-                    .keyboardShortcut(.defaultAction)
+                    .disabled(isRunning)
+                    .help("Reset retries and safely reconnect the share")
                 }
+
+                Button("Done") {
+                    dismiss()
+                }
+                .tahoePrimaryActionButton()
+                .keyboardShortcut(.defaultAction)
             }
-            .padding(16)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
         }
-        .frame(minWidth: 560, idealWidth: 600, maxWidth: .infinity, minHeight: 540, idealHeight: 600, maxHeight: .infinity)
+        .frame(width: 520, height: 520)
         .task {
             await runDoctorNow()
         }
@@ -128,6 +134,20 @@ struct ConnectionDoctorView: View {
                 title: nil
             )
         }
+    }
+
+    private var summaryText: String {
+        guard let report else { return isRunning ? "Checking \(currentShare.displayName)…" : currentShare.displayName }
+        let problems = report.steps.filter { $0.status == .failed || $0.status == .warning }.count
+        if problems == 0 { return "Everything looks good" }
+        return problems == 1 ? "1 thing needs attention" : "\(problems) things need attention"
+    }
+
+    private var summaryColor: Color {
+        guard let report else { return .secondary }
+        if report.steps.contains(where: { $0.status == .failed }) { return .red }
+        if report.steps.contains(where: { $0.status == .warning }) { return .orange }
+        return .green
     }
 
     private func runDoctor() {

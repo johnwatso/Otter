@@ -640,12 +640,14 @@ private struct ServerNameButton: View {
             draftName = customName ?? share.serverDisplayName
             isEditing = true
         } label: {
-            Label(
-                customName == nil && share.isAddressedByIP ? "Add Server Name…" : "Rename Server…",
-                systemImage: "character.cursor.ibeam"
-            )
+            Image(systemName: "pencil")
+                .imageScale(.small)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
         }
-        .tahoeSecondaryActionButton()
+        .buttonStyle(.borderless)
+        .help(customName == nil && share.isAddressedByIP ? "Add Server Name…" : "Rename Server…")
+        .accessibilityLabel(customName == nil && share.isAddressedByIP ? "Add Server Name" : "Rename Server")
         .alert(customName == nil && share.isAddressedByIP ? "Add Server Name" : "Rename Server", isPresented: $isEditing) {
             TextField("Server name", text: $draftName)
             Button("Save") {
