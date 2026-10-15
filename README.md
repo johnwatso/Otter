@@ -28,7 +28,7 @@ Otters are small, quick, and famously good at not letting important things drift
 
 ## Features
 
-- 📁 Monitors SMB, NFS, and WebDAV shares and attempts to restore their connections after sleep, wake, network changes, and unexpected disconnects
+- 📁 Monitors configured network shares and attempts to restore their connections after sleep, wake, network changes, and unexpected disconnects
 - 🔒 Connects on a registered network or an active VPN, and can start compatible VPN services that macOS exposes to it
 - 🧭 Guides SMB setup with mounted-share import, SMB discovery, the native macOS share picker, and a Connection Readiness test
 - 🔌 Handles slow or sleeping servers with reachability monitoring, Wake-on-LAN, hostname fallback, and safe recovery tools
@@ -55,7 +55,7 @@ The first-run assistant can import shares already mounted in Finder, show nearby
 ## Using Otter
 
 1. Open Otter and follow the first-run assistant.
-2. Import a mounted Finder share, choose a nearby or saved SMB server, or enter an SMB, NFS, or WebDAV address manually.
+2. Import a mounted Finder share, choose a nearby or saved SMB server, or enter a network-share address manually.
 3. Review the share and save it.
 4. Optional: add VPN or Wake-on-LAN details, or choose how Otter should maintain the connection.
 
