@@ -787,14 +787,10 @@ struct DetailRow: View {
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 96, alignment: .leading)
             Spacer()
-            Text(value)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.primary)
-                .multilineTextAlignment(.trailing)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
 
-            if let copyValue, !copyValue.isEmpty {
+            // Appears to the left of the value on hover, so every value keeps
+            // the same right edge whether or not its row can be copied.
+            if isHovering, let copyValue, !copyValue.isEmpty {
                 Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(copyValue, forType: .string)
@@ -805,8 +801,14 @@ struct DetailRow: View {
                 .buttonStyle(.borderless)
                 .help("Copy \(label.lowercased())")
                 .accessibilityLabel("Copy \(label.lowercased())")
-                .opacity(isHovering ? 1 : 0)
             }
+
+            Text(value)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
         }
         .padding(.vertical, 1)
         .contentShape(Rectangle())
