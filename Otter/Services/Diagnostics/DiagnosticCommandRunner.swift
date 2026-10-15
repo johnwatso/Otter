@@ -27,11 +27,16 @@ struct DiagnosticCommandRunner: Sendable {
 /// reaped; `Process.waitUntilExit()` can itself block indefinitely on a busy
 /// runner. The termination handler retains the output file until cleanup.
 private final class DiagnosticCommandExecution: @unchecked Sendable {
+    private static let timeoutQueue = DispatchQueue(
+        label: "io.github.johnwatso.Otter.diagnostic-command-timeout",
+        qos: .userInitiated
+    )
+
     private let lock = NSLock()
     private var process: Process?
     private var output: FileHandle?
     private var continuation: CheckedContinuation<String?, Never>?
-    private var timeoutWorkItem: DispatchWorkItem?
+    private var timeoutTimer: DispatchSourceTimer?
     private var cancelled = false
     private var responded = false
 
@@ -51,9 +56,10 @@ private final class DiagnosticCommandExecution: @unchecked Sendable {
         self.continuation = continuation
         lock.unlock()
 
-        DispatchQueue.global(qos: .utility).async { [self] in
-            launch(executable: executable, arguments: arguments, timeout: timeout, acceptedExitCodes: acceptedExitCodes)
-        }
+        // Start and arm the watchdog before returning to the cooperative task
+        // executor. Queuing this on a low-priority worker can delay even a
+        // 100 ms deadline for minutes under an overloaded test runner.
+        launch(executable: executable, arguments: arguments, timeout: timeout, acceptedExitCodes: acceptedExitCodes)
     }
 
     func cancel() {
@@ -108,16 +114,15 @@ private final class DiagnosticCommandExecution: @unchecked Sendable {
             return
         }
 
-        let timeoutWorkItem = DispatchWorkItem { [weak self, weak process] in
+        let timeoutTimer = DispatchSource.makeTimerSource(queue: Self.timeoutQueue)
+        timeoutTimer.schedule(deadline: .now() + max(timeout, 0))
+        timeoutTimer.setEventHandler { [weak self, weak process] in
             guard let self, let process else { return }
             self.timedOut(process: process)
         }
-        self.timeoutWorkItem = timeoutWorkItem
+        self.timeoutTimer = timeoutTimer
         lock.unlock()
-        DispatchQueue.global(qos: .utility).asyncAfter(
-            deadline: .now() + max(timeout, 0),
-            execute: timeoutWorkItem
-        )
+        timeoutTimer.resume()
     }
 
     private func timedOut(process: Process) {
@@ -140,8 +145,8 @@ private final class DiagnosticCommandExecution: @unchecked Sendable {
             return
         }
         self.process = nil
-        timeoutWorkItem?.cancel()
-        timeoutWorkItem = nil
+        timeoutTimer?.cancel()
+        timeoutTimer = nil
         let output = self.output
         self.output = nil
         let shouldReadOutput = !responded && !cancelled && acceptedExitCodes.contains(process.terminationStatus)
@@ -171,8 +176,8 @@ private final class DiagnosticCommandExecution: @unchecked Sendable {
     private func takeContinuationLocked() -> CheckedContinuation<String?, Never>? {
         guard !responded else { return nil }
         responded = true
-        timeoutWorkItem?.cancel()
-        timeoutWorkItem = nil
+        timeoutTimer?.cancel()
+        timeoutTimer = nil
         defer { continuation = nil }
         return continuation
     }
