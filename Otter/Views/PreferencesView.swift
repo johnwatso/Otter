@@ -1513,14 +1513,8 @@ private struct ShareListRow: View {
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 5) {
-                    Text(share.displayName)
-                        .lineLimit(1)
-                    Image(systemName: status.circleSymbol)
-                        .font(.caption2)
-                        .foregroundStyle(status.tint)
-                        .accessibilityHidden(true)
-                }
+                Text(share.displayName)
+                    .lineLimit(1)
 
                 // A healthy share needs no caption; anything else says why.
                 if status != .connected {
@@ -1531,7 +1525,13 @@ private struct ShareListRow: View {
                 }
             }
 
-            Spacer(minLength: 0)
+            Spacer(minLength: 4)
+
+            // Trailing, so every row's indicator lines up whatever the name length.
+            Image(systemName: status.circleSymbol)
+                .font(.caption2)
+                .foregroundStyle(status.tint)
+                .accessibilityHidden(true)
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
