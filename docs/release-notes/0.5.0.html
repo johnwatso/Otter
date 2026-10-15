@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Website: modernize layout and styles - Release Notes</title>
+  <title>Use timer source for diagnostic timeouts - Release Notes</title>
   <style>
     :root { color-scheme: light dark; }
     body {
@@ -39,10 +39,11 @@
 </head>
 <body>
   <main>
-    <h1>Website: modernize layout and styles</h1>
+    <h1>Use timer source for diagnostic timeouts</h1>
     <p class="meta">Version 0.5.0</p>
-    <p>Website: modernize layout and styles</p>
-    <p><strong>Commit:</strong> <a href="https://github.com/johnwatso/Otter/commit/c6e3a92470de46133155c7887629b12024d6412b">c6e3a92</a></p>
+    <p>Use timer source for diagnostic timeouts</p>
+<p>This change replaces the diagnostic command timeout work item with a dedicated DispatchSourceTimer and arms it before returning to the cooperative task executor. That keeps timeout handling responsive under overloaded test runners while still cleaning up the timer on completion or cancellation.</p>
+    <p><strong>Commit:</strong> <a href="https://github.com/johnwatso/Otter/commit/0653357c11d33fc5f6dd4218db3c817da494ee51">0653357</a></p>
   </main>
 </body>
 </html>
