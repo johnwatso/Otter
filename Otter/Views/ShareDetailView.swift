@@ -102,9 +102,10 @@ struct ShareDetailView<Actions: View>: View {
     // MARK: Reliability
 
     private func reliabilityCard(runtimeState: ShareRuntimeState) -> some View {
-        let summary = eventLog.reliabilitySummary(for: currentShare.id)
-        let problems = eventLog.dailyProblemCounts(for: currentShare.id)
-        let latency = latencyHistory.recent(for: currentShare.id)
+        let demo = appModel.screenshotDemoReliability(for: currentShare.id)
+        let summary = demo?.summary ?? eventLog.reliabilitySummary(for: currentShare.id)
+        let problems = demo?.problems ?? eventLog.dailyProblemCounts(for: currentShare.id)
+        let latency = demo?.latency ?? latencyHistory.recent(for: currentShare.id)
         let days = zip(problems, latency).map { ReliabilityDay(problems: $0, latency: $1) }
 
         return DetailCard("Reliability") {

@@ -87,6 +87,15 @@ final class AppModel: ObservableObject {
 #endif
     }
 
+    func screenshotDemoReliability(for shareID: NetworkShare.ID) -> ScreenshotDemo.Reliability? {
+#if DEBUG
+        guard isScreenshotDemoEnabled else { return nil }
+        return ScreenshotDemo.reliability(for: shareID)
+#else
+        return nil
+#endif
+    }
+
     func screenshotDemoDropCount(for shareID: NetworkShare.ID) -> Int? {
 #if DEBUG
         guard isScreenshotDemoEnabled else { return nil }
@@ -396,8 +405,9 @@ final class AppModel: ObservableObject {
 enum ScreenshotDemo {
     private static let mediaID = UUID()
     private static let backupsID = UUID()
-    private static let projectsID = UUID()
     private static let timeMachineID = UUID()
+    private static let photosID = UUID()
+    private static let projectsID = UUID()
     private static let archiveID = UUID()
 
     static let shares: [NetworkShare] = [
@@ -418,64 +428,60 @@ enum ScreenshotDemo {
             connectionMode: .adaptive
         ),
         NetworkShare(
+            id: timeMachineID,
+            displayName: "Time Machine",
+            urlString: "smb://homenas.local/TimeMachine",
+            mountPath: "/Volumes/TimeMachine"
+        ),
+        NetworkShare(
+            id: photosID,
+            displayName: "Photos",
+            urlString: "smb://homenas.local/Photos",
+            mountPath: "/Volumes/Photos"
+        ),
+        NetworkShare(
             id: projectsID,
             displayName: "Projects",
             urlString: "smb://studio-server.local/Projects",
             mountPath: "/Volumes/Projects"
         ),
-        NetworkShare(
-            id: timeMachineID,
-            displayName: "Time Machine",
-            urlString: "smb://homenas.local/TimeMachine",
-            mountPath: "/Volumes/TimeMachine",
-            rules: ShareRules(
-                wifiNetworkName: "Homebase",
-                registeredSubnets: ["192.168.1.0/24"],
-                vpnRuleEnabled: true,
-                vpnName: "Work VPN"
-            )
-        ),
+        // Set up to connect only at home, so being away is expected, not a fault.
         NetworkShare(
             id: archiveID,
             displayName: "Archive",
             urlString: "smb://archive-nas.local/Archive",
-            mountPath: "/Volumes/Archive"
+            mountPath: "/Volumes/Archive",
+            rules: ShareRules(wifiNetworkName: "Homebase", registeredSubnets: ["192.168.1.0/24"])
         ),
     ]
 
     static func runtimeState(for shareID: NetworkShare.ID) -> ShareRuntimeState? {
         let now = Date()
 
+        func connected(mountedHoursAgo: Double) -> ShareRuntimeState {
+            var state = ShareRuntimeState()
+            state.status = .connected
+            state.mountedAt = now.addingTimeInterval(-mountedHoursAgo * 3600)
+            state.lastConnectedAt = now.addingTimeInterval(-60)
+            state.lastCheckedAt = now.addingTimeInterval(-25)
+            return state
+        }
+
         switch shareID {
         case mediaID:
-            var state = ShareRuntimeState()
-            state.status = .connected
-            state.mountedAt = now.addingTimeInterval(-2 * 3600 - 47 * 60)
-            state.lastConnectedAt = now.addingTimeInterval(-90)
-            return state
+            return connected(mountedHoursAgo: 3 * 24 + 5)
         case backupsID:
-            var state = ShareRuntimeState()
-            state.status = .connected
-            state.mountedAt = now.addingTimeInterval(-25 * 60)
-            state.lastConnectedAt = now.addingTimeInterval(-120)
-            return state
-        case projectsID:
-            var state = ShareRuntimeState()
-            state.status = .reconnecting
-            state.failureCount = 2
-            state.lastConnectedAt = now.addingTimeInterval(-12 * 60)
-            return state
+            return connected(mountedHoursAgo: 3)
         case timeMachineID:
-            var state = ShareRuntimeState()
-            state.status = .waitingForAllowedNetwork("the registered network or VPN Work VPN")
-            state.lastConnectedAt = now.addingTimeInterval(-11 * 3600)
-            return state
+            return connected(mountedHoursAgo: 3 * 24 + 5)
+        case photosID:
+            return connected(mountedHoursAgo: 26)
+        case projectsID:
+            return connected(mountedHoursAgo: 9)
         case archiveID:
             var state = ShareRuntimeState()
-            state.status = .failed("Authentication failed. Connect once in Finder and save the password to Keychain.")
-            state.failureCount = 4
-            state.needsCredentials = true
-            state.lastConnectedAt = now.addingTimeInterval(-3 * 24 * 3600)
+            state.status = .waitingForAllowedNetwork("the registered network")
+            state.lastConnectedAt = now.addingTimeInterval(-2 * 24 * 3600)
             return state
         default:
             return nil
@@ -496,21 +502,19 @@ enum ScreenshotDemo {
         }
 
         return [
-            event(.connectionLost, projectsID, minutesAgo: 12),
-            event(.mounted, backupsID, minutesAgo: 25),
-            event(.mounted, projectsID, minutesAgo: 58),
-            event(.connectionLost, projectsID, minutesAgo: 65),
-            event(.mounted, mediaID, minutesAgo: 167),
-            event(.mountFailed, archiveID, minutesAgo: 180, detail: "Authentication failed. Connect once in Finder and save the password to Keychain."),
-            event(.blockedByRule, timeMachineID, minutesAgo: 11 * 60, detail: "the registered network or VPN Work VPN"),
-            event(.wakePacketSent, mediaID, minutesAgo: 11.5 * 60),
-            event(.connectionLost, projectsID, minutesAgo: 18 * 60),
-            event(.disconnected, backupsID, minutesAgo: 26 * 60),
+            event(.mounted, backupsID, minutesAgo: 3 * 60),
+            event(.mounted, projectsID, minutesAgo: 9 * 60),
+            event(.mounted, photosID, minutesAgo: 26 * 60),
+            event(.blockedByRule, archiveID, minutesAgo: 2 * 24 * 60, detail: "the registered network"),
+            event(.mounted, mediaID, minutesAgo: (3 * 24 + 5) * 60),
+            event(.mounted, timeMachineID, minutesAgo: (3 * 24 + 5) * 60),
+            event(.wakePacketSent, mediaID, minutesAgo: (3 * 24 + 5) * 60 + 1),
+            event(.connectionLost, projectsID, minutesAgo: 4 * 24 * 60),
         ]
     }()
 
     static func hasCredentials(for shareID: NetworkShare.ID) -> Bool {
-        shareID != archiveID
+        true
     }
 
     static func dropCount(for shareID: NetworkShare.ID, within interval: TimeInterval = 24 * 60 * 60) -> Int {
@@ -518,6 +522,62 @@ enum ScreenshotDemo {
         return events
             .filter { $0.shareID == shareID && $0.kind == .connectionLost && $0.date >= cutoff }
             .count
+    }
+
+    /// A week of reliability data, oldest day first, for the detail view's strip.
+    struct Reliability {
+        let summary: ShareReliabilitySummary
+        let problems: [Int]
+        let latency: [DailyLatency?]
+    }
+
+    static func reliability(for shareID: NetworkShare.ID) -> Reliability? {
+        guard shares.contains(where: { $0.id == shareID }) else { return nil }
+
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+
+        // Typical read times in ms, oldest to newest; nil is a day with no
+        // measurements (Archive was away from its network).
+        let averages: [Double?]
+        var problems = [Int](repeating: 0, count: 7)
+        var lastProblemAt: Date?
+
+        switch shareID {
+        case mediaID: averages = [11, 12, 11, 13, 12, 11, 12]
+        case backupsID: averages = [14, 13, 15, 14, 13, 14, 13]
+        case timeMachineID: averages = [18, 17, 19, 18, 17, 18, 17]
+        case photosID: averages = [12, 13, 12, 12, 14, 13, 12]
+        case projectsID:
+            averages = [9, 10, 9, 10, 10, 9, 10]
+            problems[2] = 1
+            lastProblemAt = Date().addingTimeInterval(-4 * 24 * 3600)
+        default: averages = [15, 14, 16, 15, 15, nil, nil]
+        }
+
+        let latency: [DailyLatency?] = averages.enumerated().map { index, average in
+            guard let average else { return nil }
+            let day = calendar.date(byAdding: .day, value: index - 6, to: today) ?? today
+            let samples = 600
+            return DailyLatency(
+                day: day,
+                sampleCount: samples,
+                totalMilliseconds: average * Double(samples),
+                slowestMilliseconds: average * 3
+            )
+        }
+
+        let drops = problems.reduce(0, +)
+        return Reliability(
+            summary: ShareReliabilitySummary(
+                connectionDrops: drops,
+                failures: 0,
+                healthFailures: 0,
+                lastProblemAt: lastProblemAt
+            ),
+            problems: problems,
+            latency: latency
+        )
     }
 }
 #endif
