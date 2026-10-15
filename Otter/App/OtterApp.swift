@@ -211,6 +211,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // carries, so hold the process open from code as well: a share monitor
         // that the system is free to quit while it sits idle is no monitor.
         ProcessInfo.processInfo.disableAutomaticTermination("Otter monitors network shares in the background")
+
+#if DEBUG
+        // For product screenshots: `-OtterAppearance dark` (or `light`) forces
+        // the app's appearance without touching the system setting.
+        switch UserDefaults.standard.string(forKey: "OtterAppearance") {
+        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        default: break
+        }
+#endif
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
