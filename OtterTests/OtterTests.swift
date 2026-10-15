@@ -4530,10 +4530,14 @@ final class NASDiagnosticsTests: XCTestCase {
         let result = await DiagnosticCommandRunner().run("/bin/sleep", ["30"], timeout: 0.1)
         XCTAssertNil(result)
         XCTAssertLessThan(Date().timeIntervalSince(start), 10)
+
+        let cancellationStart = Date()
         let task = Task { await DiagnosticCommandRunner().run("/bin/sleep", ["10"]) }
+        try? await Task.sleep(nanoseconds: 100_000_000)
         task.cancel()
         let cancelled = await task.value
         XCTAssertNil(cancelled)
+        XCTAssertLessThan(Date().timeIntervalSince(cancellationStart), 3)
     }
 }
 

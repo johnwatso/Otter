@@ -5,36 +5,186 @@ import Darwin
 /// has a deadline; output goes to an unlinked local file to avoid pipe deadlocks.
 struct DiagnosticCommandRunner: Sendable {
     func run(_ executable: String, _ arguments: [String], timeout: TimeInterval = 8, acceptedExitCodes: Set<Int32> = [0]) async -> String? {
-        let worker = Task.detached(priority: .utility) { () -> String? in
-            guard !Task.isCancelled else { return nil }
-            var template = Array((NSTemporaryDirectory() + "otter-diagnostic-XXXXXX").utf8CString)
-            let fd = mkstemp(&template)
-            guard fd >= 0 else { return nil }
-            template.withUnsafeBufferPointer { _ = unlink($0.baseAddress!) }
-            let output = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: executable)
-            process.arguments = arguments
-            process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C"]
-            process.standardOutput = output
-            process.standardError = FileHandle.nullDevice
-            do { try process.run() } catch { return nil }
-            let deadline = Date().addingTimeInterval(timeout)
-            while process.isRunning {
-                if Task.isCancelled || Date() >= deadline {
-                    process.terminate()
-                    // A utility stuck in a syscall must not keep a diagnostic alive.
-                    if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-                    process.waitUntilExit()
-                    return nil
-                }
-                try? await Task.sleep(nanoseconds: 50_000_000)
+        let execution = DiagnosticCommandExecution()
+        return await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                execution.start(
+                    executable: executable,
+                    arguments: arguments,
+                    timeout: timeout,
+                    acceptedExitCodes: acceptedExitCodes,
+                    continuation: continuation
+                )
             }
-            guard !Task.isCancelled, acceptedExitCodes.contains(process.terminationStatus) else { return nil }
-            try? output.seek(toOffset: 0)
-            return (try? output.read(upToCount: 1_048_576)).flatMap { String(data: $0, encoding: .utf8) }
+        }, onCancel: {
+            execution.cancel()
+        })
+    }
+}
+
+/// Owns one short-lived diagnostic child process. The caller's continuation is
+/// resumed by a deadline or cancellation without waiting for the child to be
+/// reaped; `Process.waitUntilExit()` can itself block indefinitely on a busy
+/// runner. The termination handler retains the output file until cleanup.
+private final class DiagnosticCommandExecution: @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: Process?
+    private var output: FileHandle?
+    private var continuation: CheckedContinuation<String?, Never>?
+    private var timeoutWorkItem: DispatchWorkItem?
+    private var cancelled = false
+    private var responded = false
+
+    func start(
+        executable: String,
+        arguments: [String],
+        timeout: TimeInterval,
+        acceptedExitCodes: Set<Int32>,
+        continuation: CheckedContinuation<String?, Never>
+    ) {
+        lock.lock()
+        if cancelled {
+            lock.unlock()
+            continuation.resume(returning: nil)
+            return
         }
-        return await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
+        self.continuation = continuation
+        lock.unlock()
+
+        DispatchQueue.global(qos: .utility).async { [self] in
+            launch(executable: executable, arguments: arguments, timeout: timeout, acceptedExitCodes: acceptedExitCodes)
+        }
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let runningProcess = process
+        let continuation = takeContinuationLocked()
+        lock.unlock()
+
+        continuation?.resume(returning: nil)
+        stop(runningProcess)
+    }
+
+    private func launch(executable: String, arguments: [String], timeout: TimeInterval, acceptedExitCodes: Set<Int32>) {
+        var template = Array((NSTemporaryDirectory() + "otter-diagnostic-XXXXXX").utf8CString)
+        let fd = mkstemp(&template)
+        guard fd >= 0 else {
+            respondWithLaunchFailure()
+            return
+        }
+        template.withUnsafeBufferPointer { _ = unlink($0.baseAddress!) }
+
+        let output = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C"]
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        process.terminationHandler = { [weak process] _ in
+            guard let process else { return }
+            self.didTerminate(process: process, acceptedExitCodes: acceptedExitCodes)
+        }
+
+        lock.lock()
+        guard !cancelled, !responded else {
+            lock.unlock()
+            try? output.close()
+            return
+        }
+        self.process = process
+        self.output = output
+        do {
+            try process.run()
+        } catch {
+            self.process = nil
+            self.output = nil
+            let continuation = takeContinuationLocked()
+            lock.unlock()
+            try? output.close()
+            continuation?.resume(returning: nil)
+            return
+        }
+
+        let timeoutWorkItem = DispatchWorkItem { [weak self, weak process] in
+            guard let self, let process else { return }
+            self.timedOut(process: process)
+        }
+        self.timeoutWorkItem = timeoutWorkItem
+        lock.unlock()
+        DispatchQueue.global(qos: .utility).asyncAfter(
+            deadline: .now() + max(timeout, 0),
+            execute: timeoutWorkItem
+        )
+    }
+
+    private func timedOut(process: Process) {
+        lock.lock()
+        guard self.process === process else {
+            lock.unlock()
+            return
+        }
+        let continuation = takeContinuationLocked()
+        lock.unlock()
+
+        continuation?.resume(returning: nil)
+        stop(process)
+    }
+
+    private func didTerminate(process: Process, acceptedExitCodes: Set<Int32>) {
+        lock.lock()
+        guard self.process === process else {
+            lock.unlock()
+            return
+        }
+        self.process = nil
+        timeoutWorkItem?.cancel()
+        timeoutWorkItem = nil
+        let output = self.output
+        self.output = nil
+        let shouldReadOutput = !responded && !cancelled && acceptedExitCodes.contains(process.terminationStatus)
+        let continuation = takeContinuationLocked()
+        lock.unlock()
+
+        defer { try? output?.close() }
+        guard shouldReadOutput else {
+            continuation?.resume(returning: nil)
+            return
+        }
+        try? output?.seek(toOffset: 0)
+        let text = output.flatMap { handle -> String? in
+            guard let data = try? handle.read(upToCount: 1_048_576) else { return nil }
+            return String(data: data, encoding: .utf8)
+        }
+        continuation?.resume(returning: text)
+    }
+
+    private func respondWithLaunchFailure() {
+        lock.lock()
+        let continuation = takeContinuationLocked()
+        lock.unlock()
+        continuation?.resume(returning: nil)
+    }
+
+    private func takeContinuationLocked() -> CheckedContinuation<String?, Never>? {
+        guard !responded else { return nil }
+        responded = true
+        timeoutWorkItem?.cancel()
+        timeoutWorkItem = nil
+        defer { continuation = nil }
+        return continuation
+    }
+
+    private func stop(_ process: Process?) {
+        guard let process, process.isRunning else { return }
+        process.terminate()
+        let pid = process.processIdentifier
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.2) {
+            guard process.isRunning else { return }
+            _ = kill(pid, SIGKILL)
+        }
     }
 }
 
