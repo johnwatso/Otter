@@ -152,6 +152,9 @@ struct AppPreferences: Codable, Equatable {
     var pauseState: PauseState = .inactive
     var recoverUnresponsiveMounts: Bool = false
     var detectNewShares: Bool = true
+    /// When the user opens an SMB share in Finder while a VPN-dependent share
+    /// is out of reach, connect that share's VPN and mount it in the background.
+    var connectVPNOnMountAttempt: Bool = true
     /// Reconnect a share through the name its server is browsed under, and drop
     /// the extra copies of a share macOS mounted more than once, so Finder's
     /// Network list holds one entry per server.
@@ -174,6 +177,7 @@ struct AppPreferences: Codable, Equatable {
         pauseState: PauseState = .inactive,
         recoverUnresponsiveMounts: Bool = false,
         detectNewShares: Bool = true,
+        connectVPNOnMountAttempt: Bool = true,
         deduplicateConnections: Bool = true,
         hasCompletedOnboarding: Bool = false,
         autoUpdateInstallPolicy: AutoUpdateInstallPolicy = .whenIdle,
@@ -189,6 +193,7 @@ struct AppPreferences: Codable, Equatable {
         self.pauseState = pauseState
         self.recoverUnresponsiveMounts = recoverUnresponsiveMounts
         self.detectNewShares = detectNewShares
+        self.connectVPNOnMountAttempt = connectVPNOnMountAttempt
         self.deduplicateConnections = deduplicateConnections
         self.hasCompletedOnboarding = hasCompletedOnboarding
         self.autoUpdateInstallPolicy = autoUpdateInstallPolicy
@@ -207,6 +212,7 @@ struct AppPreferences: Codable, Equatable {
         case pauseState
         case recoverUnresponsiveMounts
         case detectNewShares
+        case connectVPNOnMountAttempt
         case deduplicateConnections
         case hasCompletedOnboarding
         case autoUpdateInstallPolicy
@@ -232,6 +238,7 @@ struct AppPreferences: Codable, Equatable {
         pauseState = try container.decodeIfPresent(PauseState.self, forKey: .pauseState) ?? .inactive
         recoverUnresponsiveMounts = try container.decodeIfPresent(Bool.self, forKey: .recoverUnresponsiveMounts) ?? false
         detectNewShares = try container.decodeIfPresent(Bool.self, forKey: .detectNewShares) ?? true
+        connectVPNOnMountAttempt = try container.decodeIfPresent(Bool.self, forKey: .connectVPNOnMountAttempt) ?? true
         deduplicateConnections = try container.decodeIfPresent(Bool.self, forKey: .deduplicateConnections) ?? true
         hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
         autoUpdateInstallPolicy = try container.decodeIfPresent(AutoUpdateInstallPolicy.self, forKey: .autoUpdateInstallPolicy) ?? .whenIdle
@@ -252,6 +259,7 @@ struct AppPreferences: Codable, Equatable {
         try container.encode(pauseState, forKey: .pauseState)
         try container.encode(recoverUnresponsiveMounts, forKey: .recoverUnresponsiveMounts)
         try container.encode(detectNewShares, forKey: .detectNewShares)
+        try container.encode(connectVPNOnMountAttempt, forKey: .connectVPNOnMountAttempt)
         try container.encode(deduplicateConnections, forKey: .deduplicateConnections)
         try container.encode(hasCompletedOnboarding, forKey: .hasCompletedOnboarding)
         try container.encode(autoUpdateInstallPolicy, forKey: .autoUpdateInstallPolicy)

@@ -929,9 +929,26 @@ private struct GeneralPreferencesView: View {
                 Text("New Shares")
             }
 
+            Section {
+                Toggle("Connect VPN when a share is opened in Finder", isOn: connectVPNOnMountAttemptBinding)
+                SettingsSecondaryText("If you open an SMB share while away from its network, Otter starts the VPN set on your shares, mounts them in the background and tells you when they are ready. Applies to shares set to connect their VPN automatically.")
+            } header: {
+                Text("VPN")
+            }
+
             NotificationsPreferencesSections()
         }
         .compactPreferencesForm()
+    }
+
+    private var connectVPNOnMountAttemptBinding: Binding<Bool> {
+        Binding {
+            settings.preferences.connectVPNOnMountAttempt
+        } set: { newValue in
+            settings.updatePreferences { preferences in
+                preferences.connectVPNOnMountAttempt = newValue
+            }
+        }
     }
 
     private var appPresenceBinding: Binding<AppPresenceMode> {

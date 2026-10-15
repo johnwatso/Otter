@@ -45,6 +45,7 @@
 		1A2B3C4D5E6F700100000029 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000125 /* OnboardingView.swift */; };
 		1A2B3C4D5E6F70010000002A /* OtterShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000126 /* OtterShortcuts.swift */; };
 		1A2B3C4D5E6F70010000002B /* NewShareDetectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000127 /* NewShareDetectionService.swift */; };
+		1A2B3C4D5E6F7001000009A2 /* MountAttemptDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F7001000009A1 /* MountAttemptDetector.swift */; };
 		1A2B3C4D5E6F700100000094 /* ShareDeduplicationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000131 /* ShareDeduplicationService.swift */; };
 		1A2B3C4D5E6F70010000002C /* SupportDiagnosticsExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000128 /* SupportDiagnosticsExporter.swift */; };
 		1A2B3C4D5E6F70010000002D /* OtterCommandService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000129 /* OtterCommandService.swift */; };
@@ -125,6 +126,7 @@
 		1A2B3C4D5E6F700100000125 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000126 /* OtterShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtterShortcuts.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000127 /* NewShareDetectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewShareDetectionService.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F7001000009A1 /* MountAttemptDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MountAttemptDetector.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000131 /* ShareDeduplicationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareDeduplicationService.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000128 /* SupportDiagnosticsExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupportDiagnosticsExporter.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000129 /* OtterCommandService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtterCommandService.swift; sourceTree = "<group>"; };
@@ -238,6 +240,7 @@
 				1A2B3C4D5E6F700100000108 /* NetworkReachabilityService.swift */,
 				1A2B3C4D5E6F700100000110 /* NotificationService.swift */,
 				1A2B3C4D5E6F700100000127 /* NewShareDetectionService.swift */,
+				1A2B3C4D5E6F7001000009A1 /* MountAttemptDetector.swift */,
 				1A2B3C4D5E6F700100000131 /* ShareDeduplicationService.swift */,
 				1A2B3C4D5E6F700100000128 /* SupportDiagnosticsExporter.swift */,
 				1A2B3C4D5E6F700100000129 /* OtterCommandService.swift */,
@@ -443,6 +446,7 @@
 				1A2B3C4D5E6F70010000000D /* ShareEditorView.swift in Sources */,
 				1A2B3C4D5E6F700100000010 /* NotificationService.swift in Sources */,
 				1A2B3C4D5E6F70010000002B /* NewShareDetectionService.swift in Sources */,
+				1A2B3C4D5E6F7001000009A2 /* MountAttemptDetector.swift in Sources */,
 				1A2B3C4D5E6F700100000094 /* ShareDeduplicationService.swift in Sources */,
 				1A2B3C4D5E6F70010000002C /* SupportDiagnosticsExporter.swift in Sources */,
 				1A2B3C4D5E6F70010000002D /* OtterCommandService.swift in Sources */,

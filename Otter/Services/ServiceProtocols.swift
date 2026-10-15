@@ -78,6 +78,14 @@ protocol ShareNotificationProviding: AnyObject {
         current: ShareStatus,
         isRequestedAttempt: Bool
     )
+
+    /// Shares Otter mounted after starting a VPN because the user tried to
+    /// open an SMB share while it was out of reach.
+    func notifyVPNAssistedMount(shares: [NetworkShare], vpnName: String?)
+}
+
+extension ShareNotificationProviding {
+    func notifyVPNAssistedMount(shares: [NetworkShare], vpnName: String?) {}
 }
 
 @MainActor

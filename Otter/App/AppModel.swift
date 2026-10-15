@@ -49,6 +49,7 @@ final class AppModel: ObservableObject {
     let monitor: ShareMonitor
     let connectionDoctor: ConnectionDoctor
     let newShareDetector: NewShareDetectionService
+    let mountAttemptDetector: MountAttemptDetector
     let deduplicationService: ShareDeduplicationService
     lazy var commandService = OtterCommandService(appModel: self)
 
@@ -190,6 +191,14 @@ final class AppModel: ObservableObject {
             networkService: networkService,
             monitor: monitor
         )
+        // Watches for the user opening an SMB share in Finder while its VPN is
+        // down, so Otter can start the VPN and mount the share in the background.
+        self.mountAttemptDetector = MountAttemptDetector(
+            shouldWatch: { [weak monitor] in
+                guard let monitor else { return false }
+                return !monitor.sharesAwaitingVPNAssistance.isEmpty
+            }
+        )
         self.newShareDetector = NewShareDetectionService(
             settings: settings,
             notificationService: notificationService,
@@ -223,6 +232,13 @@ final class AppModel: ObservableObject {
         networkService.start()
         monitor.start()
         newShareDetector.start()
+        mountAttemptDetector.onAttempt = { [weak self] in
+            guard let self else { return }
+            Task { await self.monitor.handleMountAttempt() }
+        }
+        if !AppRuntime.isRunningTests {
+            mountAttemptDetector.start()
+        }
         deduplicationService.start()
         commandService.start()
         observePreferences()

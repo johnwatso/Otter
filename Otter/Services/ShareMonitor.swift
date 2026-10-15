@@ -11,12 +11,13 @@ enum MonitorReason {
     case volumeChanged
     case configurationChanged
     case retry
+    case mountAttempt
 
     var resetsRetryBudget: Bool {
         switch self {
         case .wake, .networkChanged, .configurationChanged:
             true
-        case .launch, .manual, .timer, .volumeChanged, .retry:
+        case .launch, .manual, .timer, .volumeChanged, .retry, .mountAttempt:
             false
         }
     }
@@ -71,6 +72,11 @@ final class ShareMonitor: ObservableObject {
     // deduplication pass can move a share to another address without reporting
     // a disconnection the user never experienced.
     private var maintenanceRemounts = Set<NetworkShare.ID>()
+    // Shares Otter is connecting because the user tried to open an SMB share in
+    // Finder while out of reach. Their mount is reported as one combined
+    // notification that also names the VPN, in place of the plain "connected".
+    private var vpnAssistedShares = Set<NetworkShare.ID>()
+    private var isAssistingMountAttempt = false
     private var persistedConnectionTimes: [String: PersistedConnectionTimes] = [:]
 
     private static let connectionTimesKey = "shareConnectionTimes"
@@ -184,6 +190,71 @@ final class ShareMonitor: ObservableObject {
                 await disconnect(share, pauseAutomaticMounting: false)
             }
         }
+    }
+
+    /// Shares Otter could bring up by starting a VPN right now: the ones whose
+    /// rules ask for automatic VPN connection, that are not mounted, not paused,
+    /// and have no VPN connected yet. Empty when the feature is switched off or
+    /// the Mac is offline, so callers can use it to decide whether to watch for
+    /// mount attempts at all.
+    var sharesAwaitingVPNAssistance: [NetworkShare] {
+        guard settings.preferences.connectVPNOnMountAttempt,
+              networkService.isOnline,
+              !networkService.isVPNConnected
+        else { return [] }
+
+        let currentDate = now()
+        return settings.shares.filter { share in
+            share.url != nil
+                && share.activeRules.shouldConnectVPNAutomatically
+                && status(for: share) != .connected
+                && settings.effectivePauseState(for: share, at: currentDate) == nil
+        }
+    }
+
+    /// The user (or another app) just asked macOS to mount an SMB share that
+    /// Otter did not mount. macOS cannot reach a server that sits behind a VPN,
+    /// so that attempt is going to fail. Rather than leave the user to work out
+    /// why, start the VPN their shares are configured for and mount those
+    /// shares from here, then say so once.
+    ///
+    /// The attempt does not reveal which server it targeted, so every
+    /// VPN-dependent share is brought up. Each has already opted in to
+    /// automatic VPN connection, and a server that answers without the VPN is
+    /// mounted directly, as it is for any other Connect.
+    func handleMountAttempt() async {
+        // Otter's own mounts start the same macOS helper. Anything that appears
+        // while Otter is already working on a share is its own doing.
+        guard !isAssistingMountAttempt, activeChecks.isEmpty else { return }
+
+        let candidates = sharesAwaitingVPNAssistance
+        guard !candidates.isEmpty else { return }
+
+        isAssistingMountAttempt = true
+        vpnAssistedShares = Set(candidates.map(\.id))
+        defer {
+            isAssistingMountAttempt = false
+            vpnAssistedShares = []
+        }
+
+        var mountedShares: [NetworkShare] = []
+        for candidate in candidates {
+            guard let share = settings.share(id: candidate.id) else { continue }
+            await evaluate(share, reason: .mountAttempt, force: true)
+
+            if status(for: share) == .connected {
+                mountedShares.append(share)
+            }
+        }
+
+        // Without a VPN in the picture (the servers answered directly) there is
+        // nothing to add to the ordinary "connected" notification.
+        guard !mountedShares.isEmpty, networkService.isVPNConnected else { return }
+
+        let vpnName = mountedShares.lazy
+            .compactMap { $0.activeRules.requiredVPNName }
+            .first
+        notificationService.notifyVPNAssistedMount(shares: mountedShares, vpnName: vpnName)
     }
 
     func mount(_ share: NetworkShare) async {
@@ -1060,6 +1131,15 @@ final class ShareMonitor: ObservableObject {
         guard !maintenanceRemounts.contains(share.id) else { return }
 
         recordEvent(for: share, previous: previousStatus, current: updatedState.status)
+
+        // A share mounted by VPN assistance is announced once, with the VPN,
+        // when the whole attempt finishes.
+        if case .connected = updatedState.status,
+           vpnAssistedShares.contains(share.id),
+           networkService.isVPNConnected {
+            return
+        }
+
         notificationService.notifyStatusChange(
             for: share,
             previous: previousStatus,

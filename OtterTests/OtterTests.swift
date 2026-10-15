@@ -3010,6 +3010,11 @@ private final class StubNetworkReachability: NetworkReachabilityProviding {
 private final class RecordingNotificationService: ShareNotificationProviding {
     private(set) var transitions: [(previous: ShareStatus, current: ShareStatus)] = []
     private(set) var requestedAttemptFlags: [Bool] = []
+    private(set) var vpnAssistedMounts: [(shareNames: [String], vpnName: String?)] = []
+
+    func notifyVPNAssistedMount(shares: [NetworkShare], vpnName: String?) {
+        vpnAssistedMounts.append((shares.map(\.displayName), vpnName))
+    }
 
     func notifyStatusChange(
         for share: NetworkShare,
@@ -3537,6 +3542,321 @@ final class ConnectionModePersistenceTests: XCTestCase {
         ) as? [String: Any]
         XCTAssertEqual(reencoded?["connectionMode"] as? String, "adaptive")
         XCTAssertEqual(reencoded?["keepMounted"] as? Bool, true)
+    }
+}
+
+private final class HelperProcessBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedPIDs: Set<pid_t> = []
+
+    var pids: Set<pid_t> {
+        get { lock.withLock { storedPIDs } }
+        set { lock.withLock { storedPIDs = newValue } }
+    }
+}
+
+final class MountAttemptDetectorTests: XCTestCase {
+    @MainActor
+    private func makeDetector(
+        helpers: HelperProcessBox,
+        shouldWatch: @escaping () -> Bool = { true },
+        clock: @escaping () -> Date = Date.init
+    ) -> (MountAttemptDetector, () -> Int) {
+        var attempts = 0
+        let detector = MountAttemptDetector(
+            shouldWatch: shouldWatch,
+            cooldown: 45,
+            now: clock,
+            snapshotHelpers: { helpers.pids }
+        )
+        detector.onAttempt = { attempts += 1 }
+        return (detector, { attempts })
+    }
+
+    @MainActor
+    func testReportsAHelperThatAppearsAfterWatchingBegins() {
+        let helpers = HelperProcessBox()
+        let (detector, attempts) = makeDetector(helpers: helpers)
+
+        detector.tick()
+        XCTAssertEqual(attempts(), 0)
+
+        helpers.pids = [4242]
+        detector.tick()
+        XCTAssertEqual(attempts(), 1)
+
+        // The same helper still running is not a second attempt.
+        detector.tick()
+        XCTAssertEqual(attempts(), 1)
+    }
+
+    @MainActor
+    func testIgnoresHelpersThatWereAlreadyRunning() {
+        let helpers = HelperProcessBox()
+        helpers.pids = [100]
+        let (detector, attempts) = makeDetector(helpers: helpers)
+
+        detector.tick()
+        detector.tick()
+
+        XCTAssertEqual(attempts(), 0)
+    }
+
+    @MainActor
+    func testStaysSilentWhileNothingNeedsTheVPN() {
+        let helpers = HelperProcessBox()
+        var isWatching = false
+        let (detector, attempts) = makeDetector(helpers: helpers, shouldWatch: { isWatching })
+
+        detector.tick()
+        helpers.pids = [7]
+        detector.tick()
+        XCTAssertEqual(attempts(), 0)
+
+        // A helper that was already running when watching resumes belongs to
+        // an attempt that began earlier.
+        isWatching = true
+        detector.tick()
+        XCTAssertEqual(attempts(), 0)
+
+        helpers.pids = [7, 8]
+        detector.tick()
+        XCTAssertEqual(attempts(), 1)
+    }
+
+    @MainActor
+    func testCooldownCoalescesRapidAttempts() {
+        let helpers = HelperProcessBox()
+        var current = Date(timeIntervalSince1970: 1_000)
+        let (detector, attempts) = makeDetector(helpers: helpers, clock: { current })
+
+        detector.tick()
+        helpers.pids = [1]
+        detector.tick()
+        helpers.pids = [1, 2]
+        current = current.addingTimeInterval(10)
+        detector.tick()
+        XCTAssertEqual(attempts(), 1)
+
+        helpers.pids = [1, 2, 3]
+        current = current.addingTimeInterval(60)
+        detector.tick()
+        XCTAssertEqual(attempts(), 2)
+    }
+}
+
+final class VPNAssistedMountTests: XCTestCase {
+    private let vpnRules = ShareRules(
+        vpnRuleEnabled: true,
+        vpnName: "Work VPN",
+        connectVPNAutomatically: true
+    )
+
+    @MainActor
+    private func makeMonitor(
+        _ name: String,
+        shares: [NetworkShare],
+        network: StubNetworkReachability,
+        mountService: StubMountService,
+        vpnConnectionService: StubVPNConnectionService = StubVPNConnectionService(),
+        configure: (SettingsStore) -> Void = { _ in }
+    ) -> (ShareMonitor, RecordingNotificationService) {
+        let notifier = RecordingNotificationService()
+        let suiteName = "OtterTests.VPNAssisted.\(name)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsStore(defaults: defaults, credentialStore: RecordingCredentialStore())
+        shares.forEach { settings.addShare($0) }
+        configure(settings)
+        let monitor = ShareMonitor(
+            settings: settings,
+            mountService: mountService,
+            wakeOnLANService: StubWakeOnLANService(),
+            vpnConnectionService: vpnConnectionService,
+            networkService: network,
+            notificationService: notifier,
+            eventLog: ShareEventLog(defaults: defaults),
+            defaults: defaults
+        )
+        return (monitor, notifier)
+    }
+
+    private func share(
+        _ name: String = "Office Files",
+        mode: ConnectionMode = .manual,
+        rules: ShareRules? = nil
+    ) -> NetworkShare {
+        NetworkShare(
+            displayName: name,
+            urlString: "smb://fileserver.company.example/\(name.replacingOccurrences(of: " ", with: ""))",
+            mountPath: "/Volumes/\(name)",
+            connectionMode: mode,
+            rules: rules ?? vpnRules
+        )
+    }
+
+    @MainActor
+    private func offVPNNetwork() -> StubNetworkReachability {
+        StubNetworkReachability(
+            isOnline: true,
+            isReachable: false,
+            isReachableAfterVPNConnection: true,
+            vpnNameToActivateOnRefresh: "Work VPN"
+        )
+    }
+
+    @MainActor
+    func testConnectsTheVPNMountsTheShareAndAnnouncesItOnce() async {
+        let office = share()
+        let mountService = StubMountService(mountResult: URL(fileURLWithPath: "/Volumes/Office Files", isDirectory: true))
+        let vpnConnectionService = StubVPNConnectionService()
+        let (monitor, notifier) = makeMonitor(
+            "ConnectsAndAnnounces",
+            shares: [office],
+            network: offVPNNetwork(),
+            mountService: mountService,
+            vpnConnectionService: vpnConnectionService
+        )
+
+        await monitor.handleMountAttempt()
+
+        let vpnConnectionNames = await vpnConnectionService.connectionNames
+        XCTAssertEqual(vpnConnectionNames, ["Work VPN"])
+        XCTAssertEqual(monitor.status(for: office), .connected)
+        XCTAssertEqual(notifier.vpnAssistedMounts.count, 1)
+        XCTAssertEqual(notifier.vpnAssistedMounts.first?.shareNames, ["Office Files"])
+        XCTAssertEqual(notifier.vpnAssistedMounts.first?.vpnName, "Work VPN")
+        // The combined notification replaces the plain "connected" one.
+        XCTAssertFalse(notifier.transitions.contains { $0.current == .connected })
+    }
+
+    @MainActor
+    func testBringsUpEveryVPNDependentShareWithOneConnection() async {
+        let office = share("Office Files")
+        let projects = share("Projects")
+        let mountService = StubMountService(mountResult: URL(fileURLWithPath: "/Volumes/Office Files", isDirectory: true))
+        let vpnConnectionService = StubVPNConnectionService()
+        let (monitor, notifier) = makeMonitor(
+            "BringsUpEveryShare",
+            shares: [office, projects],
+            network: offVPNNetwork(),
+            mountService: mountService,
+            vpnConnectionService: vpnConnectionService
+        )
+
+        await monitor.handleMountAttempt()
+
+        let vpnConnectionNames = await vpnConnectionService.connectionNames
+        XCTAssertEqual(vpnConnectionNames, ["Work VPN"])
+        XCTAssertEqual(notifier.vpnAssistedMounts.count, 1)
+        XCTAssertEqual(notifier.vpnAssistedMounts.first?.shareNames, ["Office Files", "Projects"])
+    }
+
+    @MainActor
+    func testDoesNothingWhenTheSettingIsOff() async {
+        let office = share()
+        let vpnConnectionService = StubVPNConnectionService()
+        let (monitor, notifier) = makeMonitor(
+            "SettingOff",
+            shares: [office],
+            network: offVPNNetwork(),
+            mountService: StubMountService(mountResult: URL(fileURLWithPath: "/Volumes/Office Files", isDirectory: true)),
+            vpnConnectionService: vpnConnectionService,
+            configure: { settings in
+                settings.updatePreferences { $0.connectVPNOnMountAttempt = false }
+            }
+        )
+
+        XCTAssertTrue(monitor.sharesAwaitingVPNAssistance.isEmpty)
+        await monitor.handleMountAttempt()
+
+        let vpnConnectionNames = await vpnConnectionService.connectionNames
+        XCTAssertTrue(vpnConnectionNames.isEmpty)
+        XCTAssertTrue(notifier.vpnAssistedMounts.isEmpty)
+    }
+
+    @MainActor
+    func testDoesNothingWhenAVPNIsAlreadyConnected() async {
+        let office = share()
+        let vpnConnectionService = StubVPNConnectionService()
+        let (monitor, _) = makeMonitor(
+            "AlreadyOnVPN",
+            shares: [office],
+            network: StubNetworkReachability(
+                isOnline: true,
+                isReachable: true,
+                isVPNConnected: true,
+                activeVPNNames: ["Work VPN"]
+            ),
+            mountService: StubMountService(),
+            vpnConnectionService: vpnConnectionService
+        )
+
+        XCTAssertTrue(monitor.sharesAwaitingVPNAssistance.isEmpty)
+        await monitor.handleMountAttempt()
+
+        let vpnConnectionNames = await vpnConnectionService.connectionNames
+        XCTAssertTrue(vpnConnectionNames.isEmpty)
+    }
+
+    @MainActor
+    func testIgnoresSharesThatDoNotUseAutomaticVPNConnection() async {
+        let keepConnected = share("Media", mode: .keepConnected)
+        let manualVPN = share(
+            "Archive",
+            rules: ShareRules(vpnRuleEnabled: true, vpnName: "Work VPN", connectVPNAutomatically: false)
+        )
+        let noVPN = share("Scratch", rules: ShareRules())
+        let (monitor, _) = makeMonitor(
+            "IgnoresOthers",
+            shares: [keepConnected, manualVPN, noVPN],
+            network: offVPNNetwork(),
+            mountService: StubMountService()
+        )
+
+        XCTAssertTrue(monitor.sharesAwaitingVPNAssistance.isEmpty)
+    }
+
+    @MainActor
+    func testMountsDirectlyWithoutAVPNNotificationWhenTheServerAnswers() async {
+        let office = share()
+        let vpnConnectionService = StubVPNConnectionService()
+        let (monitor, notifier) = makeMonitor(
+            "ServerAnswersDirectly",
+            shares: [office],
+            network: StubNetworkReachability(isOnline: true, isReachable: true),
+            mountService: StubMountService(mountResult: URL(fileURLWithPath: "/Volumes/Office Files", isDirectory: true)),
+            vpnConnectionService: vpnConnectionService
+        )
+
+        await monitor.handleMountAttempt()
+
+        let vpnConnectionNames = await vpnConnectionService.connectionNames
+        XCTAssertTrue(vpnConnectionNames.isEmpty)
+        XCTAssertEqual(monitor.status(for: office), .connected)
+        XCTAssertTrue(notifier.vpnAssistedMounts.isEmpty)
+        // With no VPN involved, the ordinary notification still goes out.
+        XCTAssertTrue(notifier.transitions.contains { $0.current == .connected })
+    }
+
+    func testNotificationCopyNamesTheVPNAndTheShares() {
+        let one = NotificationService.vpnAssistedMessage(for: [share("Office Files")], vpnName: "Work VPN")
+        XCTAssertEqual(one?.title, "Office Files is ready")
+        XCTAssertEqual(one?.body, "Otter connected “Work VPN” and mounted it for you.")
+
+        let three = NotificationService.vpnAssistedMessage(
+            for: [share("A"), share("B"), share("C")],
+            vpnName: nil
+        )
+        XCTAssertEqual(three?.title, "3 shares are ready")
+        XCTAssertEqual(three?.body, "Otter connected your VPN and mounted A, B and C.")
+
+        let five = NotificationService.vpnAssistedMessage(
+            for: ["A", "B", "C", "D", "E"].map { share($0) },
+            vpnName: "Work VPN"
+        )
+        XCTAssertEqual(five?.body, "Otter connected “Work VPN” and mounted A, B and 3 more.")
+        XCTAssertNil(NotificationService.vpnAssistedMessage(for: [], vpnName: "Work VPN"))
     }
 }
 

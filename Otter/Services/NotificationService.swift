@@ -33,6 +33,7 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
         static let openInFinder = "share.open"
         static let pause = "share.pause"
         static let category = "share-status"
+        static let readyCategory = "share-ready"
         static let shareIDKey = "shareID"
 
         static let manageDetected = "detected.manage"
@@ -141,6 +142,56 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
                 problemNotificationTracker.problemDeliveryFailed(for: share.id)
             }
         }
+    }
+
+    // Reports shares Otter mounted after starting their VPN because the user
+    // tried to open one while it was out of reach. One notification covers the
+    // whole attempt, so a handful of shares does not mean a handful of banners.
+    func notifyVPNAssistedMount(shares: [NetworkShare], vpnName: String?) {
+        guard settings.preferences.notificationsEnabled,
+              settings.preferences.notifyConnectionChanges,
+              let message = Self.vpnAssistedMessage(for: shares, vpnName: vpnName)
+        else { return }
+
+        Task {
+            await deliverVPNAssistedMount(message)
+        }
+    }
+
+    nonisolated static func vpnAssistedMessage(
+        for shares: [NetworkShare],
+        vpnName: String?
+    ) -> (title: String, body: String, shareID: NetworkShare.ID, isSingleShare: Bool)? {
+        guard let first = shares.first else { return nil }
+
+        let connected = vpnName.map { "connected “\($0)”" } ?? "connected your VPN"
+
+        if shares.count == 1 {
+            return (
+                title: "\(first.displayName) is ready",
+                body: "Otter \(connected) and mounted it for you.",
+                shareID: first.id,
+                isSingleShare: true
+            )
+        }
+
+        let names = shares.map(\.displayName)
+        let listed: String
+        switch names.count {
+        case 2:
+            listed = "\(names[0]) and \(names[1])"
+        case 3:
+            listed = "\(names[0]), \(names[1]) and \(names[2])"
+        default:
+            listed = "\(names[0]), \(names[1]) and \(names.count - 2) more"
+        }
+
+        return (
+            title: "\(names.count) shares are ready",
+            body: "Otter \(connected) and mounted \(listed).",
+            shareID: first.id,
+            isSingleShare: false
+        )
     }
 
     // Offers the user a newly mounted share that Otter isn't managing yet. The
@@ -255,6 +306,36 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
         }
     }
 
+    private func deliverVPNAssistedMount(
+        _ message: (title: String, body: String, shareID: NetworkShare.ID, isSingleShare: Bool)
+    ) async {
+        guard await hasPermissionToNotify() else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = message.title
+        content.body = message.body
+        content.threadIdentifier = "share.\(message.shareID.uuidString)"
+        content.userInfo[ActionIdentifier.shareIDKey] = message.shareID.uuidString
+
+        // Open in Finder acts on one share, so it is only offered when the
+        // notification is about one.
+        if message.isSingleShare {
+            content.categoryIdentifier = ActionIdentifier.readyCategory
+        }
+
+        if settings.preferences.notificationSoundsEnabled {
+            content.sound = .default
+        }
+
+        let request = UNNotificationRequest(
+            identifier: "vpn-assisted.\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+
+        try? await center.add(request)
+    }
+
     private func deliverDetectedShare(_ suggestion: MountedShareSuggestion) async {
         guard await hasPermissionToNotify() else { return }
 
@@ -308,6 +389,13 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
             options: []
         )
 
+        let readyCategory = UNNotificationCategory(
+            identifier: ActionIdentifier.readyCategory,
+            actions: [open],
+            intentIdentifiers: [],
+            options: []
+        )
+
         let manageDetected = UNNotificationAction(
             identifier: ActionIdentifier.manageDetected,
             title: "Keep This Mounted",
@@ -325,7 +413,7 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
             options: []
         )
 
-        center.setNotificationCategories([category, detectedCategory])
+        center.setNotificationCategories([category, readyCategory, detectedCategory])
     }
 
     private func hasPermissionToNotify() async -> Bool {
