@@ -19,6 +19,15 @@ enum AppRuntime {
     }
 }
 
+/// Presentation data used only by the Debug screenshot fixture. Keeping the
+/// value type outside of the fixture lets the release build keep the same
+/// view-facing API while always returning `nil`.
+struct ScreenshotDemoReliability {
+    let summary: ShareReliabilitySummary
+    let problems: [Int]
+    let latency: [DailyLatency?]
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     static let sharesWindowID = "shares"
@@ -87,7 +96,7 @@ final class AppModel: ObservableObject {
 #endif
     }
 
-    func screenshotDemoReliability(for shareID: NetworkShare.ID) -> ScreenshotDemo.Reliability? {
+    func screenshotDemoReliability(for shareID: NetworkShare.ID) -> ScreenshotDemoReliability? {
 #if DEBUG
         guard isScreenshotDemoEnabled else { return nil }
         return ScreenshotDemo.reliability(for: shareID)
@@ -525,13 +534,7 @@ enum ScreenshotDemo {
     }
 
     /// A week of reliability data, oldest day first, for the detail view's strip.
-    struct Reliability {
-        let summary: ShareReliabilitySummary
-        let problems: [Int]
-        let latency: [DailyLatency?]
-    }
-
-    static func reliability(for shareID: NetworkShare.ID) -> Reliability? {
+    static func reliability(for shareID: NetworkShare.ID) -> ScreenshotDemoReliability? {
         guard shares.contains(where: { $0.id == shareID }) else { return nil }
 
         let calendar = Calendar.current
@@ -568,7 +571,7 @@ enum ScreenshotDemo {
         }
 
         let drops = problems.reduce(0, +)
-        return Reliability(
+        return ScreenshotDemoReliability(
             summary: ShareReliabilitySummary(
                 connectionDrops: drops,
                 failures: 0,

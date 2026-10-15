@@ -79,6 +79,9 @@ Run the tests with:
 xcodebuild test -project Otter.xcodeproj -scheme Otter -destination 'platform=macOS'
 ```
 
+For the full source and product checks before a ShipHook release, see the
+[release-readiness checklist](docs/release-readiness.md).
+
 ## Command line
 
 The built app contains a local automation command at `Otter.app/Contents/MacOS/otterctl`. It talks only to the running Otter app through macOS distributed notifications; it does not open a network port.
@@ -94,3 +97,6 @@ OTTERCTL="/Applications/Otter.app/Contents/MacOS/otterctl"
 ## License
 
 Otter is open source under the [MIT License](LICENSE). You're free to use, modify, and redistribute it — just keep the copyright notice, which credits the original app.
+
+For help, privacy information, or a security report, see [SUPPORT.md](SUPPORT.md),
+[PRIVACY.md](PRIVACY.md), and [SECURITY.md](SECURITY.md).

@@ -1,0 +1,41 @@
+name: Validate Otter
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    name: Test and build Release
+    # Otter requires Xcode 26 or newer; this image provides the matching
+    # toolchain and can cross-compile the universal app.
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Run the test suite
+        run: >-
+          xcodebuild test
+          -project Otter.xcodeproj
+          -scheme Otter
+          -destination 'platform=macOS'
+          CODE_SIGNING_ALLOWED=NO
+
+      # Tests use the Debug configuration. A separate Release build prevents
+      # Debug-only fixtures or compiler settings from breaking a ShipHook run.
+      - name: Build the distributable configuration
+        run: >-
+          xcodebuild build
+          -project Otter.xcodeproj
+          -scheme Otter
+          -configuration Release
+          -destination 'generic/platform=macOS'
+          ARCHS='arm64 x86_64'
+          CODE_SIGNING_ALLOWED=NO
