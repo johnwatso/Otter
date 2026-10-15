@@ -13,17 +13,15 @@ struct OnboardingView: View {
 
     /// Called with the connected share when the user finishes, so the main
     /// window can select it.
-    var onFinish: (NetworkShare?) -> Void = { _ in }
+    private let onFinish: (NetworkShare?) -> Void
 
-    private enum Step: Int {
-        case welcome, preferences, connect, success
-    }
+    private typealias Step = OnboardingStep
 
     private enum ConnectPanel {
         case discover, manual
     }
 
-    @State private var step = Step.welcome
+    @State private var step: Step
     @State private var panel: ConnectPanel?
     @State private var busyID: String?
     @State private var mountedShares: [MountedShareSuggestion] = []
@@ -32,6 +30,11 @@ struct OnboardingView: View {
     @FocusState private var addressFocused: Bool
     @State private var connectionMessage: String?
     @State private var connectedShareID: NetworkShare.ID?
+
+    init(initialStep: OnboardingStep = .welcome, onFinish: @escaping (NetworkShare?) -> Void = { _ in }) {
+        _step = State(initialValue: initialStep)
+        self.onFinish = onFinish
+    }
 
     private var isConnecting: Bool { busyID != nil }
 
@@ -350,7 +353,7 @@ struct OnboardingView: View {
     // MARK: Chrome
 
     private var progressDots: some View {
-        let current = min(step.rawValue, Step.connect.rawValue)
+        let current = step.progressIndex
         return HStack(spacing: 8) {
             ForEach(0..<3, id: \.self) { index in
                 Circle()
@@ -447,18 +450,7 @@ struct OnboardingView: View {
 
     /// The address as a saved-share location, so it can go through the same
     /// macOS sign-in as a Keychain entry.
-    private var parsedAddress: SavedSMBShare? {
-        var text = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return nil }
-        if text.hasPrefix("//") { text = "smb:" + text }
-        if !text.contains("://") { text = "smb://" + text }
-        guard let components = URLComponents(string: text),
-              components.scheme?.lowercased() == "smb",
-              let host = components.host,
-              components.user == nil, components.password == nil
-        else { return nil }
-        return SavedSMBShare(host: host, path: components.path, port: components.port)
-    }
+    private var parsedAddress: SavedSMBShare? { OnboardingAddress.parse(address) }
 
     private func connectToAddress() {
         guard let target = parsedAddress else {
@@ -553,6 +545,33 @@ struct OnboardingView: View {
                 }
             }
         )
+    }
+}
+
+// MARK: - Flow helpers
+
+enum OnboardingStep: Int, CaseIterable {
+    case welcome, preferences, connect, success
+
+    /// The success screen keeps the last progress dot lit.
+    var progressIndex: Int { min(rawValue, Self.connect.rawValue) }
+}
+
+enum OnboardingAddress {
+    /// Reads a typed server address as a saved-share location, so it can go
+    /// through the same macOS sign-in as a Keychain entry. Addresses carrying
+    /// credentials or a non-SMB scheme are rejected.
+    static func parse(_ input: String) -> SavedSMBShare? {
+        var text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        if text.hasPrefix("//") { text = "smb:" + text }
+        if !text.contains("://") { text = "smb://" + text }
+        guard let components = URLComponents(string: text),
+              components.scheme?.lowercased() == "smb",
+              let host = components.host,
+              components.user == nil, components.password == nil
+        else { return nil }
+        return SavedSMBShare(host: host, path: components.path, port: components.port)
     }
 }
 

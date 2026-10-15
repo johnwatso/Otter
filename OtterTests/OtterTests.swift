@@ -5091,3 +5091,108 @@ final class ShareLatencyHistoryTests: XCTestCase {
         XCTAssertEqual(history.recent(for: share.id).last??.sampleCount, 1)
     }
 }
+
+
+final class OnboardingFlowTests: XCTestCase {
+    func testProgressDotsStayOnLastStageForSuccess() {
+        XCTAssertEqual(OnboardingStep.allCases.map(\.progressIndex), [0, 1, 2, 2])
+    }
+
+    func testAddressParsingAcceptsCommonSMBForms() throws {
+        let url = try XCTUnwrap(OnboardingAddress.parse("smb://nas.local/Media"))
+        XCTAssertEqual(url.host, "nas.local")
+        XCTAssertEqual(url.path, "Media")
+        XCTAssertNil(url.port)
+
+        let slashes = try XCTUnwrap(OnboardingAddress.parse("//nas.local/Media"))
+        XCTAssertEqual(slashes.host, "nas.local")
+        XCTAssertEqual(slashes.path, "Media")
+
+        let bare = try XCTUnwrap(OnboardingAddress.parse("  nas.local  "))
+        XCTAssertEqual(bare.host, "nas.local")
+        XCTAssertFalse(bare.hasSharePath)
+
+        let withPort = try XCTUnwrap(OnboardingAddress.parse("smb://nas.local:8445/Media"))
+        XCTAssertEqual(withPort.port, 8445)
+    }
+
+    func testAddressParsingRejectsInvalidInput() {
+        XCTAssertNil(OnboardingAddress.parse(""))
+        XCTAssertNil(OnboardingAddress.parse("   "))
+        XCTAssertNil(OnboardingAddress.parse("smb://user:secret@nas.local/Media"))
+        XCTAssertNil(OnboardingAddress.parse("https://nas.local/Media"))
+        XCTAssertNil(OnboardingAddress.parse("smb:///Media"))
+    }
+
+    func testAddressParsingBuildsConnectionURL() throws {
+        let saved = try XCTUnwrap(OnboardingAddress.parse("nas.local/Media"))
+        XCTAssertEqual(saved.connectionURL?.absoluteString, "smb://nas.local/Media")
+    }
+}
+
+@MainActor
+final class OnboardingRenderTests: XCTestCase {
+    private let size = NSSize(width: 560, height: 500)
+    private var windows: [NSWindow] = []
+
+    override func tearDown() {
+        windows.forEach { $0.close() }
+        windows.removeAll()
+        super.tearDown()
+    }
+
+    private func render(_ step: OnboardingStep, dark: Bool = false) -> (view: NSView, bitmap: NSBitmapImageRep) {
+        let appModel = AppModel(isRunningTests: true)
+        let root = OnboardingView(initialStep: step)
+            .environmentObject(appModel)
+            .environmentObject(appModel.settings)
+            .environmentObject(appModel.monitor)
+            .environmentObject(appModel.discoveryService)
+            .environmentObject(appModel.networkService)
+            .environmentObject(appModel.loginItemService)
+            .environmentObject(appModel.notificationService)
+
+        // SwiftUI only builds and draws its content inside a window.
+        let host = NSHostingView(rootView: root)
+        host.frame = NSRect(origin: .zero, size: size)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        window.contentView = host
+        window.isReleasedWhenClosed = false
+        windows.append(window)
+        window.orderFrontRegardless()
+        // Let SwiftUI settle its first update before drawing.
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        host.layoutSubtreeIfNeeded()
+        host.displayIfNeeded()
+
+        let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        return (host, bitmap)
+    }
+
+    private func isBlank(_ bitmap: NSBitmapImageRep) -> Bool {
+        guard let first = bitmap.colorAt(x: 0, y: 0) else { return true }
+        for x in stride(from: 0, to: bitmap.pixelsWide, by: 7) {
+            for y in stride(from: 0, to: bitmap.pixelsHigh, by: 7) where bitmap.colorAt(x: x, y: y) != first {
+                return false
+            }
+        }
+        return true
+    }
+
+    func testEveryStepRendersContentInLightAndDark() {
+        for step in OnboardingStep.allCases {
+            for dark in [false, true] {
+                XCTAssertFalse(isBlank(render(step, dark: dark).bitmap), "\(step) dark=\(dark) rendered blank")
+            }
+        }
+    }
+
+    func testBackgroundFollowsAppearance() throws {
+        let light = try XCTUnwrap(render(.welcome, dark: false).bitmap.colorAt(x: 4, y: 4)?.usingColorSpace(.deviceRGB))
+        let dark = try XCTUnwrap(render(.welcome, dark: true).bitmap.colorAt(x: 4, y: 4)?.usingColorSpace(.deviceRGB))
+        XCTAssertGreaterThan(light.brightnessComponent, 0.8)
+        XCTAssertLessThan(dark.brightnessComponent, 0.3)
+    }
+}
