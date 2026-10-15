@@ -4,7 +4,6 @@
   color-scheme: dark;
   --bg: #0b1018;
   --panel: #111823;
-  --panel-hover: #151e2b;
   --line: rgba(255, 255, 255, 0.09);
   --line-strong: rgba(255, 255, 255, 0.16);
   --text: #f2f6fb;
@@ -31,7 +30,6 @@
   color-scheme: light;
   --bg: #f6f9fd;
   --panel: #ffffff;
-  --panel-hover: #fbfdff;
   --line: rgba(15, 30, 55, 0.1);
   --line-strong: rgba(15, 30, 55, 0.18);
   --text: #0e1a2b;
@@ -415,12 +413,6 @@ h1 > span,
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--panel);
-  transition: border-color 0.2s, background 0.2s;
-}
-
-.feature-card:hover {
-  border-color: var(--accent-line);
-  background: var(--panel-hover);
 }
 
 .feature-icon {
