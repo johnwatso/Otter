@@ -43,6 +43,13 @@ struct ShareDetailView<Actions: View>: View {
                 DetailCard("Connection Details") {
                     DetailRow(label: "Address", value: currentShare.host ?? "Unknown", copyValue: currentShare.host)
                     DetailRow(label: "Protocol", value: currentShare.connectionProtocol?.title ?? "Unknown")
+                    if !currentShare.orderedCachedIPAddresses.isEmpty {
+                        DetailRow(
+                            label: "Fallback",
+                            value: currentShare.orderedCachedIPAddresses.joined(separator: ", "),
+                            copyValue: currentShare.orderedCachedIPAddresses.first
+                        )
+                    }
                     DetailRow(label: "Mount point", value: currentShare.mountPath, copyValue: currentShare.mountPath)
                     DetailStatusRow(
                         label: "Credentials",

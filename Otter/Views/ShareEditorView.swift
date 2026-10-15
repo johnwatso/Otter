@@ -23,7 +23,6 @@ struct ShareEditorView: View {
     @State private var isDiscoveringWakeOnLANSettings = false
     @State private var wakeOnLANDiscoveryMessage: String?
     @State private var stage: EditorStage
-    @State private var isShowingAddressing = false
     @State private var isShowingSavedConnectionHelp = false
     @FocusState private var focusedField: ValidationField?
 
@@ -507,6 +506,12 @@ struct ShareEditorView: View {
                         .id(ValidationField.address)
                     validationNotice(for: .address)
 
+                    Picker("Protocol", selection: protocolSelection) {
+                        ForEach(NetworkShareProtocol.allCases, id: \.self) { protocolKind in
+                            Text(protocolKind.title).tag(protocolKind)
+                        }
+                    }
+
                     if isEditing {
                         Button {
                             chooseMountedShare()
@@ -572,18 +577,6 @@ struct ShareEditorView: View {
                     isOn: $draft.healthCheck.isEnabled
                 )
                 healthCheckSettings
-
-                if appliesToShareCount == nil {
-                    DisclosureGroup(isExpanded: $isShowingAddressing) {
-                        addressingSettings
-                    } label: {
-                        BehaviourRowLabel(
-                            symbol: "network",
-                            title: "Protocol & addressing",
-                            subtitle: "Protocol, IP version and fallback addresses."
-                        )
-                    }
-                }
             } header: {
                 Text("More Options")
             }
@@ -591,36 +584,6 @@ struct ShareEditorView: View {
             if isEditing && appliesToShareCount == nil {
                 diagnosticsSections
             }
-        }
-    }
-
-    @ViewBuilder
-    private var addressingSettings: some View {
-        Picker("Protocol", selection: protocolSelection) {
-            ForEach(NetworkShareProtocol.allCases, id: \.self) { protocolKind in
-                Text(protocolKind.title).tag(protocolKind)
-            }
-        }
-
-        Toggle("Prefer IPv4", isOn: $draft.prefersIPv4)
-        Text("Otter caches both IPv4 and IPv6 addresses and tries the preferred family first. If it is unavailable, Otter automatically tries the other family.")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-
-        // Learned fallbacks are reference material, not something to act on.
-        ForEach(draft.orderedCachedIPAddresses, id: \.self) { address in
-            LabeledContent(
-                NetworkShare.isIPv4Address(address) ? "IPv4 fallback" : "IPv6 fallback",
-                value: fallbackURLString(for: address) ?? address
-            )
-        }
-
-        if !draft.orderedCachedIPAddresses.isEmpty,
-           let host = hostFromURL,
-           !NetworkShare.isIPAddress(host) {
-            Text("Otter learns these while you are on the same network and tries them when the hostname does not resolve. Stable addresses improve fallback reliability.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -955,21 +918,6 @@ struct ShareEditorView: View {
 
     private var isEditing: Bool {
         sourceShare != nil
-    }
-
-    private var hostFromURL: String? {
-        URL(string: draft.urlString.trimmingCharacters(in: .whitespacesAndNewlines))?.host(percentEncoded: false)
-    }
-
-    private func fallbackURLString(for cachedIP: String) -> String? {
-        guard let url = URL(string: draft.urlString.trimmingCharacters(in: .whitespacesAndNewlines)),
-              let host = url.host(percentEncoded: false),
-              !NetworkShare.isIPAddress(host)
-        else { return nil }
-
-        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        components?.host = NetworkShare.urlComponentsHost(forIPAddress: cachedIP)
-        return components?.string
     }
 
     private func resetDraftIfNeeded() {
