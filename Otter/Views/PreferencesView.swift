@@ -76,6 +76,12 @@ struct ShareManagementView: View {
         NetworkShareServerGroup.make(from: shares, serverNames: settings.preferences.serverNames)
     }
 
+    /// A server with several shares always gets a heading; a lone share only
+    /// does when the user asks to always see the server name.
+    private func showsServerHeading(_ group: NetworkShareServerGroup) -> Bool {
+        group.isGrouped || settings.preferences.alwaysShowServerName
+    }
+
     private var selectionValidationSignature: [String] {
         shareGroups.map { group in
             "\(group.id)|\(group.shares.map { $0.id.uuidString }.joined(separator: ","))"
@@ -299,7 +305,7 @@ struct ShareManagementView: View {
     private var sidebar: some View {
         List(selection: $selection) {
             ForEach(shareGroups) { group in
-                if group.isGrouped {
+                if showsServerHeading(group) {
                     DisclosureGroup(isExpanded: expansionBinding(for: group.id)) {
                         ForEach(group.shares) { share in
                             ShareListRow(share: share)
@@ -520,7 +526,7 @@ struct ShareManagementView: View {
 
     private var selectedServerGroup: NetworkShareServerGroup? {
         guard case let .server(id) = selection else { return nil }
-        return shareGroups.first { $0.id == id && $0.isGrouped }
+        return shareGroups.first { $0.id == id && showsServerHeading($0) }
     }
 
     private var selectedShares: [NetworkShare] {
@@ -663,7 +669,7 @@ struct ShareManagementView: View {
 
     private var defaultSelection: ShareManagementSelection? {
         guard let firstGroup = shareGroups.first else { return nil }
-        if firstGroup.isGrouped {
+        if showsServerHeading(firstGroup) {
             return .server(firstGroup.id)
         }
         return firstGroup.shares.first.map { .share($0.id) }
@@ -675,7 +681,7 @@ struct ShareManagementView: View {
         case let .share(id):
             isValid = shares.contains { $0.id == id }
         case let .server(id):
-            isValid = shareGroups.contains { $0.id == id && $0.isGrouped }
+            isValid = shareGroups.contains { $0.id == id && showsServerHeading($0) }
         case nil:
             isValid = false
         }
@@ -879,7 +885,7 @@ private struct GeneralPreferencesView: View {
                 SettingsSecondaryText(settings.preferences.appPresenceMode.detail)
 
                 Toggle("Always show server name", isOn: alwaysShowServerNameBinding)
-                SettingsSecondaryText("In the menu bar, show a server menu even when it contains only one configured share.")
+                SettingsSecondaryText("Show a server heading in the menu bar and share list even when it contains only one share.")
 
                 Toggle("Start at login", isOn: Binding(
                     get: { loginItemService.isEnabled },

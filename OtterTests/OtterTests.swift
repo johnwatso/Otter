@@ -2811,18 +2811,18 @@ final class AppPreferencesTests: XCTestCase {
         let preferences = try JSONDecoder().decode(AppPreferences.self, from: Data(json.utf8))
         XCTAssertEqual(preferences.autoUpdateInstallPolicy, .whenIdle)
         XCTAssertEqual(preferences.autoUpdateInstallHour, 3)
-        XCTAssertFalse(preferences.alwaysShowServerName)
+        XCTAssertTrue(preferences.alwaysShowServerName)
     }
 
     func testAlwaysShowServerNamePreferenceRoundTrips() throws {
         var preferences = AppPreferences()
-        XCTAssertFalse(preferences.alwaysShowServerName)
+        XCTAssertTrue(preferences.alwaysShowServerName)
 
-        preferences.alwaysShowServerName = true
+        preferences.alwaysShowServerName = false
         let data = try JSONEncoder().encode(preferences)
         let decoded = try JSONDecoder().decode(AppPreferences.self, from: data)
 
-        XCTAssertTrue(decoded.alwaysShowServerName)
+        XCTAssertFalse(decoded.alwaysShowServerName)
     }
 
     func testPauseStateExpiresAtItsResumeDate() {

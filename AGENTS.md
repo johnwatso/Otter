@@ -29,4 +29,5 @@ shows an out-of-date UI. Onboarding and other screens are not shown on the site.
    renders greyed out), then capture it with its window ID:
    `screencapture -l <windowID> out.png`.
 5. Replace both PNGs in `website/assets/`, and keep the `width`/`height`
-   attributes on the `<img>` tags in `website/index.html` matching the new size.
+   attributes on the `<img>` tags in `website/index.html` matching the image's
+   size in points (a Retina capture is 2x, e.g. 1584x1664 px is 792x832).

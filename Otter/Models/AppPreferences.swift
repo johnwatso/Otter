@@ -142,9 +142,9 @@ struct AppPreferences: Codable, Equatable {
 
     var fallbackCheckInterval: TimeInterval = Self.defaultFallbackCheckInterval
     var appPresenceMode: AppPresenceMode = .dockAndMenuBar
-    /// Keep the server level visible in the menu bar even when a server has
-    /// only one configured share.
-    var alwaysShowServerName: Bool = false
+    /// Keep the server level visible, in the menu bar and the share list, even
+    /// when a server has only one configured share.
+    var alwaysShowServerName: Bool = true
     var notificationsEnabled: Bool = true
     var notifyConnectionChanges: Bool = true
     var notifyProblems: Bool = true
@@ -166,7 +166,7 @@ struct AppPreferences: Codable, Equatable {
     init(
         fallbackCheckInterval: TimeInterval = Self.defaultFallbackCheckInterval,
         appPresenceMode: AppPresenceMode = .dockAndMenuBar,
-        alwaysShowServerName: Bool = false,
+        alwaysShowServerName: Bool = true,
         notificationsEnabled: Bool = true,
         notifyConnectionChanges: Bool = true,
         notifyProblems: Bool = true,
@@ -224,7 +224,7 @@ struct AppPreferences: Codable, Equatable {
             let showDockIconWhenPreferencesOpen = try container.decodeIfPresent(Bool.self, forKey: .showDockIconWhenPreferencesOpen) ?? true
             self.appPresenceMode = showDockIconWhenPreferencesOpen ? .dockAndMenuBar : .menuBarOnly
         }
-        alwaysShowServerName = try container.decodeIfPresent(Bool.self, forKey: .alwaysShowServerName) ?? false
+        alwaysShowServerName = try container.decodeIfPresent(Bool.self, forKey: .alwaysShowServerName) ?? true
         notificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true
         notifyConnectionChanges = try container.decodeIfPresent(Bool.self, forKey: .notifyConnectionChanges) ?? true
         notifyProblems = try container.decodeIfPresent(Bool.self, forKey: .notifyProblems) ?? true
