@@ -212,10 +212,9 @@ struct ShareManagementView: View {
             ConnectionDoctorView(share: share)
         }
         .sheet(isPresented: $isShowingOnboarding) {
-            OnboardingView {
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 250_000_000)
-                    appModel.requestNewShare()
+            OnboardingView { share in
+                if let share {
+                    selection = .share(share.id)
                 }
             }
         }
@@ -404,11 +403,15 @@ struct ShareManagementView: View {
         let isServer = selectedServerGroup != nil
 
         if areAllSelectedSharesConnected {
-            Button(action: showSelectedSharesInFinder) {
-                Label(isServer ? "Open in Finder" : "Open in Finder", systemImage: "folder")
+            // A server's shares each have their own Open button, so the
+            // server header doesn't repeat it.
+            if !isServer {
+                Button(action: showSelectedSharesInFinder) {
+                    Label("Open in Finder", systemImage: "folder")
+                }
+                .tahoePrimaryActionButton()
+                .help("Show in Finder")
             }
-            .tahoePrimaryActionButton()
-            .help(isServer ? "Show the mounted shares in Finder" : "Show in Finder")
         } else {
             Button {
                 Task { await mountSelectedShares() }
