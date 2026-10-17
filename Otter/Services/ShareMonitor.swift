@@ -51,6 +51,7 @@ final class ShareMonitor: ObservableObject {
     private let notificationService: any ShareNotificationProviding
     private let eventLog: ShareEventLog
     private let latencyHistory: ShareLatencyHistory?
+    private let latencyProbe: @Sendable (URL) async -> Double?
     private let defaults: UserDefaults
     private let now: () -> Date
     private var cancellables = Set<AnyCancellable>()
@@ -98,6 +99,7 @@ final class ShareMonitor: ObservableObject {
         notificationService: any ShareNotificationProviding,
         eventLog: ShareEventLog,
         latencyHistory: ShareLatencyHistory? = nil,
+        latencyProbe: @escaping @Sendable (URL) async -> Double? = { await TCPLatencyProbe.measure(url: $0) },
         defaults: UserDefaults = .standard,
         now: @escaping () -> Date = Date.init
     ) {
@@ -110,6 +112,7 @@ final class ShareMonitor: ObservableObject {
         self.notificationService = notificationService
         self.eventLog = eventLog
         self.latencyHistory = latencyHistory
+        self.latencyProbe = latencyProbe
         self.defaults = defaults
         self.now = now
         persistedConnectionTimes = Self.loadPersistedConnectionTimes(from: defaults)
@@ -738,16 +741,15 @@ final class ShareMonitor: ObservableObject {
         if isMounted {
             if let mountedURL {
                 if reason == .timer && (settings.preferences.recoverUnresponsiveMounts || share.healthCheck.isEnabled) {
-                    let checkStart = ContinuousClock.now
                     let health = await mountHealthService.checkPolicy(
                         at: mountedURL,
                         policy: share.healthCheck,
                         timeout: 3
                     )
-                    if health == .healthy {
-                        let elapsed = ContinuousClock.now - checkStart
-                        let milliseconds = Double(elapsed.components.seconds) * 1000
-                            + Double(elapsed.components.attoseconds) / 1e15
+                    // Timing the health check itself would mostly measure launching
+                    // its child process, so the round trip is timed separately.
+                    if health == .healthy, let url = share.url,
+                       let milliseconds = await latencyProbe(url) {
                         latencyHistory?.record(milliseconds: milliseconds, for: share.id, at: now())
                     }
                     if health == .unresponsive {

@@ -163,10 +163,8 @@ struct DailyLatency: Codable, Equatable {
     }
 }
 
-/// How long the periodic health check took to read each mounted volume,
-/// rolled up per day. Otter already runs that check every minute or so, so
-/// this costs nothing extra on the network. It is the time to read the volume,
-/// not a ping: it shows whether the share feels slow, which is what matters.
+/// Round-trip time to each share's server (a TCP connect, comparable to
+/// `ping`), sampled alongside the periodic health check and rolled up per day.
 @MainActor
 final class ShareLatencyHistory: ObservableObject {
     @Published private(set) var history: [NetworkShare.ID: [DailyLatency]]

@@ -5407,12 +5407,14 @@ final class ShareLatencyHistoryTests: XCTestCase {
             notificationService: RecordingNotificationService(),
             eventLog: ShareEventLog(defaults: defaults),
             latencyHistory: history,
+            latencyProbe: { _ in 0.4 },
             defaults: defaults
         )
 
         await monitor.evaluate(share, reason: .timer)
 
         XCTAssertEqual(history.recent(for: share.id).last??.sampleCount, 1)
+        XCTAssertEqual(history.recent(for: share.id).last??.averageMilliseconds, 0.4)
     }
 }
 
