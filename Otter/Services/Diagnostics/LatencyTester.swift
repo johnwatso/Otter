@@ -37,11 +37,12 @@ enum TCPLatencyProbe {
             address = resolved
         }
 
+        let target = address
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
                 var best: Double?
                 for _ in 0..<3 {
-                    guard let sample = connectTime(address: address, port: port, timeout: timeout) else { break }
+                    guard let sample = connectTime(address: target, port: port, timeout: timeout) else { break }
                     best = min(best ?? sample, sample)
                 }
                 continuation.resume(returning: best)

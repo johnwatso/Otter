@@ -314,7 +314,7 @@ struct NASDiagnosticsView: View {
                         Text(share.displayName)
                             .font(.subheadline.weight(isSelected ? .semibold : .regular))
                         Spacer()
-                        if model.isBusy { ProgressView().controlSize(.mini) }
+                        if model.isBusy { ProgressView().controlSize(.mini).accessibilityLabel("Checking") }
                         Text(model.running ? "Checking…" : (model.result?.health.state.rawValue ?? "Not checked"))
                             .font(.subheadline)
                             .foregroundStyle(model.running ? Color.secondary : (model.result?.health.state.color ?? Color.secondary))
@@ -325,6 +325,8 @@ struct NASDiagnosticsView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
     }
@@ -358,7 +360,7 @@ private struct NASShareDiagnosticsPanel: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack {
-                        if model.running || model.comparing || model.restoring { ProgressView().controlSize(.small) }
+                        if model.running || model.comparing || model.restoring { ProgressView().controlSize(.small).accessibilityLabel("Working") }
                         Text(model.status).font(.subheadline).foregroundStyle(.secondary)
                     }
                     if let result = model.result {
@@ -369,6 +371,7 @@ private struct NASShareDiagnosticsPanel: View {
                                 Label(finding.message, systemImage: finding.severity == .good ? "checkmark.circle" : (finding.severity == .warning ? "exclamationmark.triangle" : "info.circle"))
                                     .foregroundStyle(finding.severity == .warning ? Color.orange : (finding.severity == .good ? Color.green : Color.secondary))
                                     .font(.callout).textSelection(.enabled)
+                                    .accessibilityLabel("\(finding.severity == .good ? "Good" : (finding.severity == .warning ? "Warning" : "Information")): \(finding.message)")
                             }
                             if result.findings.isEmpty {
                                 Text("No obvious issues found in the available measurements.").foregroundStyle(.secondary).font(.callout)
@@ -424,7 +427,7 @@ private struct NASShareDiagnosticsPanel: View {
                         .tahoeSecondaryActionButton()
                         .disabled(busy)
                     }
-                    if let error = model.error { Text(error).foregroundStyle(.orange).textSelection(.enabled) }
+                    if let error = model.error { Text(error).foregroundStyle(Color.warningText).textSelection(.enabled) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }

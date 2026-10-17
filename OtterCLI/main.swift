@@ -2,7 +2,11 @@ import AppKit
 import Darwin
 import Foundation
 
-private enum Otterctl {
+private final class ResponseBox: @unchecked Sendable {
+    var value: String?
+}
+
+enum Otterctl {
     static let requestNotification = Notification.Name("io.github.johnwatso.Otter.command")
     static let responsePrefix = "io.github.johnwatso.Otter.command-response."
     static let appBundleIdentifier = "io.github.johnwatso.Otter"
@@ -47,16 +51,16 @@ private enum Otterctl {
 
         let requestID = UUID().uuidString
         let responseName = Notification.Name(responsePrefix + requestID)
-        var response: String?
+        let responseBox = ResponseBox()
         let center = DistributedNotificationCenter.default()
         let observer = center.addObserver(forName: responseName, object: requestID, queue: .main) { notification in
-            response = notification.userInfo?["message"] as? String
+            responseBox.value = notification.userInfo?["message"] as? String
         }
         defer { center.removeObserver(observer) }
 
         let deadline = Date().addingTimeInterval(20)
         var lastPost = Date.distantPast
-        while Date() < deadline && response == nil {
+        while Date() < deadline && responseBox.value == nil {
             if Date().timeIntervalSince(lastPost) >= 0.5 {
                 center.postNotificationName(
                     requestNotification,
@@ -74,7 +78,7 @@ private enum Otterctl {
             RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         }
 
-        guard let response else {
+        guard let response = responseBox.value else {
             fputs("otterctl: Otter did not respond. Open Otter and try again.\n", stderr)
             return 69
         }

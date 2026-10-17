@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/maxhewett/ShipHook"><img src="https://img.shields.io/badge/publishing-ShipHook-5E5CE6" alt="Published with ShipHook"></a>
   <img src="https://img.shields.io/badge/platform-macOS%2015+-blue" alt="Platform: macOS 15+">
-  <img src="https://img.shields.io/badge/swift-5.0-orange" alt="Swift 5.0">
+  <img src="https://img.shields.io/badge/swift-6-orange" alt="Swift 6">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/status-actively%20maintained-brightgreen" alt="Status: actively maintained">
 </p>

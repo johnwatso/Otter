@@ -34,6 +34,7 @@ struct ConnectionDoctorView: View {
                 if isRunning {
                     ProgressView()
                         .controlSize(.small)
+                        .accessibilityLabel("Checking")
                 }
             }
             .padding(.horizontal, 20)

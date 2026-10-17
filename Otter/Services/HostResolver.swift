@@ -125,7 +125,7 @@ struct SystemHostResolver: HostResolving {
             )
             guard nameInfoStatus == 0 else { continue }
 
-            let addressString = String(cString: hostnameBuffer)
+            let addressString = hostnameBuffer.stringValue
             if current.pointee.ai_family == AF_INET {
                 if !ipv4Addresses.contains(addressString) {
                     ipv4Addresses.append(addressString)
@@ -172,5 +172,12 @@ private final class BonjourResolutionAttempt: @unchecked Sendable {
             self.serviceRef = nil
         }
         continuation.resume(returning: hostname)
+    }
+}
+
+extension Array where Element == CChar {
+    /// The text up to the first NUL, for buffers filled in by C APIs.
+    var stringValue: String {
+        String(decoding: prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 }

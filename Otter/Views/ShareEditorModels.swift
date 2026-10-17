@@ -265,7 +265,9 @@ struct DraftShare {
             registeredSubnets: [],
             vpnRuleEnabled: usesVPNRule,
             vpnName: usesVPNRule ? vpnName : "",
-            connectVPNAutomatically: usesVPNRule && connectVPNAutomatically
+            // Shares that connect on request have no separate switch: using a
+            // VPN there means a mount attempt connects it.
+            connectVPNAutomatically: usesVPNRule && (connectVPNAutomatically || !connectionMode.maintainsConnection)
         )
     }
 

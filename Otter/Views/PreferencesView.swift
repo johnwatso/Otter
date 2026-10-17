@@ -1497,7 +1497,7 @@ private struct UpdatesPreferencesView: View {
                 if !updaterViewModel.isConfigured {
                     Label("This build has no update feed or signing key, so updates are unavailable.", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Color.warningText)
                 }
             } header: {
                 Text("Updates")

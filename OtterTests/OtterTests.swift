@@ -3338,9 +3338,10 @@ final class NewShareDetectionTests: XCTestCase {
 
     // Waits for a debounced scan to land without pinning the test to a fixed
     // deadline. Returns early as soon as the condition holds.
+    @MainActor
     private func poll(
         timeout: TimeInterval = 5,
-        until isSatisfied: () async -> Bool
+        until isSatisfied: @MainActor () async -> Bool
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {

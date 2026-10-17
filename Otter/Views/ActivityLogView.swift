@@ -158,7 +158,7 @@ private struct ActivityLogRow: View {
 
             Text(timeLabel)
                 .font(.subheadline.monospacedDigit())
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)

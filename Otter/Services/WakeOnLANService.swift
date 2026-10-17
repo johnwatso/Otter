@@ -157,7 +157,7 @@ actor WakeOnLANConfigurationDiscoveryService {
             guard inet_ntop(AF_INET, &broadcast, &buffer, socklen_t(buffer.count)) != nil else {
                 return nil
             }
-            return String(cString: buffer)
+            return buffer.stringValue
         }
 
         return nil

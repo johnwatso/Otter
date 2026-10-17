@@ -71,7 +71,7 @@ struct NetworkInterfaceInspector {
                 return getnameinfo(socketAddress, length, &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST)
             }
         }
-        return status == 0 ? String(cString: host) : nil
+        return status == 0 ? host.stringValue : nil
     }
 
     static func activeState(_ text: String) -> Bool? {

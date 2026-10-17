@@ -13,6 +13,7 @@ struct ShareEditorView: View {
     @State private var readinessReport: ConnectionDiagnosticReport?
     @State private var isTestingSetup = false
     @State private var isVerifyingVPN = false
+    @State private var vpnRequestedOnDemand = false
     @State private var vpnVerification: VPNVerificationResult?
     @State private var provisionalShareID = UUID()
     @State private var browsingServerID: DiscoveredSMBServer.ID?
@@ -275,6 +276,24 @@ struct ShareEditorView: View {
         } set: { enabled in
             withAnimation(.easeInOut(duration: 0.22)) {
                 draft.connectionMode = enabled ? .adaptive : .keepConnected
+            }
+            clearRemoteAccessIssuesIfHidden()
+        }
+    }
+
+    /// For the modes that only connect on request, the VPN is optional and
+    /// off until the toggle is turned on. It stays on while a VPN is being
+    /// chosen, before the draft has a name to save.
+    private var usesVPNOnRequest: Binding<Bool> {
+        Binding {
+            draft.usesVPNRule || vpnRequestedOnDemand
+        } set: { enabled in
+            withAnimation(.easeInOut(duration: 0.22)) {
+                vpnRequestedOnDemand = enabled
+                draft.usesVPNRule = enabled
+                    && !draft.vpnName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                // A mount request is the trigger, so the VPN always follows it.
+                if enabled { draft.connectVPNAutomatically = true }
             }
             clearRemoteAccessIssuesIfHidden()
         }
@@ -546,13 +565,20 @@ struct ShareEditorView: View {
                         subtitle: "Connect through your VPN when you're off this network.",
                         isOn: usesVPNWhenAway
                     )
+                } else if draft.showsRemoteAccess {
+                    BehaviourRow(
+                        symbol: "lock.shield",
+                        title: "Connect a VPN when needed",
+                        subtitle: "Any attempt to mount this share will try to connect the VPN automatically.",
+                        isOn: usesVPNOnRequest
+                    )
                 }
             }
 
             // Keep Connected expects the server on the current network, so
             // remote access does not apply to it. The saved configuration is
             // kept — only the controls go away.
-            if draft.showsRemoteAccess {
+            if draft.showsRemoteAccess && (draft.connectionMode == .adaptive || usesVPNOnRequest.wrappedValue) {
                 Section("Remote Access") {
                     vpnConfiguration
                         .id(ValidationField.vpn)
@@ -887,7 +913,7 @@ struct ShareEditorView: View {
             if isAlreadyAdded {
                 Text("Added")
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .accessibilityLabel("Already added")
             } else {
                 Button("Add") {
@@ -978,23 +1004,27 @@ struct ShareEditorView: View {
             if vpnSelection.wrappedValue == .custom {
                 Text("This saved VPN is no longer available. Choose another VPN from System Settings.")
                     .font(.footnote)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Color.warningText)
             } else if vpnSelection.wrappedValue == .unconfigured {
                 Text("Select a VPN to enable this connection location.")
                     .font(.footnote)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Color.warningText)
             } else {
                 Text(vpnRuleDescription)
                     .font(.footnote)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
 
             if vpnSelection.wrappedValue != .unconfigured,
                vpnSelection.wrappedValue != .custom {
-                Toggle("Start VPN automatically", isOn: $draft.connectVPNAutomatically)
-                Text(automaticVPNDescription)
-                    .font(.footnote)
-                    .foregroundStyle(.tertiary)
+                // Only mount-on-request shares have no separate switch: the
+                // "Connect a VPN when needed" toggle already means it.
+                if draft.connectionMode.maintainsConnection {
+                    Toggle("Start VPN automatically", isOn: $draft.connectVPNAutomatically)
+                    Text(automaticVPNDescription)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
 
                 HStack(spacing: 8) {
                     Button {

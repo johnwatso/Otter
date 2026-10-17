@@ -29,25 +29,23 @@ final class OtterCommandService {
             object: nil,
             queue: .main
         ) { [weak self] notification in
+            // Pull out plain strings here: a Notification is not Sendable.
+            let info = notification.userInfo
+            let requestID = info?["requestID"] as? String
+            let command = info?["command"] as? String
+            let shareName = info?["share"] as? String
+            let outputPath = info?["outputPath"] as? String
             Task { @MainActor in
-                self?.handle(notification)
+                self?.handle(requestID: requestID, command: command, shareName: shareName, outputPath: outputPath)
             }
         }
     }
 
-    deinit {
-        if let observer {
-            DistributedNotificationCenter.default().removeObserver(observer)
-        }
-    }
+    // The service lives for the whole run, so there is no teardown to do: a
+    // main-actor property cannot be read from a nonisolated deinit.
 
-    private func handle(_ notification: Notification) {
-        guard let requestID = notification.userInfo?["requestID"] as? String,
-              let command = notification.userInfo?["command"] as? String,
-              !requestID.isEmpty
-        else {
-            return
-        }
+    private func handle(requestID: String?, command: String?, shareName: String?, outputPath: String?) {
+        guard let requestID, let command, !requestID.isEmpty else { return }
 
         if let response = completedResponses[requestID] {
             respond(to: requestID, message: response)
@@ -56,8 +54,6 @@ final class OtterCommandService {
 
         guard inFlightRequestIDs.insert(requestID).inserted else { return }
 
-        let shareName = notification.userInfo?["share"] as? String
-        let outputPath = notification.userInfo?["outputPath"] as? String
 
         Task { @MainActor in
             let response = await execute(command: command, shareName: shareName, outputPath: outputPath)

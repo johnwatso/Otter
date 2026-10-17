@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		BEEF00000000000000000A02 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = BEEF00000000000000000A01 /* PrivacyInfo.xcprivacy */; };
 		1A2B3C4D5E6F700100000001 /* OtterApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000101 /* OtterApp.swift */; };
 		1A2B3C4D5E6F700100000002 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000102 /* AppModel.swift */; };
 		1A2B3C4D5E6F700100000003 /* NetworkShare.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700100000103 /* NetworkShare.swift */; };
@@ -85,6 +86,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		BEEF00000000000000000A01 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700100000020 /* Otter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Otter.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A2B3C4D5E6F700100000021 /* otterctl */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = otterctl; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A2B3C4D5E6F700100000100 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -190,6 +192,7 @@
 			isa = PBXGroup;
 			children = (
 				1A2B3C4D5E6F700100000100 /* Info.plist */,
+				BEEF00000000000000000A01 /* PrivacyInfo.xcprivacy */,
 				1A2B3C4D5E6F70010000010E /* Assets.xcassets */,
 				1A2B3C4D5E6F700100000042 /* App */,
 				1A2B3C4D5E6F700100000043 /* Models */,
@@ -406,6 +409,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1A2B3C4D5E6F70010000000E /* Assets.xcassets in Resources */,
+				BEEF00000000000000000A02 /* PrivacyInfo.xcprivacy in Resources */,
 				1A2B3C4D5E6F70010000000F /* Otter.icon in Resources */,
 				1A2B3C4D5E6F70010000001D /* website/assets/otter-icon-light.png in Resources */,
 				1A2B3C4D5E6F70010000001E /* website/assets/otter-icon-dark.png in Resources */,
@@ -640,7 +644,7 @@
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
@@ -669,7 +673,7 @@
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
 		};
@@ -682,7 +686,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
@@ -695,7 +699,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
 		};
@@ -712,7 +716,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Otter.app/Contents/MacOS/Otter";
 			};
 			name = Debug;
@@ -730,7 +734,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Otter.app/Contents/MacOS/Otter";
 			};
 			name = Release;

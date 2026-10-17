@@ -361,8 +361,8 @@ struct ShareGroupPauseMenu: View {
     }
 }
 
-@ViewBuilder
-private func pauseButtons(action: @escaping (Date?) -> Void) -> some View {
+@MainActor @ViewBuilder
+private func pauseButtons(action: @escaping @MainActor (Date?) -> Void) -> some View {
     Button("For 1 Hour") {
         action(Date().addingTimeInterval(60 * 60))
     }

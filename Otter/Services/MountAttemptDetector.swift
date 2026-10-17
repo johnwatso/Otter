@@ -113,7 +113,7 @@ final class MountAttemptDetector {
             let length = proc_pidpath(pid, &pathBuffer, UInt32(pathBuffer.count))
             guard length > 0 else { continue }
 
-            if String(cString: pathBuffer).hasSuffix(helperPathSuffix) {
+            if pathBuffer.stringValue.hasSuffix(helperPathSuffix) {
                 helpers.insert(pid)
             }
         }
