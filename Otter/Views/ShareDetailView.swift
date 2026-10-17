@@ -207,7 +207,6 @@ struct ServerDetailView<Actions: View>: View {
     @EnvironmentObject private var eventLog: ShareEventLog
     let group: NetworkShareServerGroup
     let onSelectShare: (NetworkShare) -> Void
-    let onAddShare: () -> Void
     @ViewBuilder let actions: () -> Actions
 
     var body: some View {
@@ -227,10 +226,7 @@ struct ServerDetailView<Actions: View>: View {
                     actions: actions
                 )
 
-                DetailCard("Shares", accessory: {
-                    Button("Add Share", action: onAddShare)
-                        .tahoeCompactActionButton()
-                }) {
+                DetailCard("Shares") {
                     VStack(spacing: 0) {
                         ForEach(Array(currentShares.enumerated()), id: \.element.id) { index, share in
                             if index > 0 {
@@ -388,7 +384,7 @@ private struct ServerShareRow: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         // A tap gesture alone is invisible to the keyboard and VoiceOver.
-        .focusable()
+        .focusable(interactions: .activate)
         .onKeyPress(.return) {
             onSelect()
             return .handled

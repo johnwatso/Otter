@@ -456,8 +456,7 @@ struct ShareManagementView: View {
                 group: selectedServerGroup,
                 onSelectShare: { share in
                     withAnimation(.easeInOut(duration: 0.18)) { selection = .share(share.id) }
-                },
-                onAddShare: { appModel.requestNewShare() }
+                }
             ) { heroActions }
         } else if let selectedShare {
             ShareDetailView(share: selectedShare) { heroActions }

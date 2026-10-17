@@ -170,11 +170,16 @@ final class ShareLatencyHistory: ObservableObject {
     @Published private(set) var history: [NetworkShare.ID: [DailyLatency]]
 
     static let retentionDays = 30
-    private static let storageKey = "shareLatencyHistory"
+    // v1 stored the duration of the health check, which mostly measured
+    // launching a child process. Those numbers are not comparable with the
+    // round-trip times recorded now, so they are discarded rather than mixed in.
+    private static let storageKey = "shareLatencyHistory.v2"
+    private static let legacyStorageKey = "shareLatencyHistory"
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        defaults.removeObject(forKey: Self.legacyStorageKey)
         if let data = defaults.data(forKey: Self.storageKey),
            let stored = try? JSONDecoder().decode([NetworkShare.ID: [DailyLatency]].self, from: data) {
             history = stored

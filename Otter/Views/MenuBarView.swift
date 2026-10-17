@@ -23,83 +23,99 @@ struct MenuBarView: View {
         shares.contains(where: { $0.connectsAutomatically })
     }
 
+    // Shares first, one row each; then the few things that apply to all of
+    // them. Network state only appears when it explains a problem.
     var body: some View {
-        if !newShareDetector.pendingSuggestions.isEmpty {
-            ForEach(newShareDetector.pendingSuggestions) { suggestion in
-                DetectedShareMenu(suggestion: suggestion)
+        Group {
+            if !newShareDetector.pendingSuggestions.isEmpty {
+                ForEach(newShareDetector.pendingSuggestions) { suggestion in
+                    DetectedShareMenu(suggestion: suggestion)
+                }
+
+                Divider()
+            }
+
+            if shares.isEmpty {
+                Text("No shares configured")
+            } else {
+                ForEach(shareGroups) { group in
+                    if group.isGrouped || settings.preferences.alwaysShowServerName {
+                        Section(group.serverName) {
+                            ForEach(group.shares) { share in
+                                ShareMenu(share: share)
+                            }
+                        }
+                    } else if let share = group.shares.first {
+                        ShareMenu(share: share)
+                    }
+                }
             }
 
             Divider()
-        }
 
-        if shares.isEmpty {
-            Text("No shares configured")
-        } else {
-            ForEach(shareGroups) { group in
-                if group.isGrouped || settings.preferences.alwaysShowServerName {
-                    ServerShareMenu(group: group)
-                } else if let share = group.shares.first {
-                    ShareMenu(share: share)
+            Button {
+                appModel.requestNewShare()
+                showShares()
+            } label: {
+                Label("Add Share…", systemImage: "plus")
+            }
+            .keyboardShortcut("n")
+
+            Button {
+                Task { await monitor.mountAll() }
+            } label: {
+                Label("Connect All", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .disabled(shares.isEmpty)
+
+            Button {
+                Task { await monitor.disconnectAll() }
+            } label: {
+                Label(hasAutomaticShares ? "Disconnect & Pause All" : "Disconnect All", systemImage: "eject")
+            }
+            .disabled(shares.isEmpty)
+
+            GlobalPauseMenu()
+
+            if showsNetworkStatus {
+                Divider()
+
+                networkStatusLabel
+                if networkService.isVPNConnected || networkService.hasUnidentifiedTunnel {
+                    vpnStatusLabel
                 }
             }
-        }
 
-        Divider()
+            Divider()
 
-        Button {
-            appModel.requestNewShare()
-            showShares()
-        } label: {
-            Text("Add Share…")
-        }
-        .keyboardShortcut("n")
-
-        Button {
-            Task { await monitor.mountAll() }
-        } label: {
-            Text("Connect All")
-        }
-        .disabled(shares.isEmpty)
-
-        Button {
-            Task { await monitor.disconnectAll() }
-        } label: {
-            Text(hasAutomaticShares ? "Disconnect & Pause All" : "Disconnect All")
-        }
-        .disabled(shares.isEmpty)
-
-        GlobalPauseMenu()
-
-        // Read-only status, grouped under a header so it doesn't read as a
-        // row of clickable commands.
-        Section("Network") {
-            networkStatusLabel
-            if networkService.isVPNConnected || networkService.hasUnidentifiedTunnel {
-                vpnStatusLabel
+            Button {
+                showShares()
+            } label: {
+                Label("Manage Shares", systemImage: "externaldrive")
             }
-        }
 
-        Divider()
+            Button {
+                showPreferences()
+            } label: {
+                Label("Settings…", systemImage: "gearshape")
+            }
+            .keyboardShortcut(",")
 
-        Button {
-            showShares()
-        } label: {
-            Text("Manage Shares")
+            Button {
+                NSApp.terminate(nil)
+            } label: {
+                Label("Quit Otter", systemImage: "power")
+            }
+            .keyboardShortcut("q")
         }
+        // Menu content falls back to title-only labels; ask for the symbols.
+        .labelStyle(.titleAndIcon)
+    }
 
-        Button {
-            showPreferences()
-        } label: {
-            Text("Settings…")
-        }
-        .keyboardShortcut(",")
-
-        Button {
-            NSApp.terminate(nil)
-        } label: {
-            Text("Quit Otter")
-        }
-        .keyboardShortcut("q")
+    /// Hidden while everything is ordinary; shown when offline or on a VPN,
+    /// where it explains why shares behave differently.
+    private var showsNetworkStatus: Bool {
+        !networkService.isOnline || networkService.isVPNConnected || networkService.hasUnidentifiedTunnel
     }
 
     private var networkStatusLabel: some View {
@@ -150,14 +166,14 @@ private struct DetectedShareMenu: View {
                 appModel.manageDetectedShare(suggestion)
                 showShares()
             } label: {
-                Text("Keep This Mounted")
+                Label("Keep This Mounted", systemImage: "externaldrive.badge.plus")
             }
 
             Button {
                 appModel.reviewDetectedShare(suggestion)
                 showShares()
             } label: {
-                Text("Set Up…")
+                Label("Set Up…", systemImage: "gearshape")
             }
 
             Divider()
@@ -165,13 +181,13 @@ private struct DetectedShareMenu: View {
             Button {
                 newShareDetector.dismiss(suggestion)
             } label: {
-                Text("Not Now")
+                Label("Not Now", systemImage: "xmark")
             }
 
             Button {
                 newShareDetector.ignore(suggestion)
             } label: {
-                Text("Don't Ask Again")
+                Label("Don't Ask Again", systemImage: "bell.slash")
             }
         } label: {
             Label {
@@ -188,60 +204,6 @@ private struct DetectedShareMenu: View {
     }
 }
 
-private struct ServerShareMenu: View {
-    @EnvironmentObject private var monitor: ShareMonitor
-    let group: NetworkShareServerGroup
-
-    private var hasAutomaticShares: Bool {
-        group.shares.contains(where: { $0.connectsAutomatically })
-    }
-
-    var body: some View {
-        Menu {
-            Button {
-                Task {
-                    for share in group.shares {
-                        await monitor.mount(share)
-                    }
-                }
-            } label: {
-                Text("Connect All Shares")
-            }
-
-            Button {
-                Task {
-                    for share in group.shares {
-                        if share.connectsAutomatically {
-                            await monitor.pause(
-                                share,
-                                until: nil,
-                                disconnect: monitor.status(for: share) == .connected
-                            )
-                        } else if monitor.status(for: share) == .connected {
-                            await monitor.disconnect(share, pauseAutomaticMounting: false)
-                        }
-                    }
-                }
-            } label: {
-                Text(hasAutomaticShares ? "Disconnect & Pause All" : "Disconnect All")
-            }
-            .disabled(!group.shares.contains { monitor.status(for: $0) == .connected })
-
-            Divider()
-
-            ForEach(group.shares) { share in
-                ShareMenu(share: share)
-            }
-        } label: {
-            Label {
-                Text("\(group.serverName) – \(group.shareCountLabel)")
-            } icon: {
-                Image(systemName: "server.rack")
-            }
-        }
-    }
-}
-
 private struct ShareMenu: View {
     @Environment(\.openWindow) private var openWindow
     @EnvironmentObject private var appModel: AppModel
@@ -250,55 +212,49 @@ private struct ShareMenu: View {
     let share: NetworkShare
 
     var body: some View {
+        let status = monitor.status(for: share)
+
         Menu {
-            statusLabel
-
-            Divider()
-
-            Button {
-                Task { await monitor.mount(share) }
-            } label: {
-                Text("Connect")
-            }
-
-            Button {
-                Task {
-                    await monitor.disconnect(
-                        share,
-                        pauseAutomaticMounting: share.connectsAutomatically
-                    )
-                }
-            } label: {
-                Text(share.connectsAutomatically ? "Disconnect & Pause" : "Disconnect")
-            }
-
-            if case .connected = monitor.status(for: share) {
+            if case .connected = status {
                 Button {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: share.mountPath)])
                 } label: {
-                    Text("Show in Finder")
+                    Label("Open in Finder", systemImage: "folder")
                 }
-            }
 
-            if monitor.runtimeState(for: share).needsCredentials, let url = share.url {
                 Button {
-                    NSWorkspace.shared.open(url)
+                    Task {
+                        await monitor.disconnect(
+                            share,
+                            pauseAutomaticMounting: share.connectsAutomatically
+                        )
+                    }
                 } label: {
-                    Text("Connect Once in Finder…")
+                    Label(share.connectsAutomatically ? "Disconnect & Pause" : "Disconnect", systemImage: "eject")
+                }
+            } else {
+                Button {
+                    Task { await monitor.mount(share) }
+                } label: {
+                    Label("Connect", systemImage: "arrow.triangle.2.circlepath")
+                }
+
+                if monitor.runtimeState(for: share).needsCredentials, let url = share.url {
+                    Button {
+                        NSWorkspace.shared.open(url)
+                    } label: {
+                        Label("Connect Once in Finder…", systemImage: "person.badge.key")
+                    }
                 }
             }
         } label: {
+            // A healthy share is just its name; anything else says why.
             Label {
-                Text("\(share.displayName) – \(monitor.status(for: share).label)")
+                Text(status == .connected ? share.displayName : "\(share.displayName) – \(status.label)")
             } icon: {
-                Image(systemName: monitor.status(for: share).systemImage)
+                Image(systemName: status.systemImage)
             }
         }
-    }
-
-    private var statusLabel: some View {
-        let status = monitor.status(for: share)
-        return Label(status.label, systemImage: status.systemImage)
     }
 }
 
@@ -316,7 +272,7 @@ struct GlobalPauseMenu: View {
                 Button {
                     Task { await monitor.resumeAll() }
                 } label: {
-                    Text("Resume Automatic Mounting")
+                    Label("Resume Automatic Mounting", systemImage: "play.fill")
                 }
             } else {
                 Menu {
@@ -324,7 +280,7 @@ struct GlobalPauseMenu: View {
                         Task { await monitor.pauseAll(until: resumeAt) }
                     }
                 } label: {
-                    Text("Pause Automatic Mounting")
+                    Label("Pause Automatic Mounting", systemImage: "pause.fill")
                 }
             }
         }
@@ -346,7 +302,7 @@ struct SharePauseMenu: View {
                 Button {
                     Task { await monitor.resume(currentShare) }
                 } label: {
-                    Text("Resume Automatic Mounting")
+                    Label("Resume Automatic Mounting", systemImage: "play.fill")
                 }
             } else {
                 Menu {
@@ -354,7 +310,7 @@ struct SharePauseMenu: View {
                         Task { await monitor.pause(currentShare, until: resumeAt) }
                     }
                 } label: {
-                    Text("Pause Automatic Mounting")
+                    Label("Pause Automatic Mounting", systemImage: "pause.fill")
                 }
             }
         }
@@ -386,7 +342,7 @@ struct ShareGroupPauseMenu: View {
                         }
                     }
                 } label: {
-                    Text("Resume Automatic Mounting for All")
+                    Label("Resume Automatic Mounting for All", systemImage: "play.fill")
                 }
             } else {
                 Menu {
@@ -398,7 +354,7 @@ struct ShareGroupPauseMenu: View {
                         }
                     }
                 } label: {
-                    Text("Pause Automatic Mounting for All")
+                    Label("Pause Automatic Mounting for All", systemImage: "pause.fill")
                 }
             }
         }
