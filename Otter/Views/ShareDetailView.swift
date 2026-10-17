@@ -79,7 +79,7 @@ struct ShareDetailView<Actions: View>: View {
                     }
                 }
 
-                DetailCard("Connection Behaviour", accessory: {
+                DetailCard("Connection Behavior", accessory: {
                     if settings.isManagedShare(id: currentShare.id) {
                         Label("Managed", systemImage: "checkmark.shield.fill")
                             .font(.caption)
@@ -303,7 +303,7 @@ struct ServerDetailView<Actions: View>: View {
                     DetailRow(label: "Shares", value: String.counted(currentShares.count, "share"))
                 }
 
-                DetailCard("Connection Behaviour") {
+                DetailCard("Connection Behavior") {
                     ConnectionBehaviourRows(shareIDs: currentShares.map(\.id), isServer: true)
                 }
             }
@@ -406,7 +406,7 @@ private struct ServerShareRow: View {
                     Button {
                         Task { await monitor.mount(share) }
                     } label: {
-                        Label("Mount Now", systemImage: "arrow.triangle.2.circlepath")
+                        Label("Connect", systemImage: "arrow.triangle.2.circlepath")
                     }
                 } else {
                     Button {
@@ -432,6 +432,18 @@ private struct ServerShareRow: View {
         .padding(.vertical, 8)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
+        // A tap gesture alone is invisible to the keyboard and VoiceOver.
+        .focusable()
+        .onKeyPress(.return) {
+            onSelect()
+            return .handled
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(share.displayName)
+        .accessibilityValue(status.label)
+        .accessibilityHint("Shows this share's details")
+        .accessibilityAction(named: "Show Details", onSelect)
     }
 }
 
@@ -594,6 +606,16 @@ extension ShareStatus {
     }
 }
 
+extension Color {
+    /// Orange that stays legible as small text on a light background; plain
+    /// `.orange` is fine for symbols but fails contrast as caption text.
+    static let warningText = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? .systemOrange
+            : NSColor(srgbRed: 0.69, green: 0.33, blue: 0, alpha: 1)
+    })
+}
+
 /// Symbol and word together, so status never depends on colour alone.
 struct StatusLabel: View {
     let status: ShareStatus
@@ -627,10 +649,10 @@ struct DetailHeader<Actions: View>: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 18) {
                 Image(systemName: symbol)
-                    .font(.system(size: 34, weight: .regular))
+                    .font(.largeTitle)
                     .foregroundStyle(.secondary)
-                    .frame(width: 76, height: 76)
-                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .frame(width: 64, height: 64)
+                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -656,7 +678,7 @@ struct DetailHeader<Actions: View>: View {
                     if let warning {
                         Text(warning)
                             .font(.subheadline)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Color.warningText)
                     }
                 }
                 Spacer(minLength: 0)
@@ -747,9 +769,18 @@ private struct ReliabilityStrip: View {
                     RoundedRectangle(cornerRadius: 4, style: .continuous)
                         .fill(color(for: day))
                         .frame(height: 22)
+                        // A mark as well as a colour, so a problem day is
+                        // distinguishable without telling orange from green.
+                        .overlay {
+                            if day.problems > 0 {
+                                Image(systemName: "exclamationmark")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.white)
+                            }
+                        }
                     Text(symbols[index])
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                 }
                 .help(description(of: day))
                 .accessibilityElement(children: .ignore)

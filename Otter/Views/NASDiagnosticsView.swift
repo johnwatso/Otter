@@ -254,7 +254,7 @@ struct NASDiagnosticsView: View {
                     Text(subtitle).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
                     .disabled(session.blocksDismissal)
             }
             if coversServer { shareOverview }
@@ -289,8 +289,8 @@ struct NASDiagnosticsView: View {
             }
         }
         .padding(20)
-        .frame(width: 620)
-        .frame(minHeight: 420, idealHeight: 680, maxHeight: 680)
+        .frame(minWidth: 560, idealWidth: 620, maxWidth: .infinity)
+        .frame(minHeight: 420, idealHeight: 680, maxHeight: .infinity)
         .interactiveDismissDisabled(session.blocksDismissal)
         .background(Color(NSColor.windowBackgroundColor))
         .onChange(of: session.activeShareID) { _, shareID in
@@ -528,8 +528,8 @@ private struct NASShareDiagnosticsPanel: View {
             Text("Speed Test").font(.headline)
             if let p = r.performance {
                 DetailRow(label: "Expected maximum", value: DiagnosticReportBuilder.expectedText(r.expectedMaxMBps))
-                DetailRow(label: "Write", value: diagnosticNumber(p.writeMBps, suffix: " MB/s") + " · " + diagnosticPercent(p.write.utilisation(expected: r.expectedMaxMBps)) + " utilisation")
-                DetailRow(label: "Read", value: diagnosticNumber(p.readMBps, suffix: " MB/s") + " · " + diagnosticPercent(p.read.utilisation(expected: r.expectedMaxMBps)) + " utilisation")
+                DetailRow(label: "Write", value: diagnosticNumber(p.writeMBps, suffix: " MB/s") + " · " + diagnosticPercent(p.write.utilisation(expected: r.expectedMaxMBps)) + " utilization")
+                DetailRow(label: "Read", value: diagnosticNumber(p.readMBps, suffix: " MB/s") + " · " + diagnosticPercent(p.read.utilisation(expected: r.expectedMaxMBps)) + " utilization")
                 Text(p.cacheBypass ? "Client cache bypass requested. NAS caches may still influence results." : "Client cache bypass is unavailable; cached data may inflate results.")
                     .font(.caption).foregroundStyle(.secondary)
             } else { Text(model.performanceStatus).font(.callout).foregroundStyle(.secondary) }
@@ -549,7 +549,7 @@ private struct NASShareDiagnosticsPanel: View {
     private func throughputDetails(_ label: String, _ t: ThroughputDiagnostic, expected: Double?) -> some View {
         VStack(spacing: 7) {
             DetailRow(label: "\(label) average", value: diagnosticNumber(t.averageMBps, suffix: " MB/s"))
-            DetailRow(label: "\(label) utilisation", value: diagnosticPercent(t.utilisation(expected: expected)))
+            DetailRow(label: "\(label) utilization", value: diagnosticPercent(t.utilisation(expected: expected)))
             DetailRow(label: "\(label) minimum", value: diagnosticNumber(t.minimumMBps, suffix: " MB/s"))
             DetailRow(label: "\(label) maximum", value: diagnosticNumber(t.maximumMBps, suffix: " MB/s"))
             DetailRow(label: "\(label) variation", value: diagnosticPercent(t.variation.map { $0 * 100 }))

@@ -61,6 +61,7 @@ struct ShareManagementView: View {
     @State private var didRegisterWindowAppearance = false
     @State private var isShowingActivityLog = false
     @State private var connectionDoctorShare: NetworkShare?
+    @State private var advancedDiagnosticsShare: NetworkShare?
     @State private var shareToRemove: NetworkShare?
     @State private var isAskingPauseDuration = false
     @State private var collapsedServerIDs = Set<String>()
@@ -95,7 +96,6 @@ struct ShareManagementView: View {
         } detail: {
             detail
         }
-        .toolbar(removing: .sidebarToggle)
         .toolbar {
             ToolbarItemGroup {
                 if let selectedServerGroup {
@@ -215,7 +215,18 @@ struct ShareManagementView: View {
             Text("Otter reconnects shares automatically. Choose how long to leave it paused.")
         }
         .sheet(item: $connectionDoctorShare) { share in
-            ConnectionDoctorView(share: share)
+            ConnectionDoctorView(share: share) { advancedShare in
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 350_000_000)
+                    advancedDiagnosticsShare = advancedShare
+                }
+            }
+        }
+        .sheet(item: $advancedDiagnosticsShare) { share in
+            NASDiagnosticsView(
+                shares: NetworkShareServerGroup.diagnosticShares(containing: share, in: settings.shares),
+                title: nil
+            )
         }
         .sheet(isPresented: $isShowingOnboarding) {
             OnboardingView { share in
@@ -310,6 +321,7 @@ struct ShareManagementView: View {
                         ForEach(group.shares) { share in
                             ShareListRow(share: share)
                                 .tag(ShareManagementSelection.share(share.id))
+                                .contextMenu { shareContextMenu(share) }
                         }
                     } label: {
                         ServerListHeader(group: group)
@@ -318,10 +330,14 @@ struct ShareManagementView: View {
                 } else if let share = group.shares.first {
                     ShareListRow(share: share)
                         .tag(ShareManagementSelection.share(share.id))
+                        .contextMenu { shareContextMenu(share) }
                 }
             }
         }
         .listStyle(.sidebar)
+        .onDeleteCommand {
+            if canRemoveSelectedShare { shareToRemove = selectedShare }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 if !shares.isEmpty {
@@ -358,6 +374,54 @@ struct ShareManagementView: View {
                 .padding(.vertical, 4)
             }
         }
+    }
+
+    @ViewBuilder
+    private func shareContextMenu(_ share: NetworkShare) -> some View {
+        let isConnected = monitor.status(for: share) == .connected
+        let isManaged = settings.isManagedShare(id: share.id)
+
+        if isConnected {
+            Button {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: share.mountPath)])
+            } label: {
+                Label("Open in Finder", systemImage: "folder")
+            }
+            Button {
+                Task { await monitor.disconnect(share, pauseAutomaticMounting: share.connectsAutomatically) }
+            } label: {
+                Label("Disconnect", systemImage: "eject")
+            }
+        } else {
+            Button {
+                Task { await monitor.mount(share) }
+            } label: {
+                Label("Connect", systemImage: "arrow.triangle.2.circlepath")
+            }
+        }
+
+        Divider()
+
+        Button {
+            connectionDoctorShare = share
+        } label: {
+            Label("Diagnose…", systemImage: "stethoscope")
+        }
+        Button {
+            appModel.requestEditShare(share)
+        } label: {
+            Label("Share Settings…", systemImage: "gearshape")
+        }
+        .disabled(isManaged)
+
+        Divider()
+
+        Button(role: .destructive) {
+            shareToRemove = share
+        } label: {
+            Label("Remove Share…", systemImage: "trash")
+        }
+        .disabled(isManaged)
     }
 
     private func expansionBinding(for serverID: String) -> Binding<Bool> {
@@ -544,7 +608,7 @@ struct ShareManagementView: View {
         if areAllSelectedSharesConnected {
             return selectedServerGroup == nil ? "Already connected" : "All shares on this server are connected"
         }
-        return selectedServerGroup == nil ? "Mount Now" : "Mount all shares on this server"
+        return selectedServerGroup == nil ? "Connect" : "Connect all shares on this server"
     }
 
     private var canDisconnectSelectedShares: Bool {
@@ -848,23 +912,13 @@ private enum PreferencesTab: String, CaseIterable, Hashable, Identifiable {
     }
 }
 
-// Custom tab-item label with precise optical centering and tight spacing,
-// matching the SwiftMiner settings style. On macOS the system extracts the
-// Image and Text from .tabItem to build the segmented control; explicit
-// sizing here ensures every icon sits consistently.
+// A plain Label: the Settings scene draws the toolbar tab from it, so the
+// system owns the icon size, spacing and weight.
 private struct PreferencesTabItem: View {
     let tab: PreferencesTab
 
     var body: some View {
-        VStack(spacing: 1) {
-            Image(systemName: tab.systemImage)
-                .font(.system(size: 12, weight: .medium))
-                .imageScale(.small)
-                .symbolRenderingMode(.hierarchical)
-                .frame(height: 14, alignment: .center)
-            Text(tab.title)
-                .font(.system(size: 10, weight: .medium))
-        }
+        Label(tab.title, systemImage: tab.systemImage)
     }
 }
 
@@ -898,7 +952,7 @@ private struct GeneralPreferencesView: View {
                 if loginItemService.requiresApproval {
                     Label("Approve Otter in System Settings to finish enabling login launch.", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Color.warningText)
                 }
 
                 if let error = loginItemService.lastError {
@@ -923,7 +977,7 @@ private struct GeneralPreferencesView: View {
                             systemImage: "bell.badge"
                         )
                     }
-                    .tahoeSecondaryActionButton()
+                    .settingsActionButton()
                 }
             } header: {
                 Text("New Shares")
@@ -1015,7 +1069,7 @@ private struct NotificationsPreferencesSections: View {
                     } label: {
                         Label("Allow Notifications", systemImage: "bell.badge")
                     }
-                    .tahoeSecondaryActionButton()
+                    .settingsActionButton()
                 }
             } header: {
                 Text("Permission")
@@ -1117,7 +1171,7 @@ private struct AdvancedPreferencesView: View {
                                 systemImage: "location"
                             )
                         }
-                        .tahoeSecondaryActionButton()
+                        .settingsActionButton()
                     }
 
                     LabeledContent("Active VPN", value: activeVPNLabel)
@@ -1154,7 +1208,7 @@ private struct AdvancedPreferencesView: View {
                     } label: {
                         Label("Refresh", systemImage: "arrow.clockwise")
                     }
-                    .tahoeSecondaryActionButton()
+                    .settingsActionButton()
                 }
             } header: {
                 Text("Network")
@@ -1188,7 +1242,7 @@ private struct AdvancedPreferencesView: View {
                 } label: {
                     Label("Export Diagnostic Logs\u{2026}", systemImage: "lifepreserver")
                 }
-                .tahoeSecondaryActionButton()
+                .settingsActionButton()
 
                 SettingsSecondaryText("Creates a readable report with live share state, retry timing, health history, and recent events. Identifying details are removed.")
 
@@ -1216,7 +1270,7 @@ private struct AdvancedPreferencesView: View {
                 } label: {
                     Label("Run Onboarding Again", systemImage: "arrow.counterclockwise")
                 }
-                .tahoeSecondaryActionButton()
+                .settingsActionButton()
                 SettingsSecondaryText("Reopens onboarding without removing shares or resetting macOS permissions. Debug builds only.")
             } header: {
                 Text("Developer")
@@ -1438,7 +1492,7 @@ private struct UpdatesPreferencesView: View {
                 } label: {
                     Label("Check for Updates…", systemImage: "arrow.clockwise")
                 }
-                .tahoeSecondaryActionButton()
+                .settingsActionButton()
                 .disabled(!updaterViewModel.canCheckForUpdates)
 
                 if !updaterViewModel.isConfigured {

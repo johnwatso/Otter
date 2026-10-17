@@ -108,7 +108,7 @@ struct ShareEditorView: View {
 
             actionBar
         }
-        .frame(width: 540)
+        .frame(minWidth: 500, idealWidth: 540, maxWidth: 720)
         // Let the sheet follow its content. The scrollable form still keeps
         // longer saved-connection lists and advanced settings within a
         // sensible sheet height.

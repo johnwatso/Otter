@@ -169,6 +169,8 @@ private struct MenuBarLabel: View {
 
     var body: some View {
         Image(systemName: monitor.menuBarSystemImage)
+            .accessibilityLabel("Otter")
+            .accessibilityValue(menuBarStatusDescription)
             .onAppear {
                 openManageSharesOnFirstRun()
             }
@@ -179,6 +181,12 @@ private struct MenuBarLabel: View {
                     appModel.shouldOpenSharesWindow = false
                 }
             }
+    }
+
+    private var menuBarStatusDescription: String {
+        guard !settings.shares.isEmpty else { return "No shares" }
+        let connected = settings.shares.filter { monitor.status(for: $0) == .connected }.count
+        return "\(connected) of \(settings.shares.count) shares connected"
     }
 
     // A fresh install is just an empty menu bar icon; open Manage Shares so

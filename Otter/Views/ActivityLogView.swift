@@ -7,6 +7,7 @@ struct ActivityLogView: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var eventLog: ShareEventLog
     @State private var shareFilter: NetworkShare.ID?
+    @State private var isConfirmingClear = false
     private let includedShareIDs: Set<NetworkShare.ID>?
     private let includedSharesLabel: String?
 
@@ -96,20 +97,18 @@ struct ActivityLogView: View {
             Divider()
 
             HStack {
-                Button {
-                    eventLog.clear()
+                Button(role: .destructive) {
+                    isConfirmingClear = true
                 } label: {
-                    Label("Clear Log", systemImage: "trash")
+                    Label("Clear Log…", systemImage: "trash")
                 }
                 .tahoeSecondaryActionButton()
                 .disabled(appModel.screenshotDemoEvents != nil || eventLog.events(for: nil).isEmpty)
 
                 Spacer()
 
-                Button {
+                Button("Done") {
                     dismiss()
-                } label: {
-                    Label("Done", systemImage: "checkmark")
                 }
                 .tahoePrimaryActionButton()
                 .keyboardShortcut(.defaultAction)
@@ -117,6 +116,12 @@ struct ActivityLogView: View {
             .padding(16)
         }
         .frame(minWidth: 480, idealWidth: 560, maxWidth: .infinity, minHeight: 440, idealHeight: 520, maxHeight: .infinity)
+        .confirmationDialog("Clear the activity log?", isPresented: $isConfirmingClear, titleVisibility: .visible) {
+            Button("Clear Log", role: .destructive) { eventLog.clear() }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This removes the recorded history for every share. It can't be undone.")
+        }
     }
 
     private func shareName(for shareID: NetworkShare.ID) -> String {

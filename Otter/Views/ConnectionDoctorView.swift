@@ -7,12 +7,14 @@ struct ConnectionDoctorView: View {
     @EnvironmentObject private var settings: SettingsStore
 
     let share: NetworkShare
+    /// Advanced diagnostics is a sheet of its own; the host presents it after
+    /// this one closes, so sheets never stack.
+    var onShowAdvanced: ((NetworkShare) -> Void)?
 
     @State private var report: ConnectionDiagnosticReport?
     @State private var repairStep: ConnectionDiagnosticStep?
     @State private var isRunning = false
     @State private var didCopy = false
-    @State private var isShowingAdvanced = false
 
     private var currentShare: NetworkShare {
         settings.share(id: share.id) ?? share
@@ -92,7 +94,8 @@ struct ConnectionDoctorView: View {
                     Divider()
 
                     Button {
-                        isShowingAdvanced = true
+                        dismiss()
+                        onShowAdvanced?(currentShare)
                     } label: {
                         Label("Advanced Diagnostics…", systemImage: "waveform.path.ecg")
                     }
@@ -103,6 +106,7 @@ struct ConnectionDoctorView: View {
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .help("More")
+                .accessibilityLabel("More options")
 
                 Spacer()
 
@@ -124,15 +128,9 @@ struct ConnectionDoctorView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
         }
-        .frame(width: 520, height: 520)
+        .frame(minWidth: 480, idealWidth: 520, maxWidth: .infinity, minHeight: 420, idealHeight: 520, maxHeight: .infinity)
         .task {
             await runDoctorNow()
-        }
-        .sheet(isPresented: $isShowingAdvanced) {
-            NASDiagnosticsView(
-                shares: NetworkShareServerGroup.diagnosticShares(containing: currentShare, in: settings.shares),
-                title: nil
-            )
         }
     }
 

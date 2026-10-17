@@ -50,21 +50,21 @@ struct MenuBarView: View {
             appModel.requestNewShare()
             showShares()
         } label: {
-            Label("Add Share…", systemImage: "plus")
+            Text("Add Share…")
         }
         .keyboardShortcut("n")
 
         Button {
             Task { await monitor.mountAll() }
         } label: {
-            Label("Mount All", systemImage: "arrow.triangle.2.circlepath")
+            Text("Connect All")
         }
         .disabled(shares.isEmpty)
 
         Button {
             Task { await monitor.disconnectAll() }
         } label: {
-            Label(hasAutomaticShares ? "Disconnect & Pause All" : "Disconnect All", systemImage: "eject")
+            Text(hasAutomaticShares ? "Disconnect & Pause All" : "Disconnect All")
         }
         .disabled(shares.isEmpty)
 
@@ -84,20 +84,20 @@ struct MenuBarView: View {
         Button {
             showShares()
         } label: {
-            Label("Manage Shares", systemImage: "externaldrive")
+            Text("Manage Shares")
         }
 
         Button {
             showPreferences()
         } label: {
-            Label("Settings…", systemImage: "gearshape")
+            Text("Settings…")
         }
         .keyboardShortcut(",")
 
         Button {
             NSApp.terminate(nil)
         } label: {
-            Label("Quit Otter", systemImage: "power")
+            Text("Quit Otter")
         }
         .keyboardShortcut("q")
     }
@@ -150,14 +150,14 @@ private struct DetectedShareMenu: View {
                 appModel.manageDetectedShare(suggestion)
                 showShares()
             } label: {
-                Label("Keep This Mounted", systemImage: "externaldrive.badge.plus")
+                Text("Keep This Mounted")
             }
 
             Button {
                 appModel.reviewDetectedShare(suggestion)
                 showShares()
             } label: {
-                Label("Set Up…", systemImage: "gearshape")
+                Text("Set Up…")
             }
 
             Divider()
@@ -165,13 +165,13 @@ private struct DetectedShareMenu: View {
             Button {
                 newShareDetector.dismiss(suggestion)
             } label: {
-                Label("Not Now", systemImage: "xmark")
+                Text("Not Now")
             }
 
             Button {
                 newShareDetector.ignore(suggestion)
             } label: {
-                Label("Don't Ask Again", systemImage: "bell.slash")
+                Text("Don't Ask Again")
             }
         } label: {
             Label {
@@ -205,7 +205,7 @@ private struct ServerShareMenu: View {
                     }
                 }
             } label: {
-                Label("Mount All Shares", systemImage: "arrow.triangle.2.circlepath")
+                Text("Connect All Shares")
             }
 
             Button {
@@ -223,7 +223,7 @@ private struct ServerShareMenu: View {
                     }
                 }
             } label: {
-                Label(hasAutomaticShares ? "Disconnect & Pause All" : "Disconnect All", systemImage: "eject")
+                Text(hasAutomaticShares ? "Disconnect & Pause All" : "Disconnect All")
             }
             .disabled(!group.shares.contains { monitor.status(for: $0) == .connected })
 
@@ -258,7 +258,7 @@ private struct ShareMenu: View {
             Button {
                 Task { await monitor.mount(share) }
             } label: {
-                Label("Mount Now", systemImage: "arrow.triangle.2.circlepath")
+                Text("Connect")
             }
 
             Button {
@@ -269,14 +269,14 @@ private struct ShareMenu: View {
                     )
                 }
             } label: {
-                Label(share.connectsAutomatically ? "Disconnect & Pause" : "Disconnect", systemImage: "eject")
+                Text(share.connectsAutomatically ? "Disconnect & Pause" : "Disconnect")
             }
 
             if case .connected = monitor.status(for: share) {
                 Button {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: share.mountPath)])
                 } label: {
-                    Label("Show in Finder", systemImage: "finder")
+                    Text("Show in Finder")
                 }
             }
 
@@ -284,7 +284,7 @@ private struct ShareMenu: View {
                 Button {
                     NSWorkspace.shared.open(url)
                 } label: {
-                    Label("Connect Once in Finder…", systemImage: "person.badge.key")
+                    Text("Connect Once in Finder…")
                 }
             }
         } label: {
@@ -316,7 +316,7 @@ struct GlobalPauseMenu: View {
                 Button {
                     Task { await monitor.resumeAll() }
                 } label: {
-                    Label("Resume Automatic Mounting", systemImage: "play.fill")
+                    Text("Resume Automatic Mounting")
                 }
             } else {
                 Menu {
@@ -324,7 +324,7 @@ struct GlobalPauseMenu: View {
                         Task { await monitor.pauseAll(until: resumeAt) }
                     }
                 } label: {
-                    Label("Pause Automatic Mounting", systemImage: "pause.fill")
+                    Text("Pause Automatic Mounting")
                 }
             }
         }
@@ -346,7 +346,7 @@ struct SharePauseMenu: View {
                 Button {
                     Task { await monitor.resume(currentShare) }
                 } label: {
-                    Label("Resume Automatic Mounting", systemImage: "play.fill")
+                    Text("Resume Automatic Mounting")
                 }
             } else {
                 Menu {
@@ -354,7 +354,7 @@ struct SharePauseMenu: View {
                         Task { await monitor.pause(currentShare, until: resumeAt) }
                     }
                 } label: {
-                    Label("Pause Automatic Mounting", systemImage: "pause.fill")
+                    Text("Pause Automatic Mounting")
                 }
             }
         }
@@ -386,7 +386,7 @@ struct ShareGroupPauseMenu: View {
                         }
                     }
                 } label: {
-                    Label("Resume Automatic Mounting for All", systemImage: "play.fill")
+                    Text("Resume Automatic Mounting for All")
                 }
             } else {
                 Menu {
@@ -398,7 +398,7 @@ struct ShareGroupPauseMenu: View {
                         }
                     }
                 } label: {
-                    Label("Pause Automatic Mounting for All", systemImage: "pause.fill")
+                    Text("Pause Automatic Mounting for All")
                 }
             }
         }
@@ -415,7 +415,7 @@ private func pauseButtons(action: @escaping (Date?) -> Void) -> some View {
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date()))
         action(tomorrow)
     }
-    Button("Until Resumed") {
+    Button("Until I Resume") {
         action(nil)
     }
 }

@@ -12,6 +12,14 @@ extension View {
     func tahoeCompactActionButton() -> some View {
         modifier(TahoeCompactActionButtonModifier())
     }
+
+    /// A standard bordered button for use inside a Form, where the system
+    /// controls (not Liquid Glass) are what people expect.
+    func settingsActionButton() -> some View {
+        self
+            .labelStyle(.titleAndIcon)
+            .buttonStyle(.bordered)
+    }
 }
 
 private struct TahoePrimaryActionButtonModifier: ViewModifier {
@@ -20,14 +28,12 @@ private struct TahoePrimaryActionButtonModifier: ViewModifier {
         if #available(macOS 26.0, *) {
             content
                 .labelStyle(.titleAndIcon)
-                .font(.callout.weight(.medium))
                 .buttonStyle(.glassProminent)
                 .buttonBorderShape(.capsule)
                 .controlSize(.regular)
         } else {
             content
                 .labelStyle(.titleAndIcon)
-                .font(.callout.weight(.medium))
                 .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.capsule)
                 .controlSize(.regular)
@@ -41,14 +47,12 @@ private struct TahoeSecondaryActionButtonModifier: ViewModifier {
         if #available(macOS 26.0, *) {
             content
                 .labelStyle(.titleAndIcon)
-                .font(.callout.weight(.medium))
                 .buttonStyle(.glass)
                 .buttonBorderShape(.capsule)
                 .controlSize(.regular)
         } else {
             content
                 .labelStyle(.titleAndIcon)
-                .font(.callout.weight(.medium))
                 .buttonStyle(.bordered)
                 .buttonBorderShape(.capsule)
                 .controlSize(.regular)
@@ -62,14 +66,12 @@ private struct TahoeCompactActionButtonModifier: ViewModifier {
         if #available(macOS 26.0, *) {
             content
                 .labelStyle(.titleAndIcon)
-                .font(.caption.weight(.medium))
                 .buttonStyle(.glass)
                 .buttonBorderShape(.capsule)
                 .controlSize(.small)
         } else {
             content
                 .labelStyle(.titleAndIcon)
-                .font(.caption.weight(.medium))
                 .buttonStyle(.bordered)
                 .buttonBorderShape(.capsule)
                 .controlSize(.small)
