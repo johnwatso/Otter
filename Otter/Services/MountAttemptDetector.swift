@@ -34,7 +34,7 @@ final class MountAttemptDetector {
         interval: TimeInterval = 1,
         cooldown: TimeInterval = 45,
         now: @escaping () -> Date = Date.init,
-        snapshotHelpers: @escaping HelperSnapshot = MountAttemptDetector.systemHelperSnapshot
+        snapshotHelpers: @escaping HelperSnapshot = { MountAttemptDetector.systemHelperSnapshot() }
     ) {
         self.shouldWatch = shouldWatch
         self.interval = interval
@@ -96,7 +96,7 @@ final class MountAttemptDetector {
         onAttempt?()
     }
 
-    private static let helperPathSuffix = "/NetAuthAgent.app/Contents/MacOS/NetAuthSysAgent"
+    private nonisolated static let helperPathSuffix = "/NetAuthAgent.app/Contents/MacOS/NetAuthSysAgent"
 
     nonisolated static func systemHelperSnapshot() -> Set<pid_t> {
         let capacity = proc_listallpids(nil, 0)
