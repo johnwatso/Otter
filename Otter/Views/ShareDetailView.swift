@@ -9,7 +9,6 @@ struct ShareDetailView<Actions: View>: View {
     @EnvironmentObject private var monitor: ShareMonitor
     @EnvironmentObject private var networkService: NetworkReachabilityService
     @EnvironmentObject private var eventLog: ShareEventLog
-    @EnvironmentObject private var latencyHistory: ShareLatencyHistory
     let share: NetworkShare
     @ViewBuilder let actions: () -> Actions
 
@@ -102,56 +101,7 @@ struct ShareDetailView<Actions: View>: View {
     // MARK: Reliability
 
     private func reliabilityCard(runtimeState: ShareRuntimeState) -> some View {
-        let demo = appModel.screenshotDemoReliability(for: currentShare.id)
-        let summary = demo?.summary ?? eventLog.reliabilitySummary(for: currentShare.id)
-        let problems = demo?.problems ?? eventLog.dailyProblemCounts(for: currentShare.id)
-        let latency = demo?.latency ?? latencyHistory.recent(for: currentShare.id)
-        let days = zip(problems, latency).map { ReliabilityDay(problems: $0, latency: $1) }
-
-        return DetailCard("Reliability") {
-            HStack(spacing: 8) {
-                Image(systemName: summary.isStable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(summary.isStable ? Color.green : Color.orange)
-                    .accessibilityHidden(true)
-                Text(summary.isStable
-                     ? "No recorded problems"
-                     : "\(String.counted(summary.connectionDrops, "drop")) · \(String.counted(summary.failures, "failure")) · \(String.counted(summary.healthFailures, "health warning"))")
-                    .font(.headline)
-                Text("Last 7 days")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            ReliabilityStrip(days: days)
-
-            VStack(alignment: .leading, spacing: 4) {
-                if let responseText = responseTimeText(latency) {
-                    Text(responseText)
-                } else {
-                    Text("Response times appear after Otter's next few checks.")
-                }
-                if let lastProblemAt = summary.lastProblemAt {
-                    Text("Last problem \(lastProblemAt.formatted(date: .abbreviated, time: .shortened))")
-                }
-                if let lastCheckedAt = runtimeState.lastCheckedAt {
-                    Text("Last checked \(lastCheckedAt.formatted(.relative(presentation: .named)))")
-                }
-            }
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-        }
-    }
-
-    /// "Response time 12 ms today · 14 ms over 7 days".
-    private func responseTimeText(_ latency: [DailyLatency?]) -> String? {
-        let measured = latency.compactMap { $0 }
-        guard !measured.isEmpty else { return nil }
-        let samples = measured.reduce(0) { $0 + $1.sampleCount }
-        let weekAverage = measured.reduce(0) { $0 + $1.totalMilliseconds } / Double(samples)
-        if let today = latency.last ?? nil {
-            return "Response time \(Self.milliseconds(today.averageMilliseconds)) today · \(Self.milliseconds(weekAverage)) over 7 days"
-        }
-        return "Response time \(Self.milliseconds(weekAverage)) over 7 days"
+        ReliabilityCard(shareIDs: [currentShare.id], lastCheckedAt: runtimeState.lastCheckedAt)
     }
 
     static func milliseconds(_ value: Double) -> String {
@@ -292,6 +242,11 @@ struct ServerDetailView<Actions: View>: View {
                         }
                     }
                 }
+
+                ReliabilityCard(
+                    shareIDs: currentShares.map(\.id),
+                    lastCheckedAt: currentShares.compactMap { monitor.runtimeState(for: $0).lastCheckedAt }.max()
+                )
 
                 DetailCard("Server Details") {
                     DetailRow(
@@ -742,6 +697,114 @@ extension DetailCard where Accessory == EmptyView {
 struct ReliabilityDay {
     let problems: Int
     let latency: DailyLatency?
+}
+
+/// The last seven days of drops, failures and response times. For a server it
+/// combines every share on it: problems add up day by day, and response times
+/// are averaged across all the samples taken that day.
+private struct ReliabilityCard: View {
+    @EnvironmentObject private var appModel: AppModel
+    @EnvironmentObject private var eventLog: ShareEventLog
+    @EnvironmentObject private var latencyHistory: ShareLatencyHistory
+    let shareIDs: [NetworkShare.ID]
+    let lastCheckedAt: Date?
+
+    private var isCombined: Bool { shareIDs.count > 1 }
+
+    private struct Combined {
+        var summary: ShareReliabilitySummary
+        var problems: [Int]
+        var latency: [DailyLatency?]
+    }
+
+    private var combined: Combined {
+        let perShare = shareIDs.map { id -> Combined in
+            if let demo = appModel.screenshotDemoReliability(for: id) {
+                return Combined(summary: demo.summary, problems: demo.problems, latency: demo.latency)
+            }
+            return Combined(
+                summary: eventLog.reliabilitySummary(for: id),
+                problems: eventLog.dailyProblemCounts(for: id),
+                latency: latencyHistory.recent(for: id)
+            )
+        }
+
+        let dayCount = perShare.map(\.problems.count).max() ?? 7
+        let problems = (0..<dayCount).map { day in
+            perShare.reduce(0) { $0 + ($1.problems.indices.contains(day) ? $1.problems[day] : 0) }
+        }
+        let latency: [DailyLatency?] = (0..<dayCount).map { day in
+            let samples = perShare.compactMap { $0.latency.indices.contains(day) ? $0.latency[day] : nil }
+            guard let first = samples.first else { return nil }
+            return samples.dropFirst().reduce(first) { merged, next in
+                DailyLatency(
+                    day: merged.day,
+                    sampleCount: merged.sampleCount + next.sampleCount,
+                    totalMilliseconds: merged.totalMilliseconds + next.totalMilliseconds,
+                    slowestMilliseconds: max(merged.slowestMilliseconds, next.slowestMilliseconds)
+                )
+            }
+        }
+        let summary = ShareReliabilitySummary(
+            connectionDrops: perShare.reduce(0) { $0 + $1.summary.connectionDrops },
+            failures: perShare.reduce(0) { $0 + $1.summary.failures },
+            healthFailures: perShare.reduce(0) { $0 + $1.summary.healthFailures },
+            lastProblemAt: perShare.compactMap(\.summary.lastProblemAt).max()
+        )
+        return Combined(summary: summary, problems: problems, latency: latency)
+    }
+
+    var body: some View {
+        let data = combined
+        let summary = data.summary
+        let days = zip(data.problems, data.latency).map { ReliabilityDay(problems: $0, latency: $1) }
+
+        DetailCard("Reliability") {
+            HStack(spacing: 8) {
+                Image(systemName: summary.isStable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(summary.isStable ? Color.green : Color.orange)
+                    .accessibilityHidden(true)
+                Text(summary.isStable
+                     ? "No recorded problems"
+                     : "\(String.counted(summary.connectionDrops, "drop")) · \(String.counted(summary.failures, "failure")) · \(String.counted(summary.healthFailures, "health warning"))")
+                    .font(.headline)
+                Text(isCombined ? "Last 7 days · \(String.counted(shareIDs.count, "share"))" : "Last 7 days")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            ReliabilityStrip(days: days)
+
+            VStack(alignment: .leading, spacing: 4) {
+                if let responseText = responseTimeText(data.latency) {
+                    Text(responseText)
+                } else {
+                    Text("Response times appear after Otter's next few checks.")
+                }
+                if let lastProblemAt = summary.lastProblemAt {
+                    Text("Last problem \(lastProblemAt.formatted(date: .abbreviated, time: .shortened))")
+                }
+                if let lastCheckedAt {
+                    Text("Last checked \(lastCheckedAt.formatted(.relative(presentation: .named)))")
+                }
+            }
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    /// "Response time 12 ms today · 14 ms over 7 days".
+    private func responseTimeText(_ latency: [DailyLatency?]) -> String? {
+        let measured = latency.compactMap { $0 }
+        guard !measured.isEmpty else { return nil }
+        let samples = measured.reduce(0) { $0 + $1.sampleCount }
+        let weekAverage = measured.reduce(0) { $0 + $1.totalMilliseconds } / Double(samples)
+        let milliseconds = ShareDetailView<EmptyView>.milliseconds
+        if let today = latency.last ?? nil {
+            return "Response time \(milliseconds(today.averageMilliseconds)) today · \(milliseconds(weekAverage)) over 7 days"
+        }
+        return "Response time \(milliseconds(weekAverage)) over 7 days"
+    }
 }
 
 /// Seven bars, oldest to newest. Green is a day Otter measured the share and
