@@ -1,5 +1,5 @@
+import Darwin
 import Foundation
-import Network
 
 struct LatencyTester {
     func test(address: String) async -> LatencyDiagnostic? {
@@ -20,13 +20,15 @@ struct LatencyTester {
 /// Round-trip time to a share's server, measured as the time to open a TCP
 /// connection to its port. That is what `ping` reports, give or take a
 /// handshake, so the number can be compared with it directly. Name resolution
-/// happens first and is not timed.
+/// happens first and is not timed. A plain socket is used on purpose:
+/// `NWConnection` spends tens of milliseconds on path setup before it reports
+/// ready, which would swamp a sub-millisecond LAN round trip.
 enum TCPLatencyProbe {
-    /// Milliseconds to connect, or nil if the server did not answer in time.
+    /// Milliseconds to connect (the best of a few tries, to shed scheduling
+    /// noise), or nil if the server did not answer in time.
     static func measure(url: URL, timeout: TimeInterval = 1) async -> Double? {
         guard let host = url.host(percentEncoded: false),
-              let rawPort = NetworkReachabilityService.reachabilityPort(for: url),
-              let port = NWEndpoint.Port(rawValue: rawPort)
+              let port = NetworkReachabilityService.reachabilityPort(for: url)
         else { return nil }
 
         var address = host
@@ -35,50 +37,50 @@ enum TCPLatencyProbe {
             address = resolved
         }
 
-        let queue = DispatchQueue(label: "Otter.TCPLatencyProbe", qos: .utility)
-        let connection = NWConnection(host: NWEndpoint.Host(address), port: port, using: .tcp)
-
         return await withCheckedContinuation { continuation in
-            let attempt = Attempt(connection: connection, continuation: continuation)
-            let start = ContinuousClock.now
-
-            connection.stateUpdateHandler = { @Sendable state in
-                switch state {
-                case .ready:
-                    let elapsed = ContinuousClock.now - start
-                    attempt.finish(
-                        Double(elapsed.components.seconds) * 1000
-                            + Double(elapsed.components.attoseconds) / 1e15
-                    )
-                case .failed, .waiting:
-                    attempt.finish(nil)
-                default:
-                    break
+            DispatchQueue.global(qos: .utility).async {
+                var best: Double?
+                for _ in 0..<3 {
+                    guard let sample = connectTime(address: address, port: port, timeout: timeout) else { break }
+                    best = min(best ?? sample, sample)
                 }
+                continuation.resume(returning: best)
             }
-            connection.start(queue: queue)
-            queue.asyncAfter(deadline: .now() + timeout) { attempt.finish(nil) }
         }
     }
 
-    private final class Attempt: @unchecked Sendable {
-        private let connection: NWConnection
-        private let continuation: CheckedContinuation<Double?, Never>
-        private let lock = NSLock()
-        private var didResume = false
+    private static func connectTime(address: String, port: UInt16, timeout: TimeInterval) -> Double? {
+        // A scoped IPv6 address ("fe80::1%en0") resolves fine here too.
+        var hints = addrinfo(
+            ai_flags: AI_NUMERICHOST | AI_NUMERICSERV, ai_family: AF_UNSPEC, ai_socktype: SOCK_STREAM,
+            ai_protocol: IPPROTO_TCP, ai_addrlen: 0, ai_canonname: nil, ai_addr: nil, ai_next: nil
+        )
+        var results: UnsafeMutablePointer<addrinfo>?
+        guard getaddrinfo(address, String(port), &hints, &results) == 0, let info = results else { return nil }
+        defer { freeaddrinfo(results) }
 
-        init(connection: NWConnection, continuation: CheckedContinuation<Double?, Never>) {
-            self.connection = connection
-            self.continuation = continuation
-        }
+        let descriptor = socket(info.pointee.ai_family, info.pointee.ai_socktype, info.pointee.ai_protocol)
+        guard descriptor >= 0 else { return nil }
+        defer { close(descriptor) }
 
-        func finish(_ result: Double?) {
-            lock.lock()
-            guard !didResume else { lock.unlock(); return }
-            didResume = true
-            lock.unlock()
-            connection.cancel()
-            continuation.resume(returning: result)
+        let flags = fcntl(descriptor, F_GETFL)
+        guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) >= 0 else { return nil }
+        var noSigPipe: Int32 = 1
+        setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
+
+        let start = ContinuousClock.now
+        if connect(descriptor, info.pointee.ai_addr, info.pointee.ai_addrlen) != 0 {
+            guard errno == EINPROGRESS else { return nil }
+            var poller = pollfd(fd: descriptor, events: Int16(POLLOUT), revents: 0)
+            guard poll(&poller, 1, Int32(timeout * 1000)) > 0 else { return nil }
+            var socketError: Int32 = 0
+            var length = socklen_t(MemoryLayout<Int32>.size)
+            guard getsockopt(descriptor, SOL_SOCKET, SO_ERROR, &socketError, &length) == 0,
+                  socketError == 0
+            else { return nil }
         }
+        let elapsed = ContinuousClock.now - start
+        return Double(elapsed.components.seconds) * 1000
+            + Double(elapsed.components.attoseconds) / 1e15
     }
 }
