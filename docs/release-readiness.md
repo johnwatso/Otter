@@ -36,8 +36,10 @@ expected behavior.
 - Permissions: test both allow and deny paths for Local Network,
   Notifications, and Location Services. Wi-Fi-name rules may be unavailable
   without Location Services; subnet rules must continue to work.
-- Protocols: mount and reconnect representative SMB, NFS, and WebDAV shares.
-  Verify the Finder credential flow without placing a password in a share URL.
+- Protocols: Otter 1.0 supports SMB. Mount and reconnect representative SMB
+  shares (including an alias such as `server.local`) and verify the Finder
+  credential flow without placing a password in a share URL. NFS and WebDAV
+  are not supported yet.
 - Resilience: exercise sleep/wake, Wi-Fi changes, an unavailable server, a
   manual disconnect, a VPN-only share, and an explicitly paused share.
 - Background behavior: enable launch at login, sign out or restart, then

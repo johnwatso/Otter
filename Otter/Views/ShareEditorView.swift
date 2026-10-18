@@ -36,6 +36,13 @@ struct ShareEditorView: View {
         NetworkShareProtocol(urlScheme: URL(string: draft.urlString)?.scheme) ?? .smb
     }
 
+    /// Otter supports SMB shares. A share that already uses another protocol
+    /// (saved earlier or deployed by managed configuration) keeps working and
+    /// stays editable, but new shares are SMB only.
+    private var allowsOtherProtocols: Bool {
+        sourceShare?.connectionProtocol.map { $0 != .smb } ?? false
+    }
+
     private var protocolSelection: Binding<NetworkShareProtocol> {
         Binding {
             selectedProtocol
@@ -525,9 +532,11 @@ struct ShareEditorView: View {
                         .id(ValidationField.address)
                     validationNotice(for: .address)
 
-                    Picker("Protocol", selection: protocolSelection) {
-                        ForEach(NetworkShareProtocol.allCases, id: \.self) { protocolKind in
-                            Text(protocolKind.title).tag(protocolKind)
+                    if allowsOtherProtocols {
+                        Picker("Protocol", selection: protocolSelection) {
+                            ForEach(NetworkShareProtocol.allCases, id: \.self) { protocolKind in
+                                Text(protocolKind.title).tag(protocolKind)
+                            }
                         }
                     }
 
@@ -1336,7 +1345,14 @@ struct ShareEditorView: View {
         guard let components = networkURLComponents(from: draft.urlString) else {
             return ValidationIssue(
                 field: .address,
-                message: "Use an SMB, NFS, or WebDAV address such as smb://server.local/Share."
+                message: "Use an SMB address such as smb://server.local/Share."
+            )
+        }
+
+        if !allowsOtherProtocols, components.scheme?.lowercased() != "smb" {
+            return ValidationIssue(
+                field: .address,
+                message: "Otter supports SMB shares. Use an address such as smb://server.local/Share."
             )
         }
 

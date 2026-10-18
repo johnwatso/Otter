@@ -6,7 +6,7 @@ issues first and include:
 
 - Otter version and build, macOS version, and whether the Mac is Apple silicon
   or Intel.
-- Share protocol (SMB, NFS, or WebDAV), connection mode, and whether the
+- Connection mode, and whether the
   problem follows sleep, a network change, or VPN use.
 - What you expected, what happened, and steps that reproduce it.
 - A diagnostic export, only after reviewing it.
