@@ -540,15 +540,6 @@ struct ShareEditorView: View {
                         }
                     }
 
-                    if isEditing {
-                        Button {
-                            chooseMountedShare()
-                        } label: {
-                            Label("Auto-fill details from Finder…", systemImage: "arrow.down.doc.fill")
-                        }
-                        .tahoeCompactActionButton()
-                        .padding(.vertical, 2)
-                    }
                 }
             }
 
