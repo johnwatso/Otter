@@ -1035,17 +1035,21 @@ struct DetailRow: View {
                 .frame(minWidth: 96, alignment: .leading)
             Spacer()
 
-            // Appears to the left of the value on hover, so every value keeps
-            // the same right edge whether or not its row can be copied.
-            if isHovering, let copyValue, !copyValue.isEmpty {
+            // Sits to the left of the value so every value keeps the same right
+            // edge. It is always laid out and only fades in on hover, so the row
+            // never changes size and nothing jiggles as the pointer moves over it.
+            if let copyValue, !copyValue.isEmpty {
                 Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(copyValue, forType: .string)
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .imageScale(.small)
+                        .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.borderless)
+                .opacity(isHovering ? 1 : 0)
+                .allowsHitTesting(isHovering)
                 .help("Copy \(label.lowercased())")
                 .accessibilityLabel("Copy \(label.lowercased())")
             }
