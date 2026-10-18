@@ -689,25 +689,30 @@ struct ShareEditorView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Button {
-                testSetup()
-            } label: {
-                if isTestingSetup {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Testing Setup\u{2026}")
-                    }
-                } else {
-                    Label("Test Setup", systemImage: "checkmark.circle.badge.questionmark")
-                }
-            }
-            .tahoeSecondaryActionButton()
-            .disabled(isTestingSetup)
+            HStack(alignment: .center, spacing: 12) {
+                Text("Checks the network, VPN connection, credentials, SMB service, and mount. macOS may ask you to sign in or choose a share.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            Text("Checks the network, VPN connection, credentials, SMB service, and mount. macOS may ask you to sign in or choose a share.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+
+                Button {
+                    testSetup()
+                } label: {
+                    if isTestingSetup {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Testing Setup\u{2026}")
+                        }
+                    } else {
+                        Label("Test Setup", systemImage: "checkmark.circle.badge.questionmark")
+                    }
+                }
+                .tahoeSecondaryActionButton()
+                .disabled(isTestingSetup)
+            }
 
             if let readinessReport {
                 ForEach(readinessReport.steps) { step in
