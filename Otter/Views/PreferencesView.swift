@@ -61,7 +61,6 @@ struct ShareManagementView: View {
     @State private var didRegisterWindowAppearance = false
     @State private var isShowingActivityLog = false
     @State private var connectionDoctorShare: NetworkShare?
-    @State private var advancedDiagnosticsShare: NetworkShare?
     @State private var shareToRemove: NetworkShare?
     @State private var isAskingPauseDuration = false
     @State private var collapsedServerIDs = Set<String>()
@@ -215,18 +214,7 @@ struct ShareManagementView: View {
             Text("Otter reconnects shares automatically. Choose how long to leave it paused.")
         }
         .sheet(item: $connectionDoctorShare) { share in
-            ConnectionDoctorView(share: share) { advancedShare in
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 350_000_000)
-                    advancedDiagnosticsShare = advancedShare
-                }
-            }
-        }
-        .sheet(item: $advancedDiagnosticsShare) { share in
-            NASDiagnosticsView(
-                shares: NetworkShareServerGroup.diagnosticShares(containing: share, in: settings.shares),
-                title: nil
-            )
+            ConnectionDoctorView(share: share)
         }
         .sheet(isPresented: $isShowingOnboarding) {
             OnboardingView { share in
@@ -825,6 +813,7 @@ private struct SidebarStatusFooter: View {
 private struct ServerListHeader: View {
     @EnvironmentObject private var settings: SettingsStore
     let group: NetworkShareServerGroup
+    @EnvironmentObject private var appModel: AppModel
     @EnvironmentObject private var monitor: ShareMonitor
     @State private var isRenaming = false
     @State private var draftName = ""
@@ -841,7 +830,7 @@ private struct ServerListHeader: View {
                     .foregroundStyle(.secondary)
             }
         } icon: {
-            Image(systemName: "server.rack")
+            Image(systemName: appModel.serverIcon(for: representativeShare))
                 .foregroundStyle(.secondary)
                 .frame(width: 22)
         }
@@ -1576,6 +1565,7 @@ private struct EmptyShareDetailView: View {
 }
 
 private struct ShareListRow: View {
+    @EnvironmentObject private var appModel: AppModel
     @EnvironmentObject private var monitor: ShareMonitor
     let share: NetworkShare
 
@@ -1583,7 +1573,7 @@ private struct ShareListRow: View {
         let status = monitor.status(for: share)
 
         HStack(spacing: 8) {
-            Image(systemName: "externaldrive.fill")
+            Image(systemName: appModel.shareIcon(for: share))
                 .foregroundStyle(.secondary)
                 .frame(width: 20)
                 .accessibilityHidden(true)

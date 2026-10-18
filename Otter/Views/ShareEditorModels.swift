@@ -74,6 +74,14 @@ struct MountedShareSuggestion: Identifiable, Hashable, Sendable {
         return location == otherLocation
     }
 
+    /// A server-only Keychain item is intentionally not treated as this
+    /// mounted share: it can still be used to choose another share on the same
+    /// server. Items with a share path can be matched exactly, including the
+    /// common Bonjour and `.local` aliases normalized by NetworkShareLocation.
+    func matches(savedShare: SavedSMBShare) -> Bool {
+        savedShare.hasSharePath && matches(url: savedShare.connectionURL)
+    }
+
     static func finderImportCandidates(
         in suggestions: [MountedShareSuggestion],
         for server: DiscoveredSMBServer,

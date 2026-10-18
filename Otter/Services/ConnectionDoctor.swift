@@ -373,13 +373,24 @@ final class ConnectionDoctor {
         }
 
         let runtimeState = monitor.runtimeState(for: share)
-        if let lastCheckedAt = runtimeState.lastCheckedAt {
-            let retryDetail = runtimeState.nextRetryDate.map {
-                " Next automatic retry: \($0.formatted(date: .omitted, time: .shortened))."
-            } ?? ""
+        if share.maintainsConnection {
+            let isHealthy = monitor.status(for: share) == .connected
+            var detail = "Otter watches this share in the background and reconnects it if it drops."
+            if let lastCheckedAt = runtimeState.lastCheckedAt {
+                detail += " Last checked \(lastCheckedAt.formatted(date: .omitted, time: .standard))."
+            }
+            if !isHealthy, let nextRetry = runtimeState.nextRetryDate {
+                detail += " Next automatic retry: \(nextRetry.formatted(date: .omitted, time: .shortened))."
+            }
             steps.append(.init(
-                title: "Otter monitor",
-                detail: "Last checked \(lastCheckedAt.formatted(date: .omitted, time: .standard)).\(retryDetail)",
+                title: "Background monitoring",
+                detail: detail,
+                status: isHealthy ? .passed : .information
+            ))
+        } else {
+            steps.append(.init(
+                title: "Background monitoring",
+                detail: "Otter isn’t watching this share because its connection mode only connects when asked or once at launch.",
                 status: .information
             ))
         }

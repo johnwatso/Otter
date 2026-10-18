@@ -19,12 +19,15 @@ struct ShareDetailView<Actions: View>: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 DetailHeader(
-                    symbol: "externaldrive.fill",
+                    symbol: appModel.shareIcon(for: currentShare),
                     title: currentShare.displayName,
                     status: status,
                     statusContext: statusContext,
                     lines: statusLines(status: status, runtimeState: runtimeState),
                     warning: dropWarning,
+                    symbolChoices: ShareSymbol.choices,
+                    defaultSymbol: ShareSymbol.default,
+                    onSelectSymbol: { settings.setShareIcon($0, for: currentShare) },
                     actions: actions
                 )
 
@@ -209,13 +212,17 @@ struct ServerDetailView<Actions: View>: View {
     let onSelectShare: (NetworkShare) -> Void
     @ViewBuilder let actions: () -> Actions
 
+    private var serverSymbol: String {
+        group.shares.first.map { appModel.serverIcon(for: $0) } ?? ServerSymbol.default
+    }
+
     var body: some View {
         let summary = statusSummary
 
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 DetailHeader(
-                    symbol: "server.rack",
+                    symbol: serverSymbol,
                     title: group.serverName,
                     status: summary.status,
                     statusText: summary.label,
@@ -223,6 +230,9 @@ struct ServerDetailView<Actions: View>: View {
                     warning: connectionDropCount > 0
                         ? "Dropped \(String.counted(connectionDropCount, "time")) across this server in the last 24 hours"
                         : nil,
+                    onSelectSymbol: group.shares.first.map { share in
+                        { settings.setServerIcon($0, for: share) }
+                    },
                     actions: actions
                 )
 
@@ -321,7 +331,7 @@ private struct ServerShareRow: View {
         let isConnected = status == .connected
 
         HStack(spacing: 12) {
-            Image(systemName: "externaldrive.fill")
+            Image(systemName: appModel.shareIcon(for: share))
                 .font(.title3)
                 .foregroundStyle(.secondary)
                 .frame(width: 32, height: 32)
@@ -594,17 +604,41 @@ struct DetailHeader<Actions: View>: View {
     var statusContext: String?
     var lines: [String] = []
     var warning: String?
+    /// When set, the icon becomes a button that lets the user pick another symbol.
+    var symbolChoices: [SymbolChoice] = ServerSymbol.choices
+    var defaultSymbol: String = ServerSymbol.default
+    var onSelectSymbol: ((String?) -> Void)?
     @ViewBuilder let actions: () -> Actions
+
+    @State private var isPickingSymbol = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 18) {
-                Image(systemName: symbol)
-                    .font(.largeTitle)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 64, height: 64)
-                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .accessibilityHidden(true)
+                if let onSelectSymbol {
+                    Button {
+                        isPickingSymbol = true
+                    } label: {
+                        symbolTile
+                    }
+                    .buttonStyle(.plain)
+                    .help("Change icon")
+                    .accessibilityLabel("Change icon")
+                    .popover(isPresented: $isPickingSymbol, arrowEdge: .bottom) {
+                        SymbolPicker(
+                            title: "Icon",
+                            choices: symbolChoices,
+                            defaultSymbol: defaultSymbol,
+                            selection: symbol
+                        ) { choice in
+                            onSelectSymbol(choice)
+                            isPickingSymbol = false
+                        }
+                    }
+                } else {
+                    symbolTile
+                        .accessibilityHidden(true)
+                }
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
@@ -640,6 +674,128 @@ struct DetailHeader<Actions: View>: View {
             }
         }
         .accessibilityElement(children: .contain)
+    }
+
+    private var symbolTile: some View {
+        Image(systemName: symbol)
+            .font(.largeTitle)
+            .foregroundStyle(.secondary)
+            .frame(width: 64, height: 64)
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+struct SymbolChoice: Hashable {
+    let symbol: String
+    let name: String
+
+    init(_ symbol: String, _ name: String) {
+        self.symbol = symbol
+        self.name = name
+    }
+}
+
+/// The symbols a share can be shown with.
+enum ShareSymbol {
+    static let `default` = "externaldrive.fill"
+
+    static let choices: [SymbolChoice] = [
+        SymbolChoice("externaldrive.fill", "Drive"),
+        SymbolChoice("folder.fill", "Folder"),
+        SymbolChoice("archivebox.fill", "Archive"),
+        SymbolChoice("clock.arrow.circlepath", "Backups"),
+        SymbolChoice("photo.on.rectangle", "Photos"),
+        SymbolChoice("film.stack", "Movies"),
+        SymbolChoice("play.rectangle.fill", "Video"),
+        SymbolChoice("tv.fill", "TV"),
+        SymbolChoice("music.note", "Music"),
+        SymbolChoice("camera.fill", "Camera"),
+        SymbolChoice("doc.fill", "Documents"),
+        SymbolChoice("briefcase.fill", "Work"),
+        SymbolChoice("person.2.fill", "Shared"),
+        SymbolChoice("house.fill", "Home"),
+        SymbolChoice("books.vertical.fill", "Library"),
+        SymbolChoice("gamecontroller.fill", "Games"),
+        SymbolChoice("shippingbox.fill", "Storage"),
+        SymbolChoice("lock.fill", "Private"),
+        SymbolChoice("cloud.fill", "Cloud"),
+        SymbolChoice("externaldrive.fill.badge.timemachine", "Time Machine"),
+    ]
+}
+
+/// The symbols a server can be shown with.
+enum ServerSymbol {
+    static let `default` = "server.rack"
+
+    static let choices: [SymbolChoice] = [
+        SymbolChoice("server.rack", "Server rack"),
+        SymbolChoice("macpro.gen3.server", "Mac Pro rack"),
+        SymbolChoice("macpro.gen3", "Mac Pro (2019)"),
+        SymbolChoice("macpro.gen2", "Mac Pro (2013)"),
+        SymbolChoice("macpro.gen1", "Mac Pro (tower)"),
+        SymbolChoice("macstudio", "Mac Studio"),
+        SymbolChoice("macmini", "Mac mini"),
+        SymbolChoice("desktopcomputer", "Desktop"),
+        SymbolChoice("laptopcomputer", "Laptop"),
+        SymbolChoice("display", "Display"),
+        SymbolChoice("xserve", "Xserve"),
+        SymbolChoice("externaldrive.fill", "External drive"),
+        SymbolChoice("internaldrive.fill", "Internal drive"),
+        SymbolChoice("opticaldiscdrive.fill", "Disc drive"),
+        SymbolChoice("cpu", "Chip"),
+        SymbolChoice("airport.extreme", "Router"),
+        SymbolChoice("network", "Network"),
+        SymbolChoice("icloud.fill", "Cloud"),
+        SymbolChoice("house.fill", "Home"),
+        SymbolChoice("building.2.fill", "Office"),
+    ]
+}
+
+/// A grid of symbols to choose an icon from.
+struct SymbolPicker: View {
+    let title: String
+    let choices: [SymbolChoice]
+    let defaultSymbol: String
+    let selection: String
+    let onSelect: (String?) -> Void
+
+    private let columns = Array(repeating: GridItem(.fixed(44), spacing: 8), count: 5)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.headline)
+
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(choices, id: \.symbol) { choice in
+                    Button {
+                        onSelect(choice.symbol == defaultSymbol ? nil : choice.symbol)
+                    } label: {
+                        Image(systemName: choice.symbol)
+                            .font(.title2)
+                            .frame(width: 44, height: 44)
+                            .background(
+                                choice.symbol == selection
+                                    ? Color.accentColor.opacity(0.22)
+                                    : Color.primary.opacity(0.06),
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            )
+                            .overlay {
+                                if choice.symbol == selection {
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .stroke(Color.accentColor, lineWidth: 1.5)
+                                }
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .help(choice.name)
+                    .accessibilityLabel(choice.name)
+                    .accessibilityAddTraits(choice.symbol == selection ? .isSelected : [])
+                }
+            }
+        }
+        .padding(16)
     }
 }
 

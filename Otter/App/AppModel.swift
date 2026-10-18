@@ -115,6 +115,28 @@ final class AppModel: ObservableObject {
 #endif
     }
 
+    /// The icon to show for a share: the screenshot demo's, then the user's choice.
+    func shareIcon(for share: NetworkShare) -> String {
+#if DEBUG
+        if isScreenshotDemoEnabled, let symbol = ScreenshotDemo.shareIcons[share.id] {
+            return symbol
+        }
+#endif
+        return settings.shareIcon(for: share) ?? ShareSymbol.default
+    }
+
+    /// The icon to show for a share's server: the screenshot demo's, then the user's choice.
+    func serverIcon(for share: NetworkShare) -> String {
+#if DEBUG
+        if isScreenshotDemoEnabled,
+           let identity = share.serverIdentity,
+           let symbol = ScreenshotDemo.serverIcons[identity] {
+            return symbol
+        }
+#endif
+        return settings.serverIcon(for: share) ?? ServerSymbol.default
+    }
+
     func triggerOpenSharesWindow() {
         shouldOpenSharesWindow = true
     }
@@ -479,6 +501,28 @@ enum ScreenshotDemo {
             rules: ShareRules(wifiNetworkName: "Homebase", registeredSubnets: ["192.168.1.0/24"])
         ),
     ]
+
+    /// Icons that make the demo read like a real setup, keyed by share ID.
+    static let shareIcons: [NetworkShare.ID: String] = [
+        mediaID: "film.stack",
+        backupsID: "clock.arrow.circlepath",
+        timeMachineID: "externaldrive.fill.badge.timemachine",
+        photosID: "photo.on.rectangle",
+        projectsID: "folder.fill",
+        archiveID: "archivebox.fill",
+    ]
+
+    /// Server icons for the demo, keyed by `NetworkShare.serverIdentity`.
+    static var serverIcons: [String: String] {
+        var icons: [String: String] = [:]
+        let symbols = ["homenas.local": "xserve", "studio-server.local": "macstudio", "archive-nas.local": "server.rack"]
+        for share in shares {
+            if let identity = share.serverIdentity, let host = share.host, let symbol = symbols[host] {
+                icons[identity] = symbol
+            }
+        }
+        return icons
+    }
 
     static func runtimeState(for shareID: NetworkShare.ID) -> ShareRuntimeState? {
         let now = Date()

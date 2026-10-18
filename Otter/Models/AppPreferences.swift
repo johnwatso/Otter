@@ -165,6 +165,10 @@ struct AppPreferences: Codable, Equatable {
     /// Custom display names the user gave servers, keyed by
     /// `NetworkShare.serverIdentity`. These do not change network addresses.
     var serverNames: [String: String] = [:]
+    /// SF Symbol names the user picked for servers, keyed like `serverNames`.
+    var serverIcons: [String: String] = [:]
+    /// SF Symbol names the user picked for individual shares, keyed by share ID.
+    var shareIcons: [String: String] = [:]
 
     init(
         fallbackCheckInterval: TimeInterval = Self.defaultFallbackCheckInterval,
@@ -218,6 +222,8 @@ struct AppPreferences: Codable, Equatable {
         case autoUpdateInstallPolicy
         case autoUpdateInstallHour
         case serverNames
+        case serverIcons
+        case shareIcons
         case showDockIconWhenPreferencesOpen
     }
 
@@ -244,6 +250,8 @@ struct AppPreferences: Codable, Equatable {
         autoUpdateInstallPolicy = try container.decodeIfPresent(AutoUpdateInstallPolicy.self, forKey: .autoUpdateInstallPolicy) ?? .whenIdle
         autoUpdateInstallHour = try container.decodeIfPresent(Int.self, forKey: .autoUpdateInstallHour) ?? 3
         serverNames = try container.decodeIfPresent([String: String].self, forKey: .serverNames) ?? [:]
+        serverIcons = try container.decodeIfPresent([String: String].self, forKey: .serverIcons) ?? [:]
+        shareIcons = try container.decodeIfPresent([String: String].self, forKey: .shareIcons) ?? [:]
         normalize()
     }
 
@@ -265,6 +273,8 @@ struct AppPreferences: Codable, Equatable {
         try container.encode(autoUpdateInstallPolicy, forKey: .autoUpdateInstallPolicy)
         try container.encode(autoUpdateInstallHour, forKey: .autoUpdateInstallHour)
         try container.encode(serverNames, forKey: .serverNames)
+        try container.encode(serverIcons, forKey: .serverIcons)
+        try container.encode(shareIcons, forKey: .shareIcons)
     }
 
     mutating func normalize() {
@@ -274,6 +284,8 @@ struct AppPreferences: Codable, Equatable {
             let name = entry.value.trimmingCharacters(in: .whitespacesAndNewlines)
             if !name.isEmpty { names[entry.key] = name }
         }
+        serverIcons = serverIcons.filter { !$0.value.isEmpty }
+        shareIcons = shareIcons.filter { !$0.value.isEmpty }
         pauseState.clearIfExpired()
     }
 }

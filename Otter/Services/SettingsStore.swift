@@ -408,6 +408,31 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    /// The SF Symbol the user chose for this share's server, if any.
+    func serverIcon(for share: NetworkShare) -> String? {
+        share.serverIdentity.flatMap { preferences.serverIcons[$0] }
+    }
+
+    /// Sets the icon for every share on this share's server. Nil restores the default.
+    func setServerIcon(_ symbol: String?, for share: NetworkShare) {
+        guard let identity = share.serverIdentity else { return }
+        updatePreferences { preferences in
+            preferences.serverIcons[identity] = symbol
+        }
+    }
+
+    /// The SF Symbol the user chose for this share, if any.
+    func shareIcon(for share: NetworkShare) -> String? {
+        preferences.shareIcons[share.id.uuidString]
+    }
+
+    /// Nil restores the default share icon.
+    func setShareIcon(_ symbol: String?, for share: NetworkShare) {
+        updatePreferences { preferences in
+            preferences.shareIcons[share.id.uuidString] = symbol
+        }
+    }
+
     func updatePreferences(_ update: (inout AppPreferences) -> Void) {
         var updated = preferences
         update(&updated)

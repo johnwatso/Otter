@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import Otter
 
@@ -86,6 +87,27 @@ final class NetworkShareTests: XCTestCase {
         XCTAssertTrue(suggestion.matches(url: try XCTUnwrap(URL(string: "smb://john@NAS/Media/Movies"))))
         XCTAssertFalse(suggestion.matches(url: try XCTUnwrap(URL(string: "smb://nas.local/Backups"))))
         XCTAssertFalse(suggestion.matches(url: try XCTUnwrap(URL(string: "smb://nas.local/"))))
+    }
+
+    func testMountedSuggestionMatchesExactSavedShareAcrossServerAliases() throws {
+        let suggestion = MountedShareSuggestion(
+            displayName: "Vault",
+            urlString: "smb://RoonieNAS-Pro.local/Vault",
+            mountPath: "/Volumes/Vault"
+        )
+        let sameShare = try XCTUnwrap(
+            SavedSMBShare(host: "RoonieNAS-Pro._smb._tcp.local", path: "Vault")
+        )
+        let otherShare = try XCTUnwrap(
+            SavedSMBShare(host: "RoonieNAS-Pro", path: "Media")
+        )
+        let serverOnly = try XCTUnwrap(
+            SavedSMBShare(host: "RoonieNAS-Pro._smb._tcp.local")
+        )
+
+        XCTAssertTrue(suggestion.matches(savedShare: sameShare))
+        XCTAssertFalse(suggestion.matches(savedShare: otherShare))
+        XCTAssertFalse(suggestion.matches(savedShare: serverOnly))
     }
 
     func testFinderImportCandidatesPreferTheSelectedBonjourServer() {
@@ -5254,59 +5276,6 @@ extension NASDiagnosticsTests {
         XCTAssertEqual(calls, 1)
         XCTAssertNil(outcome.comparison)
         XCTAssertFalse(outcome.restorationRequired)
-    }
-}
-
-import SwiftUI
-
-extension NASDiagnosticsTests {
-    @MainActor
-    func testDiagnosticsPanelRendersAtSupportedHeights() async throws {
-        let appModel = AppModel(isRunningTests: true)
-        let model = NASDiagnosticsViewModel()
-        model.result = healthyNASResult()
-        model.status = "Diagnostics complete"
-        let share = NetworkShare(displayName: "RoonieNAS-Pro", urlString: "smb://nas.local/Vault", mountPath: "/Volumes/Vault")
-        for height in [680, 480] {
-            let root = NASDiagnosticsView(share: share, model: model)
-                .environmentObject(appModel).environmentObject(appModel.monitor)
-            let host = NSHostingView(rootView: root)
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: height), styleMask: .borderless, backing: .buffered, defer: false)
-            window.contentView = host
-            host.frame = NSRect(x: 0, y: 0, width: 620, height: height)
-            host.layoutSubtreeIfNeeded()
-            try await Task.sleep(nanoseconds: 200_000_000)
-            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-            host.cacheDisplay(in: host.bounds, to: bitmap)
-            let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
-            XCTAssertGreaterThan(png.count, 1000)
-            try png.write(to: URL(fileURLWithPath: "/tmp/otter-diagnostics-preview-\(height).png"))
-            window.contentView = nil
-        }
-    }
-
-    /// A server's shares share one diagnostics sheet, so busy state and
-    /// results span every share.
-    @MainActor
-    func testServerDiagnosticsSessionSpansEveryShare() {
-        let media = NetworkShare(displayName: "Media", urlString: "smb://nas.local/Media", mountPath: "/Volumes/Media")
-        let backups = NetworkShare(displayName: "Backups", urlString: "smb://nas.local/Backups", mountPath: "/Volumes/Backups")
-        let mediaModel = NASDiagnosticsViewModel()
-        let session = NASDiagnosticsSession(shares: [media, backups], models: [media.id: mediaModel])
-
-        XCTAssertTrue(session.model(for: media) === mediaModel)
-        XCTAssertFalse(session.hasResults)
-        XCTAssertFalse(session.isBusy)
-        XCTAssertEqual(session.serverReport(), "")
-
-        mediaModel.result = healthyNASResult()
-        XCTAssertTrue(session.hasResults)
-        XCTAssertFalse(session.serverReport().isEmpty)
-
-        session.model(for: backups).testing = true
-        XCTAssertTrue(session.isBusy)
-        XCTAssertTrue(session.blocksDismissal)
-        XCTAssertTrue(session.isCancellable)
     }
 }
 

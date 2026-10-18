@@ -46,6 +46,7 @@ struct OnboardingView: View {
         savedShares.filter { saved in
             guard saved.hasSharePath, let url = saved.connectionURL else { return true }
             return !settings.isDuplicateShare(urlString: url.absoluteString)
+                && !mountedShares.contains { $0.matches(savedShare: saved) }
         }
     }
 

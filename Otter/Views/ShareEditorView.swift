@@ -659,7 +659,12 @@ struct ShareEditorView: View {
     @ViewBuilder
     private var healthCheckSettings: some View {
         if draft.healthCheck.isEnabled {
-            Toggle("Require writable volume", isOn: $draft.healthCheck.requiresWritableVolume)
+            BehaviourRow(
+                symbol: "pencil",
+                title: "Require writable volume",
+                subtitle: "Confirm Otter can create and remove a small test file.",
+                isOn: $draft.healthCheck.requiresWritableVolume
+            )
         }
     }
 
