@@ -28,10 +28,9 @@ struct PreferencesView: View {
                 .tag(PreferencesTab.updates)
         }
         .padding(.top, -2)
-        // Tabs differ a lot in height; a floor keeps the window from snapping
-        // small when switching from Advanced back to General.
-        .frame(width: 520)
-        .frame(minHeight: 620, alignment: .top)
+        // A fixed, compact height keeps the window from resizing between
+        // tabs; each tab's form scrolls when it needs more room.
+        .frame(width: 520, height: 360, alignment: .top)
         .onAppear {
             if !didRegisterWindowAppearance {
                 didRegisterWindowAppearance = true
