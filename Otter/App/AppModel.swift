@@ -115,14 +115,19 @@ final class AppModel: ObservableObject {
 #endif
     }
 
-    /// The icon to show for a share: the screenshot demo's, then the user's choice.
-    func shareIcon(for share: NetworkShare) -> String {
+    /// The icon the user (or the screenshot demo) chose for a share, if any.
+    func customShareIcon(for share: NetworkShare) -> String? {
 #if DEBUG
         if isScreenshotDemoEnabled, let symbol = ScreenshotDemo.shareIcons[share.id] {
             return symbol
         }
 #endif
-        return settings.shareIcon(for: share) ?? ShareSymbol.default
+        return settings.shareIcon(for: share)
+    }
+
+    /// The icon to show for a share: its chosen icon, else the default drive.
+    func shareIcon(for share: NetworkShare) -> String {
+        customShareIcon(for: share) ?? ShareSymbol.default
     }
 
     /// The icon to show for a share's server: the screenshot demo's, then the user's choice.

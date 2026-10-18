@@ -307,16 +307,16 @@ struct ShareManagementView: View {
                 if showsServerHeading(group) {
                     DisclosureGroup(isExpanded: expansionBinding(for: group.id)) {
                         ForEach(group.shares) { share in
-                            ShareListRow(share: share)
+                            ShareListRow(share: share, isSelected: selection == .share(share.id))
                                 .tag(ShareManagementSelection.share(share.id))
                                 .contextMenu { shareContextMenu(share) }
                         }
                     } label: {
-                        ServerListHeader(group: group)
+                        ServerListHeader(group: group, isSelected: selection == .server(group.id))
                     }
                     .tag(ShareManagementSelection.server(group.id))
                 } else if let share = group.shares.first {
-                    ShareListRow(share: share)
+                    ShareListRow(share: share, isSelected: selection == .share(share.id))
                         .tag(ShareManagementSelection.share(share.id))
                         .contextMenu { shareContextMenu(share) }
                 }
@@ -812,6 +812,7 @@ private struct SidebarStatusFooter: View {
 private struct ServerListHeader: View {
     @EnvironmentObject private var settings: SettingsStore
     let group: NetworkShareServerGroup
+    let isSelected: Bool
     @EnvironmentObject private var appModel: AppModel
     @EnvironmentObject private var monitor: ShareMonitor
     @State private var isRenaming = false
@@ -826,11 +827,11 @@ private struct ServerListHeader: View {
                 Spacer(minLength: 0)
                 Text("\(connectedCount)/\(group.shares.count)")
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(isSelected ? AnyShapeStyle(.white.opacity(0.85)) : AnyShapeStyle(.secondary))
             }
         } icon: {
             Image(systemName: appModel.serverIcon(for: representativeShare))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
                 .frame(width: 22)
         }
         .padding(.vertical, 3)
@@ -1565,8 +1566,10 @@ private struct EmptyShareDetailView: View {
 
 private struct ShareListRow: View {
     @EnvironmentObject private var appModel: AppModel
+    @Environment(\.backgroundProminence) private var backgroundProminence
     @EnvironmentObject private var monitor: ShareMonitor
     let share: NetworkShare
+    let isSelected: Bool
 
     var body: some View {
         let status = monitor.status(for: share)
@@ -1595,7 +1598,9 @@ private struct ShareListRow: View {
             // Trailing, so every row's indicator lines up whatever the name length.
             Image(systemName: status.circleSymbol)
                 .font(.caption2)
-                .foregroundStyle(status.tint)
+                // Green on the selection's blue is hard to see, so the symbol goes
+                // white there; its shape still says which state it is.
+                .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(status.tint))
                 .accessibilityHidden(true)
         }
         .padding(.vertical, 2)

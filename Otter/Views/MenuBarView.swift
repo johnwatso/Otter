@@ -252,7 +252,10 @@ private struct ShareMenu: View {
             Label {
                 Text(status == .connected ? share.displayName : "\(share.displayName) – \(status.label)")
             } icon: {
-                Image(systemName: status.systemImage)
+                // A share the user gave an icon shows it; otherwise the icon
+                // reflects its state. Anything but healthy is also spelled out
+                // in the title.
+                Image(systemName: appModel.customShareIcon(for: share) ?? status.systemImage)
             }
         }
     }
