@@ -3,6 +3,7 @@ import Foundation
 
 enum ShareEventKind: String, Codable {
     case mounted
+    case reconnected
     case connectionLost
     case disconnected
     case blockedByRule
@@ -58,7 +59,17 @@ final class ShareEventLog: ObservableObject {
         }
     }
 
-    func record(_ kind: ShareEventKind, for share: NetworkShare, detail: String? = nil) {
+    func record(_ requestedKind: ShareEventKind, for share: NetworkShare, detail: String? = nil) {
+        var kind = requestedKind
+        var detail = detail
+        // A mount straight after a drop is a reconnect, not a fresh mount.
+        if kind == .mounted,
+           let previous = events.first(where: { $0.shareID == share.id }),
+           [.connectionLost, .unresponsiveDetected, .healthCheckFailed].contains(previous.kind) {
+            kind = .reconnected
+            detail = detail ?? "Connection restored"
+        }
+
         if let latest = events.first(where: { $0.shareID == share.id }),
            latest.kind == kind,
            latest.detail == detail,

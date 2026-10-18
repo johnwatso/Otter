@@ -1,12 +1,66 @@
+import AppKit
 import SwiftUI
 
-// Dense, flat activity list in the SwiftMiner event log style.
+private enum ActivityEventFilter: String, CaseIterable, Identifiable {
+    case all = "All Events"
+    case connections = "Connections"
+    case problems = "Warnings & Errors"
+
+    var id: String { rawValue }
+
+    func includes(_ kind: ShareEventKind) -> Bool {
+        switch self {
+        case .all: true
+        case .connections: kind.isConnectionEvent
+        case .problems: kind.severity != .info
+        }
+    }
+}
+
+private struct ActivityDayGroup: Identifiable {
+    let day: Date
+    let events: [ShareEvent]
+    var id: Date { day }
+}
+
+// Adjacent identical events (same share, kind and detail) shown as one row.
+// Newest first. Errors and credential prompts are never merged.
+private struct ActivityEventRun: Identifiable {
+    let events: [ShareEvent]
+    var id: ShareEvent.ID { events[0].id }
+
+    static func runs(from events: [ShareEvent]) -> [ActivityEventRun] {
+        var result: [[ShareEvent]] = []
+        for event in events {
+            if let last = result.last?.first,
+               event.kind.isCollapsible,
+               last.shareID == event.shareID,
+               last.kind == event.kind,
+               last.detail == event.detail {
+                result[result.count - 1].append(event)
+            } else {
+                result.append([event])
+            }
+        }
+        return result.map(ActivityEventRun.init)
+    }
+}
+
+private struct ActivitySummary {
+    var mounts = 0
+    var reconnects = 0
+    var errors = 0
+}
+
+// Date-grouped activity list with a 24-hour summary and expandable rows.
 struct ActivityLogView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appModel: AppModel
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var eventLog: ShareEventLog
     @State private var shareFilter: NetworkShare.ID?
+    @State private var eventFilter: ActivityEventFilter = .all
+    @State private var expandedIDs: Set<ShareEvent.ID> = []
     @State private var isConfirmingClear = false
     private let includedShareIDs: Set<NetworkShare.ID>?
     private let includedSharesLabel: String?
@@ -25,8 +79,13 @@ struct ActivityLogView: View {
         appModel.screenshotDemoShares ?? settings.shares
     }
 
-    private var visibleEvents: [ShareEvent] {
-        let events = appModel.screenshotDemoEvents ?? eventLog.events(for: nil)
+    private var storedEvents: [ShareEvent] {
+        appModel.screenshotDemoEvents ?? eventLog.events(for: nil)
+    }
+
+    // Events for the selected share(s), before the event-type filter.
+    private var scopedEvents: [ShareEvent] {
+        let events = storedEvents
         if let resolvedFilter {
             return events.filter { $0.shareID == resolvedFilter }
         }
@@ -49,73 +108,92 @@ struct ActivityLogView: View {
         return allShares.filter { includedShareIDs.contains($0.id) }
     }
 
+    private var summary: ActivitySummary {
+        let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
+        var result = ActivitySummary()
+        for event in scopedEvents where event.date >= cutoff {
+            if event.kind == .mounted { result.mounts += 1 }
+            if event.kind == .reconnected { result.reconnects += 1 }
+            if event.kind.severity == .error { result.errors += 1 }
+        }
+        return result
+    }
+
+    private func dayGroups(from events: [ShareEvent]) -> [ActivityDayGroup] {
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: events) { calendar.startOfDay(for: $0.date) }
+        return grouped
+            .map { ActivityDayGroup(day: $0.key, events: $0.value.sorted { $0.date > $1.date }) }
+            .sorted { $0.day > $1.day }
+    }
+
     var body: some View {
+        let events = scopedEvents.filter { eventFilter.includes($0.kind) }
+        let groups = dayGroups(from: events)
+
         VStack(spacing: 0) {
-            HStack {
-                Text("Activity Log")
-                    .font(.title3)
-                    .fontWeight(.bold)
-
-                Spacer()
-
-                Picker("Share", selection: $shareFilter) {
-                    Text(includedSharesLabel.map { "All on \($0)" } ?? "All Shares")
-                        .tag(NetworkShare.ID?.none)
-
-                    ForEach(filterableShares) { share in
-                        Text(share.displayName).tag(Optional(share.id))
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(width: 170)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            header
 
             Divider()
 
-            if visibleEvents.isEmpty {
-                ContentUnavailableView {
-                    Label("No Activity", systemImage: "clock.arrow.circlepath")
-                } description: {
-                    Text("Mounts, drops, and failures will appear here as they happen.")
-                }
-                .frame(maxHeight: .infinity)
+            ActivitySummaryView(summary: summary)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 4)
+
+            if scopedEvents.isEmpty {
+                emptyState(
+                    symbol: "clock",
+                    title: "No activity yet",
+                    message: "Connection events will appear here as Otter manages your shares."
+                )
+            } else if events.isEmpty {
+                emptyState(
+                    symbol: "line.3.horizontal.decrease.circle",
+                    title: "No matching events",
+                    message: "Try selecting a different event filter."
+                )
             } else {
-                List(visibleEvents) { event in
-                    ActivityLogRow(event: event, shareName: shareName(for: event.shareID))
-                        .listRowInsets(EdgeInsets(top: 3, leading: 12, bottom: 3, trailing: 12))
-                        .listRowSeparator(.visible, edges: .bottom)
-                        .listRowSeparatorTint(.secondary.opacity(0.14))
-                        .listRowBackground(Color.clear)
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(groups) { group in
+                            ActivityDateSection(
+                                group: group,
+                                showsShareName: resolvedFilter == nil,
+                                shareLookup: share(for:),
+                                expandedIDs: $expandedIDs
+                            )
+                        }
+                    }
+                    .padding(16)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
             }
 
             Divider()
 
             HStack {
-                Button(role: .destructive) {
-                    isConfirmingClear = true
-                } label: {
-                    Label("Clear Log…", systemImage: "trash")
-                }
-                .tahoeSecondaryActionButton()
-                .disabled(appModel.screenshotDemoEvents != nil || eventLog.events(for: nil).isEmpty)
-
                 Spacer()
-
-                Button("Done") {
-                    dismiss()
+                Menu {
+                    Button("Export Log…", systemImage: "square.and.arrow.up") { exportLog() }
+                        .disabled(scopedEvents.isEmpty)
+                    Divider()
+                    Button("Clear Log…", systemImage: "trash", role: .destructive) { isConfirmingClear = true }
+                        .disabled(appModel.screenshotDemoEvents != nil || eventLog.events(for: nil).isEmpty)
+                } label: {
+                    Image(systemName: "arrow.up.page.on.clipboard")
                 }
-                .tahoePrimaryActionButton()
-                .keyboardShortcut(.defaultAction)
+                .menuIndicator(.hidden)
+                .tahoeSecondaryMenu()
+                .fixedSize()
+                .help("Export or clear the log")
+                .accessibilityLabel("Log actions")
+                Button("Done") { dismiss() }
+                    .tahoePrimaryActionButton()
+                    .keyboardShortcut(.defaultAction)
             }
             .padding(16)
         }
-        .frame(minWidth: 480, idealWidth: 560, maxWidth: .infinity, minHeight: 440, idealHeight: 520, maxHeight: .infinity)
+        .frame(minWidth: 620, idealWidth: 680, maxWidth: 720, minHeight: 480, idealHeight: 700, maxHeight: 750)
         .confirmationDialog("Clear the activity log?", isPresented: $isConfirmingClear, titleVisibility: .visible) {
             Button("Clear Log", role: .destructive) { eventLog.clear() }
             Button("Cancel", role: .cancel) { }
@@ -124,67 +202,360 @@ struct ActivityLogView: View {
         }
     }
 
-    private func shareName(for shareID: NetworkShare.ID) -> String {
-        allShares.first { $0.id == shareID }?.displayName ?? "Removed share"
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Activity Log")
+                        .font(.title3.weight(.bold))
+                    Text(resolvedFilter == nil
+                         ? "Connection history and events for your shares."
+                         : "Connection history and events for this share.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+            }
+
+            HStack(spacing: 10) {
+                Picker("Share", selection: $shareFilter) {
+                    Text(includedSharesLabel.map { "All on \($0)" } ?? "All Shares")
+                        .tag(NetworkShare.ID?.none)
+                    ForEach(filterableShares) { share in
+                        Text(share.displayName).tag(Optional(share.id))
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+                .accessibilityLabel("Share")
+
+                Picker("Events", selection: $eventFilter) {
+                    ForEach(ActivityEventFilter.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+                .accessibilityLabel("Event filter")
+
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 16)
+        .padding(.bottom, 12)
+    }
+
+    private func emptyState(symbol: String, title: String, message: String) -> some View {
+        ContentUnavailableView {
+            Label(title, systemImage: symbol)
+        } description: {
+            Text(message)
+        }
+        .frame(maxHeight: .infinity)
+    }
+
+    private func share(for id: NetworkShare.ID) -> NetworkShare? {
+        allShares.first { $0.id == id }
+    }
+
+    private func exportLog() {
+        struct Entry: Encodable {
+            let date: Date
+            let share: String
+            let server: String?
+            let event: String
+            let detail: String?
+        }
+        let entries = scopedEvents.map { event in
+            let share = share(for: event.shareID)
+            return Entry(
+                date: event.date,
+                share: share?.displayName ?? "Removed share",
+                server: share?.host,
+                event: event.kind.rawValue,
+                detail: event.detail
+            )
+        }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(entries) else { return }
+
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "Otter Activity Log.json"
+        panel.allowedContentTypes = [.json]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        try? data.write(to: url, options: .atomic)
     }
 }
 
-private struct ActivityLogRow: View {
-    let event: ShareEvent
-    let shareName: String
+private struct ActivitySummaryView: View {
+    let summary: ActivitySummary
 
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Image(systemName: event.kind.symbol)
+        HStack(spacing: 0) {
+            Text("Last 24 hours")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(event.kind.color)
-                .frame(width: 16, alignment: .center)
-                .accessibilityHidden(true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 4)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(event.kind.title)
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-
-                Text(metadataText)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .help(metadataText)
-            }
-
-            Spacer(minLength: 8)
-
-            Text(timeLabel)
-                .font(.subheadline.monospacedDigit())
-                .foregroundStyle(.secondary)
+            metric(symbol: "checkmark.circle.fill", color: .green, value: summary.mounts, label: "Mounts")
+            separator
+            metric(symbol: "arrow.triangle.2.circlepath", color: .blue, value: summary.reconnects, label: "Reconnects")
+            separator
+            metric(symbol: "xmark.circle.fill", color: .red, value: summary.errors, label: "Errors")
         }
-        .padding(.vertical, 2)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.separator.opacity(0.6)))
         .accessibilityElement(children: .combine)
     }
 
-    private var metadataText: String {
-        var parts = [shareName]
-        if let detail = event.detail, !detail.isEmpty {
-            parts.append(detail)
-        }
-        return parts.joined(separator: " • ")
+    private var separator: some View {
+        Divider().frame(height: 28)
     }
 
-    private var timeLabel: String {
-        if Calendar.current.isDateInToday(event.date) {
-            return event.date.formatted(date: .omitted, time: .shortened)
+    private func metric(symbol: String, color: Color, value: Int, label: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .foregroundStyle(color)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 0) {
+                Text("\(value)").font(.headline.monospacedDigit())
+                Text(label).font(.caption).foregroundStyle(.secondary)
+            }
         }
-        return event.date.formatted(date: .abbreviated, time: .shortened)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct ActivityDateSection: View {
+    let group: ActivityDayGroup
+    let showsShareName: Bool
+    let shareLookup: (NetworkShare.ID) -> NetworkShare?
+    @Binding var expandedIDs: Set<ShareEvent.ID>
+
+    private var runs: [ActivityEventRun] { ActivityEventRun.runs(from: group.events) }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            ForEach(Array(runs.enumerated()), id: \.element.id) { index, run in
+                if index > 0 {
+                    Divider().padding(.leading, 44)
+                }
+                ActivityEventRow(
+                    events: run.events,
+                    share: shareLookup(run.events[0].shareID),
+                    showsShareName: showsShareName,
+                    isExpanded: expandedIDs.contains(run.id),
+                    toggle: { toggle(run.id) }
+                )
+            }
+        }
+        .background(.background.opacity(0.6))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.separator.opacity(0.6)))
+    }
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            if let prefix = relativeName {
+                Text(prefix).fontWeight(.semibold)
+                Text(group.day.formatted(date: .long, time: .omitted)).foregroundStyle(.secondary)
+            } else {
+                Text(group.day.formatted(date: .long, time: .omitted)).fontWeight(.semibold)
+            }
+            Spacer()
+        }
+        .font(.subheadline)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(.quaternary.opacity(0.6))
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    private var relativeName: String? {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(group.day) { return "Today" }
+        if calendar.isDateInYesterday(group.day) { return "Yesterday" }
+        return nil
+    }
+
+    private func toggle(_ id: ShareEvent.ID) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            if expandedIDs.contains(id) {
+                expandedIDs.remove(id)
+            } else {
+                expandedIDs.insert(id)
+            }
+        }
+    }
+}
+
+private struct ActivityEventRow: View {
+    let events: [ShareEvent]
+    let share: NetworkShare?
+    let showsShareName: Bool
+    let isExpanded: Bool
+    let toggle: () -> Void
+
+    private var event: ShareEvent { events[0] }
+    private var isRun: Bool { events.count > 1 }
+
+    private var timeLabel: String {
+        let time = { (date: Date) in date.formatted(date: .omitted, time: .shortened) }
+        guard let oldest = events.last, isRun else { return time(event.date) }
+        return "\(time(oldest.date)) – \(time(event.date))"
+    }
+
+    private var shareName: String { share?.displayName ?? "Removed share" }
+
+    private var subtitle: String? {
+        if let detail = event.detail, !detail.isEmpty { return detail }
+        return showsShareName ? shareName : nil
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button(action: toggle) {
+                HStack(alignment: .center, spacing: 12) {
+                    Image(systemName: event.kind.symbol)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(event.kind.color)
+                        .frame(width: 20)
+                        .accessibilityHidden(true)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(isRun ? "\(event.kind.title) ×\(events.count)" : event.kind.title)
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        if let subtitle {
+                            Text(subtitle)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(isExpanded ? nil : 1)
+                                .truncationMode(.tail)
+                        }
+                        if showsShareName, event.detail?.isEmpty == false {
+                            Text(shareName)
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Text(timeLabel)
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.secondary)
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .accessibilityHidden(true)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityText)
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+            .accessibilityHint("Shows event details")
+            .accessibilityAddTraits(.isButton)
+
+            if isExpanded {
+                details
+                    .padding(.leading, 46)
+                    .padding(.trailing, 14)
+                    .padding(.bottom, 10)
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    private var accessibilityText: String {
+        var text = "\(event.kind.severity.label)\(event.kind.title)"
+        if isRun { text += ", \(events.count) times, \(timeLabel)" } else { text += ", \(event.date.formatted(date: .abbreviated, time: .shortened))" }
+        if showsShareName { text += ", \(shareName)" }
+        if let detail = event.detail, !detail.isEmpty { text += ", \(detail)" }
+        return text
+    }
+
+    private var details: some View {
+        Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 6) {
+            row("Share", shareName)
+            if let host = share?.host { row("Server", host) }
+            if let detail = event.detail, !detail.isEmpty { row("Detail", detail) }
+            if isRun {
+                row("Times", events.map { $0.date.formatted(date: .omitted, time: .shortened) }.joined(separator: "\n"))
+            } else {
+                row("Time", event.date.formatted(date: .long, time: .shortened))
+            }
+        }
+        .font(.subheadline)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .textSelection(.enabled)
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        GridRow {
+            Text(label).foregroundStyle(.secondary).frame(width: 52, alignment: .leading)
+            Text(value).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+enum ShareEventSeverity {
+    case info, warning, error
+
+    var label: String {
+        switch self {
+        case .info: ""
+        case .warning: "Warning: "
+        case .error: "Error: "
+        }
     }
 }
 
 private extension ShareEventKind {
+    var severity: ShareEventSeverity {
+        switch self {
+        case .mountFailed, .unresponsiveDetected:
+            .error
+        case .connectionLost, .healthCheckFailed, .credentialsRequired:
+            .warning
+        default:
+            .info
+        }
+    }
+
+    var isCollapsible: Bool {
+        severity != .error && self != .credentialsRequired
+    }
+
+    var isConnectionEvent: Bool {
+        switch self {
+        case .mounted, .reconnected, .connectionLost, .disconnected, .blockedByRule, .duplicateResolved, .mountFailed:
+            true
+        default:
+            false
+        }
+    }
+
     var title: String {
         switch self {
         case .mounted:
             "Mounted"
+        case .reconnected:
+            "Reconnected"
         case .connectionLost:
             "Connection lost"
         case .disconnected:
@@ -212,6 +583,8 @@ private extension ShareEventKind {
         switch self {
         case .mounted:
             "checkmark.circle.fill"
+        case .reconnected:
+            "arrow.triangle.2.circlepath"
         case .connectionLost:
             "wifi.exclamationmark"
         case .disconnected:
@@ -239,6 +612,8 @@ private extension ShareEventKind {
         switch self {
         case .mounted:
             .green
+        case .reconnected:
+            .blue
         case .connectionLost:
             .orange
         case .disconnected:

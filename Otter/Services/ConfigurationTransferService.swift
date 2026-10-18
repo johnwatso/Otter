@@ -637,7 +637,7 @@ enum SupportPackageService {
             return "A mounted-volume health check failed."
         case .unresponsiveDetected:
             return "The mounted volume stopped responding."
-        case .mounted, .connectionLost, .disconnected, .wakePacketSent, .none:
+        case .mounted, .reconnected, .connectionLost, .disconnected, .wakePacketSent, .none:
             return nil
         }
     }

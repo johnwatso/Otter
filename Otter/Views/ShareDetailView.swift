@@ -383,11 +383,12 @@ private struct ServerShareRow: View {
                 }
                 .disabled(settings.isManagedShare(id: share.id))
             } label: {
-                Image(systemName: "ellipsis")
+                Image(systemName: "slider.horizontal.3")
             }
-            .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
+            .tahoeSecondaryMenu()
             .fixedSize()
+            .help("Actions for this share")
             .accessibilityLabel("More actions for \(share.displayName)")
         }
         .padding(.vertical, 8)
