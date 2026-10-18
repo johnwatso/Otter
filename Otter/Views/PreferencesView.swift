@@ -1099,7 +1099,6 @@ private struct AdvancedPreferencesView: View {
     @EnvironmentObject private var networkService: NetworkReachabilityService
     @State private var configurationMessage: String?
     @State private var supportPackageMessage: String?
-    @State private var isShowingNetworkDetails = false
 
     var body: some View {
         Form {
@@ -1138,78 +1137,90 @@ private struct AdvancedPreferencesView: View {
             }
 
             Section {
-                DisclosureGroup("Wi-Fi and VPN status", isExpanded: $isShowingNetworkDetails) {
-                    LabeledContent("Current Wi-Fi", value: networkService.currentWiFiNetworkName ?? "Unavailable")
+                LabeledContent("Current Wi-Fi", value: networkService.currentWiFiNetworkName ?? "Unavailable")
 
-                    if networkService.wifiNameRequiresLocationPermission {
-                        Label("macOS requires Location Services access to show the Wi-Fi network name.", systemImage: "location.slash")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                if networkService.wifiNameRequiresLocationPermission {
+                    Label("macOS requires Location Services access to show the Wi-Fi network name.", systemImage: "location.slash")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
-                        Button {
-                            if networkService.canRequestLocationAuthorization {
-                                networkService.requestLocationAuthorization()
-                            } else {
-                                openLocationPrivacySettings()
-                            }
-                        } label: {
-                            Label(
-                                networkService.canRequestLocationAuthorization ? "Allow Location Access" : "Open Location Settings",
-                                systemImage: "location"
-                            )
+                    Button {
+                        if networkService.canRequestLocationAuthorization {
+                            networkService.requestLocationAuthorization()
+                        } else {
+                            openLocationPrivacySettings()
                         }
-                        .settingsActionButton()
+                    } label: {
+                        Label(
+                            networkService.canRequestLocationAuthorization ? "Allow Location Access" : "Open Location Settings",
+                            systemImage: "location"
+                        )
                     }
+                    .settingsActionButton()
+                }
 
-                    LabeledContent("Active VPN", value: activeVPNLabel)
+                LabeledContent("Active VPN", value: activeVPNLabel)
 
-                    if networkService.isVPNNameUnavailable {
-                        Label("An unidentified tunnel is active. It does not satisfy VPN share rules.", systemImage: "info.circle")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                if networkService.isVPNNameUnavailable {
+                    Label("An unidentified tunnel is active. It does not satisfy VPN share rules.", systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
-                    if networkService.knownVPNNames.isEmpty {
-                        Label("No VPNs found", systemImage: "lock.slash")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        LabeledContent("VPNs in System Settings") {
-                            VStack(alignment: .trailing, spacing: 4) {
-                                ForEach(networkService.knownVPNNames, id: \.self) { vpnName in
-                                    HStack(spacing: 5) {
-                                        Text(vpnName)
-                                        if !networkService.canControlVPN(named: vpnName) {
-                                            Text("Manual")
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                        }
+                if networkService.knownVPNNames.isEmpty {
+                    Label("No VPNs found", systemImage: "lock.slash")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    LabeledContent("VPNs in System Settings") {
+                        VStack(alignment: .trailing, spacing: 4) {
+                            ForEach(networkService.knownVPNNames, id: \.self) { vpnName in
+                                HStack(spacing: 5) {
+                                    Text(vpnName)
+                                    if !networkService.canControlVPN(named: vpnName) {
+                                        Text("Manual")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
                                     }
                                 }
                             }
                         }
                     }
-
-                    Button {
-                        networkService.refreshNetworkDetails()
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    }
-                    .settingsActionButton()
                 }
+
+                Button {
+                    networkService.refreshNetworkDetails()
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .settingsActionButton()
             } header: {
                 Text("Network")
             }
 
             Section {
-                Menu {
-                    Button("Export Configuration…", action: exportConfiguration)
-                    Button("Import Configuration…", action: importConfiguration)
-                    Divider()
-                    Button("Export Protected Backup…", action: exportProtectedBackup)
-                    Button("Restore Protected Backup…", action: importProtectedBackup)
-                } label: {
-                    Label("Backup & Restore", systemImage: "square.and.arrow.up.on.square")
+                LabeledContent("Configuration") {
+                    HStack {
+                        Button(action: exportConfiguration) {
+                            Label("Export…", systemImage: "square.and.arrow.up")
+                        }
+                        Button(action: importConfiguration) {
+                            Label("Import…", systemImage: "square.and.arrow.down")
+                        }
+                    }
+                    .settingsActionButton()
+                }
+
+                LabeledContent("Protected Backup") {
+                    HStack {
+                        Button(action: exportProtectedBackup) {
+                            Label("Export…", systemImage: "lock")
+                        }
+                        Button(action: importProtectedBackup) {
+                            Label("Restore…", systemImage: "arrow.counterclockwise")
+                        }
+                    }
+                    .settingsActionButton()
                 }
 
                 SettingsSecondaryText("Standard exports are safe templates and never include credentials. Protected backups encrypt eligible SMB Keychain credentials with a password you choose.")
@@ -1220,7 +1231,7 @@ private struct AdvancedPreferencesView: View {
                         .foregroundStyle(.secondary)
                 }
             } header: {
-                Text("Configuration")
+                Text("Backup & Restore")
             }
 
             Section {
