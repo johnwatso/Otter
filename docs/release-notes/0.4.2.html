@@ -3,48 +3,51 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Improve share controls and direct connectivity fallback - Release Notes</title>
+  <title>Otter 0.4.2 - Release Notes</title>
+<meta name="description" content="Otter now prefers a server it can reach directly before reaching for a VPN, and the share controls say exactly what they do.">
+  <meta name="description" content="Release notes for Otter 1.0: a redesigned Manage Shares window, guided onboarding, VPN-aware mounting, reliability history and faster diagnostics.">
   <style>
     :root { color-scheme: light dark; }
-    body {
-      margin: 0;
-      padding: 32px 20px 48px;
-      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f4f6f8;
-      color: #0f1720;
-    }
-    main {
-      max-width: 760px;
-      margin: 0 auto;
-      padding: 28px;
-      border-radius: 22px;
-      background: rgba(255, 255, 255, 0.86);
-      box-shadow: 0 20px 60px rgba(15, 23, 32, 0.10);
-    }
+    body { margin: 0; padding: 32px 20px 48px; font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f6f8; color: #0f1720; }
+    main { max-width: 760px; margin: 0 auto; padding: 28px; border-radius: 22px; background: rgba(255, 255, 255, .86); box-shadow: 0 20px 60px rgba(15, 23, 32, .10); border: 1px solid rgba(82, 96, 109, .12); }
     h1 { margin: 0 0 6px; font-size: 30px; line-height: 1.15; }
-    .meta { margin: 0 0 24px; color: #52606d; font-size: 14px; }
-    p { margin: 0 0 16px; }
+    .meta { color: #52606d; font-size: 14px; }
+    .intro { margin: 0 0 24px; color: #384454; }
+    section { margin: 18px 0 0; padding: 18px 18px 14px; border: 1px solid rgba(82, 96, 109, .18); border-radius: 16px; border-left: 5px solid #0a67a3; background: rgba(255, 255, 255, .42); }
+    h2 { margin: 0 0 4px; color: #0a67a3; font-size: 18px; }
+    ul { margin: 12px 0 0; padding-left: 22px; }
+    li { margin: 0 0 8px; }
     a { color: #0a67a3; text-decoration: none; }
     a:hover { text-decoration: underline; }
-    @media (prefers-color-scheme: dark) {
-      body { background: #0b1015; color: #edf2f7; }
-      main {
-        background: rgba(15, 23, 32, 0.88);
-        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
-      }
-      .meta { color: #9fb0c2; }
-      a { color: #73c3ff; }
-    }
+    @media (prefers-color-scheme: dark) { body { background: #0b1015; color: #edf2f7; } main { background: rgba(15, 23, 32, .88); border-color: rgba(159, 176, 194, .14); } .meta { color: #9fb0c2; } .intro { color: #c8d3df; } section { border-color: rgba(159, 176, 194, .18); background: rgba(255, 255, 255, .04); } h2, a { color: #73c3ff; } section { border-left-color: #73c3ff; } }
   </style>
 </head>
 <body>
   <main>
-    <h1>Improve share controls and direct connectivity fallback</h1>
-    <p class="meta">Version 0.4.2</p>
-    <p>Improve share controls and direct connectivity fallback</p>
-<p>Release notes:<br>- Prefer a directly reachable local server before starting or waiting for a configured VPN in Manual, Adaptive, and Connect Once modes.<br>- Preserve explicit registered-network restrictions while treating VPN-only configuration as a fallback connection path.<br>- Make Manual share disconnect actions avoid creating automatic-mount pauses, and hide pause controls when no automatic shares are present.<br>- Update menu bar and Preferences labels so disconnect behavior clearly distinguishes Manual shares from automatically maintained shares.<br>- Add an Always Show Server Name preference and singular/plural share-count labels for menu organization.<br>- Bump Otter to version 0.4.2 (build 2026083109).<br>- Add regression coverage for local-first VPN routing, Manual disconnect behavior, pause state, server grouping, and preference persistence.</p>
-<p>Validation:<br>- xcodebuild test -project Otter.xcodeproj -scheme Otter -destination 'platform=macOS'<br>- 172 tests passed with 0 failures.</p>
-    <p><strong>Commit:</strong> <a href="https://github.com/johnwatso/Otter/commit/19d0d68322f955cbe48b2afc208c34e1e5bb04bc">19d0d68</a></p>
+    <h1>Otter 0.4.2</h1>
+    <p class="meta">Version 0.4.2 &middot; Build 2026083109 &middot; Released 1 September 2026</p>
+    <p class="intro">Otter now prefers a server it can reach directly before reaching for a VPN, and the share controls say exactly what they do.</p>
+
+    <section>
+      <h2>🏠 Direct connections first</h2>
+      <p class="meta">No VPN when you are already at home.</p>
+      <ul>
+        <li>In Manual, Adaptive and Connect Once modes, Otter prefers a locally reachable server before starting, or waiting for, a configured VPN.</li>
+        <li>Registered-network restrictions are still respected, and a VPN-only setup is treated as a fallback path.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>🎛️ Clearer share controls</h2>
+      <p class="meta">Manual shares and automatic shares behave the way their labels say.</p>
+      <ul>
+        <li>Disconnecting a Manual share no longer creates an automatic-mount pause, and pause controls are hidden when there are no automatic shares.</li>
+        <li>Menu bar and Preferences wording now distinguishes Manual shares from shares Otter keeps connected.</li>
+        <li>New <strong>Always Show Server Name</strong> preference, plus singular and plural share counts in the menu.</li>
+      </ul>
+    </section>
+
+    <p class="meta"><a href="./index.html">All release notes</a></p>
   </main>
 </body>
 </html>

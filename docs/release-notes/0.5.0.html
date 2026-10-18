@@ -3,47 +3,61 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Use timer source for diagnostic timeouts - Release Notes</title>
+  <title>Otter 0.5.0 - Release Notes</title>
+<meta name="description" content="Otter can now tell you why a share is slow. Every share and server gets a read-only NAS Diagnostics panel, with an optional speed test.">
+  <meta name="description" content="Release notes for Otter 1.0: a redesigned Manage Shares window, guided onboarding, VPN-aware mounting, reliability history and faster diagnostics.">
   <style>
     :root { color-scheme: light dark; }
-    body {
-      margin: 0;
-      padding: 32px 20px 48px;
-      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f4f6f8;
-      color: #0f1720;
-    }
-    main {
-      max-width: 760px;
-      margin: 0 auto;
-      padding: 28px;
-      border-radius: 22px;
-      background: rgba(255, 255, 255, 0.86);
-      box-shadow: 0 20px 60px rgba(15, 23, 32, 0.10);
-    }
+    body { margin: 0; padding: 32px 20px 48px; font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f6f8; color: #0f1720; }
+    main { max-width: 760px; margin: 0 auto; padding: 28px; border-radius: 22px; background: rgba(255, 255, 255, .86); box-shadow: 0 20px 60px rgba(15, 23, 32, .10); border: 1px solid rgba(82, 96, 109, .12); }
     h1 { margin: 0 0 6px; font-size: 30px; line-height: 1.15; }
-    .meta { margin: 0 0 24px; color: #52606d; font-size: 14px; }
-    p { margin: 0 0 16px; }
+    .meta { color: #52606d; font-size: 14px; }
+    .intro { margin: 0 0 24px; color: #384454; }
+    section { margin: 18px 0 0; padding: 18px 18px 14px; border: 1px solid rgba(82, 96, 109, .18); border-radius: 16px; border-left: 5px solid #0a67a3; background: rgba(255, 255, 255, .42); }
+    h2 { margin: 0 0 4px; color: #0a67a3; font-size: 18px; }
+    ul { margin: 12px 0 0; padding-left: 22px; }
+    li { margin: 0 0 8px; }
     a { color: #0a67a3; text-decoration: none; }
     a:hover { text-decoration: underline; }
-    @media (prefers-color-scheme: dark) {
-      body { background: #0b1015; color: #edf2f7; }
-      main {
-        background: rgba(15, 23, 32, 0.88);
-        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
-      }
-      .meta { color: #9fb0c2; }
-      a { color: #73c3ff; }
-    }
+    @media (prefers-color-scheme: dark) { body { background: #0b1015; color: #edf2f7; } main { background: rgba(15, 23, 32, .88); border-color: rgba(159, 176, 194, .14); } .meta { color: #9fb0c2; } .intro { color: #c8d3df; } section { border-color: rgba(159, 176, 194, .18); background: rgba(255, 255, 255, .04); } h2, a { color: #73c3ff; } section { border-left-color: #73c3ff; } }
   </style>
 </head>
 <body>
   <main>
-    <h1>Use timer source for diagnostic timeouts</h1>
-    <p class="meta">Version 0.5.0</p>
-    <p>Use timer source for diagnostic timeouts</p>
-<p>This change replaces the diagnostic command timeout work item with a dedicated DispatchSourceTimer and arms it before returning to the cooperative task executor. That keeps timeout handling responsive under overloaded test runners while still cleaning up the timer on completion or cancellation.</p>
-    <p><strong>Commit:</strong> <a href="https://github.com/johnwatso/Otter/commit/0653357c11d33fc5f6dd4218db3c817da494ee51">0653357</a></p>
+    <h1>Otter 0.5.0</h1>
+    <p class="meta">Version 0.5.0 &middot; Build 2026090711 &middot; Released 7 September 2026</p>
+    <p class="intro">Otter can now tell you why a share is slow. Every share and server gets a read-only NAS Diagnostics panel, with an optional speed test.</p>
+
+    <section>
+      <h2>🩺 NAS Diagnostics</h2>
+      <p class="meta">Connection health, routing and speed in one place.</p>
+      <ul>
+        <li>A new panel in every share and server detail view reports connection health, routing, SMB dialect and channels, and latency from a read-only check.</li>
+        <li>Utilisation is measured against an expected practical maximum, based on verified active SMB channels and capped by each client interface, rather than a nominal link speed.</li>
+        <li>Findings are marked good, informational or warning. An unavailable measurement is never treated as zero or as proof that nothing is wrong.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>🚀 Performance test</h2>
+      <p class="meta">Measure real throughput without leaving a mess behind.</p>
+      <ul>
+        <li>An optional 1–5 GB test writes and reads a temporary file in its own uniquely named folder, asks the client to bypass its cache, and cleans up on success and on cancellation.</li>
+        <li><strong>Compare After Reconnect</strong> and <strong>Compare Using IP Address</strong> repeat the diagnostics and any matched speed test, then restore your configured connection, even after a failure or cancellation.</li>
+        <li>If a temporary direct-IP mount cannot be verified, <strong>Restore Configured Connection</strong> puts everything back. Saved addresses, credentials and connection rules are never changed.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>🔒 Safe by design</h2>
+      <p class="meta">Diagnostics never get in the way of your shares.</p>
+      <ul>
+        <li><strong>Copy Diagnostic Report</strong> exports selected fields rather than raw command output, and leaves out credentials, Keychain contents and unrelated SMB sessions.</li>
+        <li>Busy shares stay mounted instead of being forced off, and every diagnostic subprocess has a deadline so a stalled NAS cannot hold a check open.</li>
+      </ul>
+    </section>
+
+    <p class="meta"><a href="./index.html">All release notes</a></p>
   </main>
 </body>
 </html>

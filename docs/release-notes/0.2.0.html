@@ -4,35 +4,33 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Otter 0.2.0 - Release Notes</title>
-  <meta name="description" content="Release notes for Otter 0.2.0: more reliable new-share detection, flexible VPN handling, and a smoother setup flow.">
-  <link rel="canonical" href="https://www.get-otter.com/release-notes/0.2.0.html">
-  <link rel="icon" type="image/png" href="/assets/otter-icon.png">
+<meta name="description" content="A reliability-focused release that makes it easier to bring existing shares into Otter and safer to respond when a new one appears.">
+  <meta name="description" content="Release notes for Otter 1.0: a redesigned Manage Shares window, guided onboarding, VPN-aware mounting, reliability history and faster diagnostics.">
   <style>
     :root { color-scheme: light dark; }
     body { margin: 0; padding: 32px 20px 48px; font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f6f8; color: #0f1720; }
     main { max-width: 760px; margin: 0 auto; padding: 28px; border-radius: 22px; background: rgba(255, 255, 255, .86); box-shadow: 0 20px 60px rgba(15, 23, 32, .10); border: 1px solid rgba(82, 96, 109, .12); }
     h1 { margin: 0 0 6px; font-size: 30px; line-height: 1.15; }
-    .meta, .summary { color: #52606d; font-size: 14px; }
+    .meta { color: #52606d; font-size: 14px; }
     .intro { margin: 0 0 24px; color: #384454; }
-    section { margin: 18px 0 0; padding: 18px 18px 14px; border: 1px solid rgba(82, 96, 109, .18); border-radius: 16px; border-left: 5px solid #1685c5; background: rgba(255, 255, 255, .42); }
-    h2 { margin: 0 0 4px; color: #1685c5; font-size: 18px; }
+    section { margin: 18px 0 0; padding: 18px 18px 14px; border: 1px solid rgba(82, 96, 109, .18); border-radius: 16px; border-left: 5px solid #0a67a3; background: rgba(255, 255, 255, .42); }
+    h2 { margin: 0 0 4px; color: #0a67a3; font-size: 18px; }
     ul { margin: 12px 0 0; padding-left: 22px; }
     li { margin: 0 0 8px; }
-    li:last-child { margin-bottom: 0; }
     a { color: #0a67a3; text-decoration: none; }
     a:hover { text-decoration: underline; }
-    @media (prefers-color-scheme: dark) { body { background: #0b1015; color: #edf2f7; } main { background: rgba(15, 23, 32, .88); border-color: rgba(159, 176, 194, .14); } .meta, .summary { color: #9fb0c2; } .intro { color: #c8d3df; } section { border-color: rgba(159, 176, 194, .18); background: rgba(255, 255, 255, .04); } a { color: #73c3ff; } }
+    @media (prefers-color-scheme: dark) { body { background: #0b1015; color: #edf2f7; } main { background: rgba(15, 23, 32, .88); border-color: rgba(159, 176, 194, .14); } .meta { color: #9fb0c2; } .intro { color: #c8d3df; } section { border-color: rgba(159, 176, 194, .18); background: rgba(255, 255, 255, .04); } h2, a { color: #73c3ff; } section { border-left-color: #73c3ff; } }
   </style>
 </head>
 <body>
   <main>
     <h1>Otter 0.2.0</h1>
-    <p class="meta">Version 0.2.0 &middot; Build 2</p>
+    <p class="meta">Version 0.2.0 &middot; Build 2 &middot; Released 7 August 2026</p>
     <p class="intro">A reliability-focused release that makes it easier to bring existing shares into Otter and safer to respond when a new one appears.</p>
 
     <section>
-      <h2>&#128064; Manage newly mounted shares</h2>
-      <p class="summary">Otter can now notice a Finder-mounted share and offer to take care of it for you.</p>
+      <h2>👀 Manage newly mounted shares</h2>
+      <p class="meta">Otter can now notice a Finder-mounted share and offer to take care of it for you.</p>
       <ul>
         <li>Detects new mounted shares and offers to add them to Otter.</li>
         <li>Keeps the offer available in the menu bar until it is answered, rather than losing it with a notification.</li>
@@ -42,8 +40,8 @@
     </section>
 
     <section>
-      <h2>&#128274; More flexible VPN paths</h2>
-      <p class="summary">A share can now use the most appropriate route without being overly strict about the path you are currently on.</p>
+      <h2>🔒 More flexible VPN paths</h2>
+      <p class="meta">A share can now use the most appropriate route without being overly strict about the path you are currently on.</p>
       <ul>
         <li>Adds a manual VPN connection mode alongside automatic connection.</li>
         <li>Lets a share connect from its registered local network or through its configured VPN path.</li>
@@ -52,8 +50,8 @@
     </section>
 
     <section>
-      <h2>&#128276; Quieter, more dependable notifications</h2>
-      <p class="summary">The app now works with macOS&rsquo;s notification model rather than asking for a delivery mode it cannot use.</p>
+      <h2>🔔 Quieter, more dependable notifications</h2>
+      <p class="meta">The app now works with macOS’s notification model rather than asking for a delivery mode it cannot use.</p>
       <ul>
         <li>Uses standard persistent notification delivery for new-share offers.</li>
         <li>Delivers workspace notifications on the posting thread so scanning remains correctly scheduled.</li>
