@@ -31,7 +31,7 @@ struct PreferencesView: View {
         // Tabs differ a lot in height; a floor keeps the window from snapping
         // small when switching from Advanced back to General.
         .frame(width: 520)
-        .frame(minHeight: 420, alignment: .top)
+        .frame(minHeight: 620, alignment: .top)
         .onAppear {
             if !didRegisterWindowAppearance {
                 didRegisterWindowAppearance = true
@@ -1168,9 +1168,7 @@ private struct AdvancedPreferencesView: View {
                 }
 
                 if networkService.knownVPNNames.isEmpty {
-                    Label("No VPNs found", systemImage: "lock.slash")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    LabeledContent("VPNs in System Settings", value: "None found")
                 } else {
                     LabeledContent("VPNs in System Settings") {
                         VStack(alignment: .trailing, spacing: 4) {
@@ -1188,14 +1186,19 @@ private struct AdvancedPreferencesView: View {
                     }
                 }
 
-                Button {
-                    networkService.refreshNetworkDetails()
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-                .settingsActionButton()
             } header: {
-                Text("Network")
+                HStack {
+                    Text("Network")
+                    Spacer()
+                    Button {
+                        networkService.refreshNetworkDetails()
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                            .labelStyle(.iconOnly)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Refresh Wi-Fi and VPN status")
+                }
             }
 
             Section {
@@ -1203,9 +1206,11 @@ private struct AdvancedPreferencesView: View {
                     HStack {
                         Button(action: exportConfiguration) {
                             Label("Export…", systemImage: "square.and.arrow.up")
+                                .frame(width: 84)
                         }
                         Button(action: importConfiguration) {
                             Label("Import…", systemImage: "square.and.arrow.down")
+                                .frame(width: 84)
                         }
                     }
                     .settingsActionButton()
@@ -1215,9 +1220,11 @@ private struct AdvancedPreferencesView: View {
                     HStack {
                         Button(action: exportProtectedBackup) {
                             Label("Export…", systemImage: "lock")
+                                .frame(width: 84)
                         }
                         Button(action: importProtectedBackup) {
                             Label("Restore…", systemImage: "arrow.counterclockwise")
+                                .frame(width: 84)
                         }
                     }
                     .settingsActionButton()
