@@ -547,13 +547,12 @@ struct ShareManagementView: View {
                 }
             }
         } label: {
-            Image(systemName: "ellipsis")
+            Image(systemName: "slider.horizontal.3")
                 .frame(width: 20, height: 16)
         }
-        .menuStyle(.button)
-        .tahoeSecondaryActionButton()
         .menuIndicator(.hidden)
         .fixedSize()
+        .tahoeSecondaryMenu()
         .help("More actions")
         .accessibilityLabel("More actions")
     }
