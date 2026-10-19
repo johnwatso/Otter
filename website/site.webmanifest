@@ -1,0 +1,16 @@
+{
+  "name": "Otter for macOS",
+  "short_name": "Otter",
+  "description": "Automatically reconnect SMB network shares on macOS.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0B1018",
+  "theme_color": "#0B1018",
+  "icons": [
+    {
+      "src": "/assets/otter-icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
