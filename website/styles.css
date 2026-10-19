@@ -1,5 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap");
-
 :root {
   color-scheme: dark;
   --bg: #0b1018;
@@ -15,15 +13,19 @@
   --accent-wash: rgba(90, 200, 250, 0.1);
   --accent-line: rgba(90, 200, 250, 0.28);
   --hero-glow: rgba(47, 155, 255, 0.2);
+  --stage-base: #0c1b2c;
+  --stage-blue-core: rgba(32, 156, 255, 0.48);
+  --stage-blue: rgba(19, 126, 255, 0.31);
+  --stage-blue-edge: rgba(74, 176, 255, 0.12);
   --good: #6fdcae;
   --bad: #f58b9d;
   --badge-bg: rgba(255, 255, 255, 0.05);
-    --grid-dot: rgba(255, 255, 255, 0.05);
+  --grid-dot: rgba(255, 255, 255, 0.05);
   --header-bg: rgba(11, 16, 24, 0.78);
   --aqua: var(--accent);
   --cyan: var(--accent);
-  --font-body: "DM Sans", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
-  --font-display: Manrope, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Segoe UI", sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", "Segoe UI", sans-serif;
 }
 
 :root[data-theme="light"] {
@@ -41,10 +43,14 @@
   --accent-wash: rgba(10, 116, 230, 0.08);
   --accent-line: rgba(10, 116, 230, 0.28);
   --hero-glow: rgba(47, 155, 255, 0.2);
+  --stage-base: #eaf5ff;
+  --stage-blue-core: rgba(0, 119, 255, 0.32);
+  --stage-blue: rgba(10, 132, 255, 0.23);
+  --stage-blue-edge: rgba(76, 174, 255, 0.1);
   --good: #14966a;
   --bad: #d6405b;
   --badge-bg: rgba(15, 30, 55, 0.04);
-    --grid-dot: rgba(15, 30, 55, 0.06);
+  --grid-dot: rgba(15, 30, 55, 0.06);
   --header-bg: rgba(246, 249, 253, 0.82);
 }
 
@@ -68,16 +74,6 @@ body {
   font-family: var(--font-body);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
-}
-
-body::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto;
-  height: 1100px;
-  background: radial-gradient(ellipse 55% 45% at 50% 30%, var(--hero-glow), transparent 100%);
-  pointer-events: none;
-  z-index: -1;
 }
 
 img {
@@ -221,31 +217,77 @@ h4 {
 
 /* Hero */
 
+.hero-scene {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 45%, var(--stage-base) 100%);
+}
+
+.hero-scene::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  z-index: 0;
+  width: min(1040px, 100vw);
+  height: 590px;
+  transform: translateX(-50%);
+  background: radial-gradient(
+    ellipse at 50% 58%,
+    var(--stage-blue-core) 0%,
+    var(--stage-blue) 31%,
+    var(--stage-blue-edge) 54%,
+    transparent 73%
+  );
+  pointer-events: none;
+}
+
+.hero-scene::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 0;
+  height: 230px;
+  background: linear-gradient(to bottom, transparent, var(--bg) 94%);
+  pointer-events: none;
+}
+
+.hero,
+.showcase {
+  position: relative;
+  z-index: 1;
+}
+
 .hero {
-  padding: 72px 0 24px;
+  padding: 82px 0 0;
   text-align: center;
 }
 
 h1 {
-  margin: 0 auto 20px;
-  max-width: 880px;
-  font-size: clamp(44px, 6vw, 72px);
+  margin: 0 auto 18px;
+  max-width: 960px;
+  color: var(--text);
+  font-size: clamp(48px, 6vw, 76px);
   font-weight: 700;
-  letter-spacing: -2.8px;
-  line-height: 1.08;
+  letter-spacing: -0.045em;
+  line-height: 1.01;
 }
 
-h1 > span,
+h1 > span {
+  color: inherit;
+}
+
 .accent {
   color: var(--accent);
 }
 
 .hero-copy {
-  max-width: 640px;
+  max-width: 660px;
   margin: 0 auto;
   color: var(--muted);
-  font-size: 18px;
-  line-height: 1.65;
+  font-size: 17px;
+  line-height: 1.58;
 }
 
 .hero-actions {
@@ -253,7 +295,7 @@ h1 > span,
   flex-wrap: wrap;
   justify-content: center;
   gap: 12px;
-  margin-top: 28px;
+  margin-top: 24px;
 }
 
 .button {
@@ -267,21 +309,20 @@ h1 > span,
   border-radius: 8px;
   font-size: 15px;
   font-weight: 600;
-  transition: background 0.2s, border-color 0.2s, transform 0.2s;
-}
-
-.button:hover {
-  transform: translateY(-2px);
+  transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .button-primary {
   border-color: var(--accent);
   background: var(--accent);
+  box-shadow: 0 1px 2px rgba(6, 33, 64, 0.16);
   color: var(--accent-ink);
 }
 
 .button-primary:hover {
-  background: color-mix(in srgb, var(--accent) 86%, white);
+  border-color: color-mix(in srgb, var(--accent) 88%, black);
+  background: color-mix(in srgb, var(--accent) 88%, black);
+  box-shadow: 0 2px 5px rgba(6, 33, 64, 0.2);
 }
 
 .button-secondary {
@@ -310,20 +351,51 @@ h1 > span,
 }
 
 .platform-note {
-  margin-top: 18px;
-  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  margin: 18px 0 0;
+  padding: 0;
+  color: var(--soft);
   font-size: 13px;
+  line-height: 1.4;
+  list-style: none;
 }
 
-.platform-note span {
-  margin: 0 10px;
-  opacity: 0.6;
+.platform-note li {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+.platform-note li + li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 1px;
+  height: 14px;
+  background: var(--line-strong);
+}
+
+.platform-note svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* App screenshot */
 
 .showcase {
-  padding-top: 56px;
+  padding: 42px 0 64px;
 }
 
 .showcase-stage {
@@ -332,7 +404,7 @@ h1 > span,
 }
 
 .app-shot {
-  width: min(600px, 100%);
+  width: min(660px, 100%);
   height: auto;
 }
 
@@ -365,6 +437,10 @@ h1 > span,
 
 .section {
   padding-top: 110px;
+}
+
+.hero-scene + .section {
+  padding-top: 82px;
 }
 
 .eyebrow {
@@ -682,28 +758,44 @@ h1 > span,
   }
 
   .hero {
-    padding-top: 44px;
+    padding-top: 50px;
   }
 
   h1 {
-    font-size: 42px;
-    letter-spacing: -1.7px;
+    font-size: clamp(36px, 10.5vw, 40px);
+    letter-spacing: -0.042em;
+    line-height: 1.02;
   }
 
   .hero-copy {
     font-size: 16px;
+    line-height: 1.55;
   }
 
-  .hero-actions .button {
+  .cta-panel .hero-actions .button {
     flex: 1 1 100%;
   }
 
-  .platform-note span {
-    margin: 0 6px;
+  .hero > .hero-actions .button {
+    min-width: 148px;
+  }
+
+  .platform-note {
+    max-width: 350px;
+    gap: 8px 16px;
+    margin-inline: auto;
+  }
+
+  .platform-note li {
+    padding: 0;
+  }
+
+  .platform-note li + li::before {
+    display: none;
   }
 
   .showcase {
-    padding-top: 40px;
+    padding: 36px 0 54px;
   }
 
   .section {
