@@ -1146,7 +1146,17 @@ private struct AdvancedPreferencesView: View {
 
                     Button {
                         if networkService.canRequestLocationAuthorization {
-                            networkService.requestLocationAuthorization()
+                            Task {
+                                // macOS shows no prompt at all when Location
+                                // Services is off system-wide, so send the user
+                                // to the switch rather than leave the button
+                                // doing nothing.
+                                if await NetworkReachabilityService.locationServicesEnabled() {
+                                    networkService.requestLocationAuthorization()
+                                } else {
+                                    openLocationPrivacySettings()
+                                }
+                            }
                         } else {
                             openLocationPrivacySettings()
                         }
