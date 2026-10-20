@@ -3,48 +3,54 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Prepare Otter 1.0.1: bump version and add release notes - Release Notes</title>
+  <title>Otter 1.0.1 - Release Notes</title>
+  <meta name="description" content="Release notes for Otter 1.0.1: notification permission during onboarding, VPN shares that reconnect on your home network, and Finder opening shares Otter mounts over VPN.">
   <style>
     :root { color-scheme: light dark; }
-    body {
-      margin: 0;
-      padding: 32px 20px 48px;
-      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f4f6f8;
-      color: #0f1720;
-    }
-    main {
-      max-width: 760px;
-      margin: 0 auto;
-      padding: 28px;
-      border-radius: 22px;
-      background: rgba(255, 255, 255, 0.86);
-      box-shadow: 0 20px 60px rgba(15, 23, 32, 0.10);
-    }
+    body { margin: 0; padding: 32px 20px 48px; font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f6f8; color: #0f1720; }
+    main { max-width: 760px; margin: 0 auto; padding: 28px; border-radius: 22px; background: rgba(255, 255, 255, .86); box-shadow: 0 20px 60px rgba(15, 23, 32, .10); border: 1px solid rgba(82, 96, 109, .12); }
     h1 { margin: 0 0 6px; font-size: 30px; line-height: 1.15; }
-    .meta { margin: 0 0 24px; color: #52606d; font-size: 14px; }
-    p { margin: 0 0 16px; }
+    .meta { color: #52606d; font-size: 14px; }
+    .intro { margin: 0 0 24px; color: #384454; }
+    section { margin: 18px 0 0; padding: 18px 18px 14px; border: 1px solid rgba(82, 96, 109, .18); border-radius: 16px; border-left: 5px solid #0a67a3; background: rgba(255, 255, 255, .42); }
+    h2 { margin: 0 0 4px; color: #0a67a3; font-size: 18px; }
+    ul { margin: 12px 0 0; padding-left: 22px; }
+    li { margin: 0 0 8px; }
     a { color: #0a67a3; text-decoration: none; }
     a:hover { text-decoration: underline; }
-    @media (prefers-color-scheme: dark) {
-      body { background: #0b1015; color: #edf2f7; }
-      main {
-        background: rgba(15, 23, 32, 0.88);
-        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
-      }
-      .meta { color: #9fb0c2; }
-      a { color: #73c3ff; }
-    }
+    @media (prefers-color-scheme: dark) { body { background: #0b1015; color: #edf2f7; } main { background: rgba(15, 23, 32, .88); border-color: rgba(159, 176, 194, .14); } .meta { color: #9fb0c2; } .intro { color: #c8d3df; } section { border-color: rgba(159, 176, 194, .18); background: rgba(255, 255, 255, .04); } h2, a { color: #73c3ff; } section { border-left-color: #73c3ff; } }
   </style>
 </head>
 <body>
   <main>
-    <h1>Prepare Otter 1.0.1: bump version and add release notes</h1>
-    <p class="meta">Version 1.0.1</p>
-    <p>Prepare Otter 1.0.1: bump version and add release notes</p>
-<p>Asks for notification permission during onboarding, keeps VPN-rule<br>shares mounted on the local network so they reconnect at home, and opens<br>the share in Finder after Otter connects the VPN for it.</p>
-<p>Also restores the curated 1.0.0 release notes that a ShipHook run<br>replaced with a commit message.</p>
-    <p><strong>Commit:</strong> <a href="https://github.com/johnwatso/Otter/commit/084dd010949f7c20ef502e3a89cd5e8393ad3657">084dd01</a></p>
+    <h1>Otter 1.0.1</h1>
+    <p class="meta">Version 1.0.1 &middot; Build 2026102001 &middot; Released 20 October 2026</p>
+    <p class="intro">A quick follow-up to Otter 1.0 that fixes two problems found on fresh installs of macOS Tahoe and makes opening a share over VPN feel finished.</p>
+
+    <section>
+      <h2>🔔 Notifications during setup</h2>
+      <ul>
+        <li>Onboarding now asks macOS for permission to send notifications, so Connection Notifications is no longer shown as on when macOS was never asked.</li>
+        <li>The switch shows what macOS actually allows. If notifications were turned off for Otter, switching it on opens System Settings.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>🏠 VPN shares reconnect at home</h2>
+      <ul>
+        <li>Fixes Manual and Connect Once shares with a VPN rule being unmounted again straight after connecting on your local network, so they would not reconnect after you came back from the VPN.</li>
+        <li>A mounted share is only let go when its server stops answering, not just because the VPN is down.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>📂 Finder opens the share for you</h2>
+      <ul>
+        <li>When you open a share in Finder away from home and Otter connects the VPN and mounts it, Otter now opens the share in a Finder window, since Finder’s own attempt can only time out.</li>
+      </ul>
+    </section>
+
+    <p class="meta"><a href="./index.html">All release notes</a></p>
   </main>
 </body>
 </html>
