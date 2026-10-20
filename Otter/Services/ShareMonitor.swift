@@ -52,6 +52,7 @@ final class ShareMonitor: ObservableObject {
     private let eventLog: ShareEventLog
     private let latencyHistory: ShareLatencyHistory?
     private let latencyProbe: @Sendable (URL) async -> Double?
+    private let openInFinder: @MainActor (URL) -> Void
     private let defaults: UserDefaults
     private let now: () -> Date
     private var cancellables = Set<AnyCancellable>()
@@ -100,6 +101,7 @@ final class ShareMonitor: ObservableObject {
         eventLog: ShareEventLog,
         latencyHistory: ShareLatencyHistory? = nil,
         latencyProbe: @escaping @Sendable (URL) async -> Double? = { await TCPLatencyProbe.measure(url: $0) },
+        openInFinder: @escaping @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) },
         defaults: UserDefaults = .standard,
         now: @escaping () -> Date = Date.init
     ) {
@@ -113,6 +115,7 @@ final class ShareMonitor: ObservableObject {
         self.eventLog = eventLog
         self.latencyHistory = latencyHistory
         self.latencyProbe = latencyProbe
+        self.openInFinder = openInFinder
         self.defaults = defaults
         self.now = now
         persistedConnectionTimes = Self.loadPersistedConnectionTimes(from: defaults)
@@ -219,7 +222,7 @@ final class ShareMonitor: ObservableObject {
     /// Otter did not mount. macOS cannot reach a server that sits behind a VPN,
     /// so that attempt is going to fail. Rather than leave the user to work out
     /// why, start the VPN their shares are configured for and mount those
-    /// shares from here, then say so once.
+    /// shares from here, then say so once and open them in Finder.
     ///
     /// The attempt does not reveal which server it targeted, so every
     /// VPN-dependent share is brought up. Each has already opted in to
@@ -258,6 +261,14 @@ final class ShareMonitor: ObservableObject {
             .compactMap { $0.activeRules.requiredVPNName }
             .first
         notificationService.notifyVPNAssistedMount(shares: mountedShares, vpnName: vpnName)
+
+        // Finder's own attempt cannot reach the server and will only time out,
+        // so show the user the share they were opening, as Finder would have.
+        // Read the share again: mounting may have moved its mount path.
+        for share in mountedShares {
+            let mountPath = settings.share(id: share.id)?.mountPath ?? share.mountPath
+            openInFinder(URL(fileURLWithPath: mountPath, isDirectory: true))
+        }
     }
 
     func mount(_ share: NetworkShare) async {
@@ -595,9 +606,13 @@ final class ShareMonitor: ObservableObject {
         // whenever it is available. Explicit registered-network rules still
         // rely on their saved network identity and are never bypassed by this
         // reachability check.
+        // A share that is already mounted gets the same check before the rule
+        // can take it away: Manual and Connect Once shares mounted on the LAN
+        // (by Otter or straight from Finder) would otherwise be unmounted by
+        // the very next volume or timer check simply because no VPN is up.
         var serverWasReachableDirectly = false
         if !ruleEvaluation.allowsConnection,
-           wantsConnectionNow,
+           wantsConnectionNow || isMounted,
            rules.hasVPNRule,
            !rules.hasNetworkRule,
            rules.requiredVPNName != nil,

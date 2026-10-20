@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import UserNotifications
 
@@ -66,6 +67,24 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
 
     var canAskForAuthorization: Bool {
         authorizationStatus == .notDetermined
+    }
+
+    /// Whether macOS will actually show Otter's notifications right now.
+    var isAllowedByMacOS: Bool {
+        switch authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            true
+        case .notDetermined, .denied:
+            false
+        @unknown default:
+            false
+        }
+    }
+
+    func openSystemNotificationSettings() {
+        let bundleID = Bundle.main.bundleIdentifier ?? ""
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(bundleID)") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     func start() {
@@ -418,15 +437,7 @@ final class NotificationService: NSObject, ObservableObject, UNUserNotificationC
 
     private func hasPermissionToNotify() async -> Bool {
         await refreshAuthorizationStatus()
-
-        switch authorizationStatus {
-        case .authorized, .provisional, .ephemeral:
-            return true
-        case .notDetermined, .denied:
-            return false
-        @unknown default:
-            return false
-        }
+        return isAllowedByMacOS
     }
 
     private func notificationMessage(

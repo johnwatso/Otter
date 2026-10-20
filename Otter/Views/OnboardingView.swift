@@ -85,6 +85,10 @@ struct OnboardingView: View {
             loginItemService.refresh()
             Task { await notificationService.refreshAuthorizationStatus() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            // Picks up a change made in System Settings while onboarding is open.
+            Task { await notificationService.refreshAuthorizationStatus() }
+        }
         .onDisappear {
             discovery.stop()
             appModel.onboardingDidEnd()
@@ -139,7 +143,7 @@ struct OnboardingView: View {
                     symbol: "bell",
                     title: "Connection Notifications",
                     detail: notificationsDenied
-                        ? "Notifications are turned off for Otter in System Settings."
+                        ? "Notifications are turned off for Otter in System Settings. Turn this on to open them."
                         : "Get notified when shares disconnect or require attention.",
                     isOn: notificationsBinding
                 )
@@ -149,6 +153,13 @@ struct OnboardingView: View {
         }
         .padding(.top, 44)
         .frame(maxHeight: .infinity, alignment: .top)
+        .task {
+            // Notifications default to on, so ask macOS now, while the reason
+            // is on screen, rather than leaving the switch on with nothing behind it.
+            if settings.preferences.notificationsEnabled {
+                requestNotificationPermission()
+            }
+        }
     }
 
     private var connectPage: some View {
@@ -536,16 +547,40 @@ struct OnboardingView: View {
         notificationService.authorizationStatus == .denied
     }
 
+    // The switch shows what will actually happen: on only when Otter wants to
+    // notify and macOS has agreed, never on the strength of the preference
+    // alone while permission is still undecided.
     private var notificationsBinding: Binding<Bool> {
         Binding(
-            get: { settings.preferences.notificationsEnabled && !notificationsDenied },
+            get: { settings.preferences.notificationsEnabled && notificationService.isAllowedByMacOS },
             set: { enabled in
-                settings.updatePreferences { $0.notificationsEnabled = enabled && !notificationsDenied }
-                if enabled, notificationService.canAskForAuthorization {
-                    Task { await notificationService.requestAuthorization() }
+                guard enabled else {
+                    settings.updatePreferences { $0.notificationsEnabled = false }
+                    return
+                }
+
+                if notificationsDenied {
+                    // macOS will not ask twice; only System Settings can undo a refusal.
+                    settings.updatePreferences { $0.notificationsEnabled = true }
+                    notificationService.openSystemNotificationSettings()
+                } else {
+                    requestNotificationPermission()
                 }
             }
         )
+    }
+
+    /// Asks macOS for permission and keeps the preference in step with the answer.
+    private func requestNotificationPermission() {
+        settings.updatePreferences { $0.notificationsEnabled = true }
+        guard notificationService.canAskForAuthorization else { return }
+
+        Task {
+            let granted = await notificationService.requestAuthorization()
+            if !granted {
+                settings.updatePreferences { $0.notificationsEnabled = false }
+            }
+        }
     }
 }
 

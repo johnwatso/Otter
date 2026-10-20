@@ -2924,7 +2924,11 @@ private actor StubMountService: MountServicing {
         return mountResult
     }
 
-    func unmount(_ share: NetworkShare) async throws {}
+    private(set) var unmountCallCount = 0
+
+    func unmount(_ share: NetworkShare) async throws {
+        unmountCallCount += 1
+    }
 }
 
 private actor StubWakeOnLANService: WakeOnLANServicing {
@@ -3669,6 +3673,13 @@ final class MountAttemptDetectorTests: XCTestCase {
 }
 
 final class VPNAssistedMountTests: XCTestCase {
+    // Folders the monitor asked Finder to open, so tests never open real windows.
+    private final class FinderOpenRecorder: @unchecked Sendable {
+        var urls: [URL] = []
+    }
+
+    private let finder = FinderOpenRecorder()
+
     private let vpnRules = ShareRules(
         vpnRuleEnabled: true,
         vpnName: "Work VPN",
@@ -3699,6 +3710,7 @@ final class VPNAssistedMountTests: XCTestCase {
             networkService: network,
             notificationService: notifier,
             eventLog: ShareEventLog(defaults: defaults),
+            openInFinder: { [finder] in finder.urls.append($0) },
             defaults: defaults
         )
         return (monitor, notifier)
@@ -3751,6 +3763,8 @@ final class VPNAssistedMountTests: XCTestCase {
         XCTAssertEqual(notifier.vpnAssistedMounts.first?.vpnName, "Work VPN")
         // The combined notification replaces the plain "connected" one.
         XCTAssertFalse(notifier.transitions.contains { $0.current == .connected })
+        // Finder's own attempt will time out, so Otter shows the share instead.
+        XCTAssertEqual(finder.urls.map(\.path), ["/Volumes/Office Files"])
     }
 
     @MainActor
@@ -3860,6 +3874,8 @@ final class VPNAssistedMountTests: XCTestCase {
         XCTAssertTrue(notifier.vpnAssistedMounts.isEmpty)
         // With no VPN involved, the ordinary notification still goes out.
         XCTAssertTrue(notifier.transitions.contains { $0.current == .connected })
+        // Finder reached the server itself, so it opens the share on its own.
+        XCTAssertTrue(finder.urls.isEmpty)
     }
 
     func testNotificationCopyNamesTheVPNAndTheShares() {
@@ -4129,6 +4145,57 @@ final class ConnectionModeBehaviorTests: XCTestCase {
         XCTAssertEqual(network.canReachCallCount, 1)
         XCTAssertEqual(mountCallCount, 1)
         XCTAssertEqual(monitor.status(for: manual), .connected)
+    }
+
+    @MainActor
+    func testManualKeepsALocalMountWhileItsVPNIsDown() async {
+        // Mounted on the home network (by Otter or from Finder) after an
+        // earlier session over the VPN. The VPN is down but the server answers.
+        let manual = share(
+            .manual,
+            rules: ShareRules(vpnRuleEnabled: true, vpnName: "Work VPN", connectVPNAutomatically: true)
+        )
+        let mountService = StubMountService(mountedURL: URL(fileURLWithPath: "/Volumes/Media", isDirectory: true))
+        let vpnConnectionService = StubVPNConnectionService()
+        let (monitor, _, _) = makeMonitor(
+            "ManualKeepsLocalMount",
+            share: manual,
+            network: StubNetworkReachability(isOnline: true, isReachable: true),
+            mountService: mountService,
+            vpnConnectionService: vpnConnectionService
+        )
+
+        for reason in [MonitorReason.volumeChanged, .timer, .networkChanged] {
+            await monitor.evaluate(manual, reason: reason)
+        }
+
+        let unmountCallCount = await mountService.unmountCallCount
+        let vpnConnectionNames = await vpnConnectionService.connectionNames
+        XCTAssertEqual(unmountCallCount, 0, "A share reachable on the LAN must not be unmounted for lacking a VPN")
+        XCTAssertTrue(vpnConnectionNames.isEmpty)
+        XCTAssertEqual(monitor.status(for: manual), .connected)
+    }
+
+    @MainActor
+    func testManualStillReleasesAMountTheServerNoLongerAnswers() async {
+        // The VPN that carried the mount went away and the server is out of reach.
+        let manual = share(
+            .manual,
+            rules: ShareRules(vpnRuleEnabled: true, vpnName: "Work VPN", connectVPNAutomatically: true)
+        )
+        let mountService = StubMountService(mountedURL: URL(fileURLWithPath: "/Volumes/Media", isDirectory: true))
+        let (monitor, _, _) = makeMonitor(
+            "ManualReleasesStaleMount",
+            share: manual,
+            network: StubNetworkReachability(isOnline: true, isReachable: false),
+            mountService: mountService
+        )
+
+        await monitor.evaluate(manual, reason: .networkChanged)
+
+        let unmountCallCount = await mountService.unmountCallCount
+        XCTAssertEqual(unmountCallCount, 1)
+        XCTAssertEqual(monitor.status(for: manual), .disconnected)
     }
 
     // MARK: - Connect Once
