@@ -3,46 +3,90 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Refine landing page hero design - Release Notes</title>
+  <title>Otter 1.0 - Release Notes</title>
+  <meta name="description" content="Release notes for Otter 1.0: a redesigned Manage Shares window, guided onboarding, VPN-aware mounting, reliability history and faster diagnostics.">
   <style>
     :root { color-scheme: light dark; }
-    body {
-      margin: 0;
-      padding: 32px 20px 48px;
-      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f4f6f8;
-      color: #0f1720;
-    }
-    main {
-      max-width: 760px;
-      margin: 0 auto;
-      padding: 28px;
-      border-radius: 22px;
-      background: rgba(255, 255, 255, 0.86);
-      box-shadow: 0 20px 60px rgba(15, 23, 32, 0.10);
-    }
+    body { margin: 0; padding: 32px 20px 48px; font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f6f8; color: #0f1720; }
+    main { max-width: 760px; margin: 0 auto; padding: 28px; border-radius: 22px; background: rgba(255, 255, 255, .86); box-shadow: 0 20px 60px rgba(15, 23, 32, .10); border: 1px solid rgba(82, 96, 109, .12); }
     h1 { margin: 0 0 6px; font-size: 30px; line-height: 1.15; }
-    .meta { margin: 0 0 24px; color: #52606d; font-size: 14px; }
-    p { margin: 0 0 16px; }
+    .meta { color: #52606d; font-size: 14px; }
+    .intro { margin: 0 0 24px; color: #384454; }
+    section { margin: 18px 0 0; padding: 18px 18px 14px; border: 1px solid rgba(82, 96, 109, .18); border-radius: 16px; border-left: 5px solid #0a67a3; background: rgba(255, 255, 255, .42); }
+    h2 { margin: 0 0 4px; color: #0a67a3; font-size: 18px; }
+    ul { margin: 12px 0 0; padding-left: 22px; }
+    li { margin: 0 0 8px; }
     a { color: #0a67a3; text-decoration: none; }
     a:hover { text-decoration: underline; }
-    @media (prefers-color-scheme: dark) {
-      body { background: #0b1015; color: #edf2f7; }
-      main {
-        background: rgba(15, 23, 32, 0.88);
-        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
-      }
-      .meta { color: #9fb0c2; }
-      a { color: #73c3ff; }
-    }
+    @media (prefers-color-scheme: dark) { body { background: #0b1015; color: #edf2f7; } main { background: rgba(15, 23, 32, .88); border-color: rgba(159, 176, 194, .14); } .meta { color: #9fb0c2; } .intro { color: #c8d3df; } section { border-color: rgba(159, 176, 194, .18); background: rgba(255, 255, 255, .04); } h2, a { color: #73c3ff; } section { border-left-color: #73c3ff; } }
   </style>
 </head>
 <body>
   <main>
-    <h1>Refine landing page hero design</h1>
-    <p class="meta">Version 1.0.0</p>
-    <p>Refine landing page hero design</p>
-    <p><strong>Commit:</strong> <a href="https://github.com/johnwatso/Otter/commit/992e83621e71af59e40786b117fbf37c326859cf">992e836</a></p>
+    <h1>Otter 1.0 🦦</h1>
+    <p class="meta">Version 1.0.0 &middot; Build 2026101901 &middot; Released 19 October 2026</p>
+    <p class="intro">Otter 1.0 is here. It keeps your SMB shares mounted through sleep, network changes, VPN reconnects and server restarts, and now it looks and feels the part: a redesigned Manage Shares window, a guided first run, and a much clearer picture of how reliable each share really is.</p>
+
+    <section>
+      <h2>✨ A redesigned Manage Shares window</h2>
+      <ul>
+        <li>A new status header, a Reliability strip, Connection Details and Connection Behavior cards, and a sidebar that groups shares under their server with status indicators lined up on the trailing edge.</li>
+        <li>Give any share or server its own icon, and see your chosen share icons in the menu bar too.</li>
+        <li>Icon-only Finder, disconnect and pause controls keep the header calm, and the menu bar menu is simpler.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>🚀 A guided first run</h2>
+      <ul>
+        <li>A four-step onboarding walks you from a server address to a mounted share, connecting through the standard macOS sign-in so your password never goes in a share URL.</li>
+        <li>Otter can offer to manage a share you mount in Finder, and cleans up the duplicate connections that aliases such as <strong>nas.local</strong> create.</li>
+        <li>Otter 1.0 supports SMB shares. NFS and WebDAV are not supported yet.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>🔌 Smarter connections</h2>
+      <ul>
+        <li>Open an SMB share in Finder while away from your home network and Otter connects the VPN for you, mounts the share, and tells you when it is ready.</li>
+        <li>Optional fallback addresses and Wake-on-LAN-aware behaviour help shares recover when a server is asleep or its name does not resolve.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>📈 Reliability you can see</h2>
+      <ul>
+        <li>A seven-day Reliability card shows daily health and response times for each share and for the whole server.</li>
+        <li>Response time is now measured as a real TCP round trip, so the numbers reflect the connection rather than how long a health check took.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>🩺 Diagnostics that explain what is wrong</h2>
+      <ul>
+        <li>A redesigned Diagnose sheet runs per-share NAS checks, including a quick speed test, and diagnostic runs no longer hang.</li>
+        <li>A redesigned Activity Log makes it easy to see what Otter did and when.</li>
+        <li>Export a readable diagnostic report with identifying details removed.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>⚙️ Tidier Settings</h2>
+      <ul>
+        <li>Wi-Fi and VPN status and the backup and restore actions are always visible instead of tucked behind disclosures and menus, in a compact, fixed-size window.</li>
+        <li>Notifications now live in General, and Settings has fewer, clearer options.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>🔒 Built for a 1.0</h2>
+      <ul>
+        <li>A privacy manifest, Swift 6 concurrency, and accessibility and destructive-action improvements throughout.</li>
+        <li>Requires macOS 15 or later, and is designed for macOS Tahoe.</li>
+      </ul>
+    </section>
+
+    <p class="meta"><a href="./index.html">All release notes</a></p>
   </main>
 </body>
 </html>
