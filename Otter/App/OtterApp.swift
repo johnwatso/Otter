@@ -102,10 +102,8 @@ private struct OtterCommands: Commands {
         // actually opens the window.
 
         CommandGroup(replacing: .help) {
-            Button("Check for Updates…") {
-                appModel.updaterViewModel.checkForUpdates()
-            }
-            .disabled(!appModel.updaterViewModel.canCheckForUpdates)
+            CheckForUpdatesButton(updaterViewModel: appModel.updaterViewModel)
+                .labelStyle(.titleOnly)
 
             Button("Export Diagnostics…") {
                 Task { @MainActor in
