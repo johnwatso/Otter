@@ -7,7 +7,6 @@ struct MenuBarView: View {
     @EnvironmentObject private var appModel: AppModel
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var monitor: ShareMonitor
-    @EnvironmentObject private var networkService: NetworkReachabilityService
     @EnvironmentObject private var updaterViewModel: UpdaterViewModel
     @EnvironmentObject private var newShareDetector: NewShareDetectionService
 
@@ -24,7 +23,7 @@ struct MenuBarView: View {
     }
 
     // Shares first, one row each; then the few things that apply to all of
-    // them. Network state only appears when it explains a problem.
+    // them.
     var body: some View {
         Group {
             if !newShareDetector.pendingSuggestions.isEmpty {
@@ -77,15 +76,6 @@ struct MenuBarView: View {
 
             GlobalPauseMenu()
 
-            if showsNetworkStatus {
-                Divider()
-
-                networkStatusLabel
-                if networkService.isVPNConnected || networkService.hasUnidentifiedTunnel {
-                    vpnStatusLabel
-                }
-            }
-
             Divider()
 
             Button {
@@ -101,6 +91,8 @@ struct MenuBarView: View {
             }
             .keyboardShortcut(",")
 
+            CheckForUpdatesButton(updaterViewModel: updaterViewModel)
+
             Button {
                 NSApp.terminate(nil)
             } label: {
@@ -112,35 +104,6 @@ struct MenuBarView: View {
         .labelStyle(.titleAndIcon)
     }
 
-    /// Hidden while everything is ordinary; shown when offline or on a VPN,
-    /// where it explains why shares behave differently.
-    private var showsNetworkStatus: Bool {
-        !networkService.isOnline || networkService.isVPNConnected || networkService.hasUnidentifiedTunnel
-    }
-
-    private var networkStatusLabel: some View {
-        Label(
-            networkStatusText,
-            systemImage: networkService.isOnline ? "wifi" : "wifi.slash"
-        )
-    }
-
-    private var vpnStatusLabel: some View {
-        Label("VPN: \(vpnStatusText)", systemImage: "lock.shield")
-    }
-
-    private var vpnStatusText: String {
-        networkService.currentVPNDisplayName
-    }
-
-    private var networkStatusText: String {
-        if let networkName = networkService.currentWiFiNetworkName {
-            return "Wi-Fi: \(networkName)"
-        }
-
-        return networkService.isOnline ? "Network available" : "No active network"
-    }
-
     private func showPreferences() {
         openSettings()
         bringOtterToFront()
@@ -149,6 +112,23 @@ struct MenuBarView: View {
     private func showShares() {
         openWindow(id: AppModel.sharesWindowID)
         bringOtterToFront(windowTitled: "Manage Shares")
+    }
+}
+
+// Observes the updater itself so the item enables once Sparkle is ready. Menu
+// commands are not views that SwiftUI re-renders on their own, so reading
+// `canCheckForUpdates` through anything that is not observed leaves the item
+// stuck in its launch-time, disabled state.
+struct CheckForUpdatesButton: View {
+    @ObservedObject var updaterViewModel: UpdaterViewModel
+
+    var body: some View {
+        Button {
+            updaterViewModel.checkForUpdates()
+        } label: {
+            Label("Check for Updates…", systemImage: "arrow.down.circle")
+        }
+        .disabled(!updaterViewModel.isConfigured || !updaterViewModel.canCheckForUpdates)
     }
 }
 

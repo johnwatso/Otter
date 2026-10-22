@@ -149,6 +149,12 @@ final class NetworkReachabilityService: NSObject, ObservableObject, CLLocationMa
         locationManager.requestWhenInUseAuthorization()
     }
 
+    /// Whether Location Services is switched on for the whole Mac. Apple asks
+    /// for this to be read off the main thread, as it can block.
+    nonisolated static func locationServicesEnabled() async -> Bool {
+        await Task.detached { CLLocationManager.locationServicesEnabled() }.value
+    }
+
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         let status = manager.authorizationStatus
         Task { @MainActor in
