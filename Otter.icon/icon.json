@@ -22,6 +22,27 @@
     {
       "layers" : [
         {
+          "glass" : false,
+          "image-name" : "otter-mono.png",
+          "name" : "Otter Mono",
+          "opacity-specializations" : [
+            {
+              "value" : 0
+            },
+            {
+              "appearance" : "tinted",
+              "value" : 1
+            }
+          ],
+          "position" : {
+            "scale" : 1.06,
+            "translation-in-points" : [
+              6,
+              0
+            ]
+          }
+        },
+        {
           "fill" : "automatic",
           "glass" : false,
           "image-name" : "6BD5DAB2-8438-4795-90FD-5A1AFF801FC5 2.png",
@@ -32,7 +53,13 @@
               6,
               0
             ]
-          }
+          },
+          "opacity-specializations" : [
+            {
+              "appearance" : "tinted",
+              "value" : 0
+            }
+          ]
         }
       ],
       "shadow" : {
