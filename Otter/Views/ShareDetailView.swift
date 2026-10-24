@@ -212,6 +212,11 @@ struct ServerDetailView<Actions: View>: View {
     let onSelectShare: (NetworkShare) -> Void
     @ViewBuilder let actions: () -> Actions
 
+    @State private var webUIURL: URL?
+    @State private var detectedWebUIHost: String?
+
+    private var webUIHost: String? { currentShares.first?.host }
+
     private var serverSymbol: String {
         group.shares.first.map { appModel.serverIcon(for: $0) } ?? ServerSymbol.default
     }
@@ -233,7 +238,18 @@ struct ServerDetailView<Actions: View>: View {
                     onSelectSymbol: group.shares.first.map { share in
                         { settings.setServerIcon($0, for: share) }
                     },
-                    actions: actions
+                    actions: {
+                        actions()
+                        if detectedWebUIHost == webUIHost, let webUIURL {
+                            Button {
+                                NSWorkspace.shared.open(webUIURL)
+                            } label: {
+                                Label("Open Web UI", systemImage: "globe")
+                            }
+                            .tahoeSecondaryActionButton()
+                            .help("Open \(webUIURL.absoluteString) in your browser")
+                        }
+                    }
                 )
 
                 DetailCard("Shares") {
@@ -273,6 +289,23 @@ struct ServerDetailView<Actions: View>: View {
             .frame(maxWidth: .infinity, alignment: .center)
         }
         .background(Color(NSColor.windowBackgroundColor))
+        .task(id: webUIHost) {
+            webUIURL = nil
+            detectedWebUIHost = nil
+            guard let host = webUIHost, appModel.screenshotDemoShares == nil else { return }
+            let discovery = WebUIDiscoveryService()
+            repeat {
+                let detectedURL = await discovery.discover(host: host)
+                guard !Task.isCancelled else { return }
+                detectedWebUIHost = host
+                webUIURL = detectedURL
+                do {
+                    try await Task.sleep(for: .seconds(60))
+                } catch {
+                    return
+                }
+            } while !Task.isCancelled
+        }
     }
 
     private var currentShares: [NetworkShare] {

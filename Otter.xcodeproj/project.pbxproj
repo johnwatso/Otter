@@ -66,6 +66,7 @@
 		D1A600000000000000000009 /* SharePerformanceTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A600000000000000010009; };
 		D1A60000000000000000000A /* NASDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A60000000000000001000A; };
 		D1A600000000000000000020 /* DiagnosticComparisonService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A600000000000000010020; };
+		AABB00000000000000000001 /* WebUIDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABB00000000000000000002; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -147,6 +148,7 @@
 		D1A600000000000000010009 /* SharePerformanceTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Diagnostics/SharePerformanceTester.swift"; sourceTree = "<group>"; };
 		D1A60000000000000001000A /* NASDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NASDiagnosticsView.swift"; sourceTree = "<group>"; };
 		D1A600000000000000010020 /* DiagnosticComparisonService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Diagnostics/DiagnosticComparisonService.swift"; sourceTree = "<group>"; };
+		AABB00000000000000000002 /* WebUIDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebUIDiscoveryService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -238,6 +240,7 @@
 				D1A600000000000000010000 /* DiagnosticAnalyzer.swift */,
 				1A2B3C4D5E6F700100000106 /* SettingsStore.swift */,
 				1A2B3C4D5E6F700100000117 /* CredentialStore.swift */,
+				AABB00000000000000000002 /* WebUIDiscoveryService.swift */,
 				1A2B3C4D5E6F700100000116 /* HostResolver.swift */,
 				1A2B3C4D5E6F700100000107 /* MountService.swift */,
 				1A2B3C4D5E6F700100000108 /* NetworkReachabilityService.swift */,
@@ -459,6 +462,7 @@
 				1A2B3C4D5E6F700100000013 /* ActionButtonStyles.swift in Sources */,
 				1A2B3C4D5E6F700100000014 /* ShareEventLog.swift in Sources */,
 				1A2B3C4D5E6F700100000015 /* ReconnectPolicy.swift in Sources */,
+				AABB00000000000000000001 /* WebUIDiscoveryService.swift in Sources */,
 				1A2B3C4D5E6F700100000016 /* HostResolver.swift in Sources */,
 				1A2B3C4D5E6F700100000017 /* CredentialStore.swift in Sources */,
 				1A2B3C4D5E6F700100000018 /* ServiceProtocols.swift in Sources */,

@@ -23,20 +23,47 @@ private struct ActivityDayGroup: Identifiable {
     var id: Date { day }
 }
 
-// Adjacent identical events (same share, kind and detail) shown as one row.
-// Newest first. Errors and credential prompts are never merged.
-private struct ActivityEventRun: Identifiable {
+// Newest first. A server log combines matching events across shares in a
+// short burst. Other scopes retain the existing adjacent per-share runs.
+struct ActivityEventRun: Identifiable {
     let events: [ShareEvent]
     var id: ShareEvent.ID { events[0].id }
 
-    static func runs(from events: [ShareEvent]) -> [ActivityEventRun] {
+    static func runs(
+        from events: [ShareEvent],
+        serverIdentities: [NetworkShare.ID: String]? = nil
+    ) -> [ActivityEventRun] {
         var result: [[ShareEvent]] = []
         for event in events {
-            if let last = result.last?.first,
-               event.kind.isCollapsible,
-               last.shareID == event.shareID,
-               last.kind == event.kind,
-               last.detail == event.detail {
+            if let serverIdentities {
+                var matchingIndex: Int?
+                if let server = serverIdentities[event.shareID] {
+                    for index in result.indices.reversed() {
+                        let latest = result[index][0]
+                        // Anchor the burst to its newest event so a long chain
+                        // of events cannot merge separate incidents.
+                        guard latest.date.timeIntervalSince(event.date) <= 30 else { break }
+                        // Don't group across another transition for this share,
+                        // or mistake two attempts on one share for one incident.
+                        guard !result[index].contains(where: { $0.shareID == event.shareID }) else { break }
+                        if serverIdentities[latest.shareID] == server,
+                           latest.kind == event.kind,
+                           latest.detail == event.detail {
+                            matchingIndex = index
+                            break
+                        }
+                    }
+                }
+                if let matchingIndex {
+                    result[matchingIndex].append(event)
+                } else {
+                    result.append([event])
+                }
+            } else if let last = result.last?.first,
+                      event.kind.isCollapsible,
+                      last.shareID == event.shareID,
+                      last.kind == event.kind,
+                      last.detail == event.detail {
                 result[result.count - 1].append(event)
             } else {
                 result.append([event])
@@ -108,10 +135,26 @@ struct ActivityLogView: View {
         return allShares.filter { includedShareIDs.contains($0.id) }
     }
 
+    private var serverIdentities: [NetworkShare.ID: String]? {
+        guard includedShareIDs != nil, resolvedFilter == nil else { return nil }
+        return Dictionary(uniqueKeysWithValues: filterableShares.compactMap { share in
+            share.serverIdentity.map { (share.id, $0) }
+        })
+    }
+
     private var summary: ActivitySummary {
         let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
         var result = ActivitySummary()
-        for event in scopedEvents where event.date >= cutoff {
+        let recent = scopedEvents.filter { $0.date >= cutoff }
+        let summaryEvents: [ShareEvent]
+        if let serverIdentities {
+            summaryEvents = dayGroups(from: recent).flatMap { group in
+                ActivityEventRun.runs(from: group.events, serverIdentities: serverIdentities).map { $0.events[0] }
+            }
+        } else {
+            summaryEvents = recent
+        }
+        for event in summaryEvents {
             if event.kind == .mounted { result.mounts += 1 }
             if event.kind == .reconnected { result.reconnects += 1 }
             if event.kind.severity == .error { result.errors += 1 }
@@ -129,7 +172,10 @@ struct ActivityLogView: View {
 
     var body: some View {
         let events = scopedEvents.filter { eventFilter.includes($0.kind) }
-        let groups = dayGroups(from: events)
+        // Group before filtering so hidden transitions still separate incidents.
+        let groups = dayGroups(from: scopedEvents).filter { group in
+            group.events.contains { eventFilter.includes($0.kind) }
+        }
 
         VStack(spacing: 0) {
             header
@@ -159,7 +205,9 @@ struct ActivityLogView: View {
                         ForEach(groups) { group in
                             ActivityDateSection(
                                 group: group,
+                                eventFilter: eventFilter,
                                 showsShareName: resolvedFilter == nil,
+                                serverIdentities: serverIdentities,
                                 shareLookup: share(for:),
                                 expandedIDs: $expandedIDs
                             )
@@ -209,7 +257,8 @@ struct ActivityLogView: View {
                     Text("Activity Log")
                         .font(.title3.weight(.bold))
                     Text(resolvedFilter == nil
-                         ? "Connection history and events for your shares."
+                         ? includedSharesLabel.map { "Connection history and events for \($0)." }
+                            ?? "Connection history and events for your shares."
                          : "Connection history and events for this share.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -333,11 +382,16 @@ private struct ActivitySummaryView: View {
 
 private struct ActivityDateSection: View {
     let group: ActivityDayGroup
+    let eventFilter: ActivityEventFilter
     let showsShareName: Bool
+    let serverIdentities: [NetworkShare.ID: String]?
     let shareLookup: (NetworkShare.ID) -> NetworkShare?
     @Binding var expandedIDs: Set<ShareEvent.ID>
 
-    private var runs: [ActivityEventRun] { ActivityEventRun.runs(from: group.events) }
+    private var runs: [ActivityEventRun] {
+        ActivityEventRun.runs(from: group.events, serverIdentities: serverIdentities)
+            .filter { eventFilter.includes($0.events[0].kind) }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -348,7 +402,7 @@ private struct ActivityDateSection: View {
                 }
                 ActivityEventRow(
                     events: run.events,
-                    share: shareLookup(run.events[0].shareID),
+                    shareLookup: shareLookup,
                     showsShareName: showsShareName,
                     isExpanded: expandedIDs.contains(run.id),
                     toggle: { toggle(run.id) }
@@ -397,21 +451,36 @@ private struct ActivityDateSection: View {
 
 private struct ActivityEventRow: View {
     let events: [ShareEvent]
-    let share: NetworkShare?
+    let shareLookup: (NetworkShare.ID) -> NetworkShare?
     let showsShareName: Bool
     let isExpanded: Bool
     let toggle: () -> Void
 
     private var event: ShareEvent { events[0] }
     private var isRun: Bool { events.count > 1 }
+    private var share: NetworkShare? { shareLookup(event.shareID) }
+    private var shareIDs: [NetworkShare.ID] {
+        var seen = Set<NetworkShare.ID>()
+        return events.map(\.shareID).filter { seen.insert($0).inserted }
+    }
+    private var spansShares: Bool { shareIDs.count > 1 }
+
+    private var title: String {
+        if spansShares { return "\(event.kind.title) · \(String.counted(shareIDs.count, "share"))" }
+        return isRun ? "\(event.kind.title) ×\(events.count)" : event.kind.title
+    }
 
     private var timeLabel: String {
         let time = { (date: Date) in date.formatted(date: .omitted, time: .shortened) }
         guard let oldest = events.last, isRun else { return time(event.date) }
-        return "\(time(oldest.date)) – \(time(event.date))"
+        let start = time(oldest.date)
+        let end = time(event.date)
+        return start == end ? end : "\(start) – \(end)"
     }
 
-    private var shareName: String { share?.displayName ?? "Removed share" }
+    private var shareName: String {
+        shareIDs.map { shareLookup($0)?.displayName ?? "Removed share" }.joined(separator: ", ")
+    }
 
     private var subtitle: String? {
         if let detail = event.detail, !detail.isEmpty { return detail }
@@ -429,7 +498,7 @@ private struct ActivityEventRow: View {
                         .accessibilityHidden(true)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(isRun ? "\(event.kind.title) ×\(events.count)" : event.kind.title)
+                        Text(title)
                             .font(.body.weight(.semibold))
                             .foregroundStyle(.primary)
                         if let subtitle {
@@ -480,8 +549,14 @@ private struct ActivityEventRow: View {
     }
 
     private var accessibilityText: String {
-        var text = "\(event.kind.severity.label)\(event.kind.title)"
-        if isRun { text += ", \(events.count) times, \(timeLabel)" } else { text += ", \(event.date.formatted(date: .abbreviated, time: .shortened))" }
+        var text = "\(event.kind.severity.label)\(spansShares ? title : event.kind.title)"
+        if spansShares {
+            text += ", \(timeLabel)"
+        } else if isRun {
+            text += ", \(events.count) times, \(timeLabel)"
+        } else {
+            text += ", \(event.date.formatted(date: .abbreviated, time: .shortened))"
+        }
         if showsShareName { text += ", \(shareName)" }
         if let detail = event.detail, !detail.isEmpty { text += ", \(detail)" }
         return text
@@ -489,11 +564,16 @@ private struct ActivityEventRow: View {
 
     private var details: some View {
         Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 6) {
-            row("Share", shareName)
+            row(spansShares ? "Shares" : "Share", shareName)
             if let host = share?.host { row("Server", host) }
             if let detail = event.detail, !detail.isEmpty { row("Detail", detail) }
             if isRun {
-                row("Times", events.map { $0.date.formatted(date: .omitted, time: .shortened) }.joined(separator: "\n"))
+                row("Times", events.map { event in
+                    let time = event.date.formatted(date: .omitted, time: .standard)
+                    guard spansShares else { return time }
+                    let name = shareLookup(event.shareID)?.displayName ?? "Removed share"
+                    return "\(name): \(time)"
+                }.joined(separator: "\n"))
             } else {
                 row("Time", event.date.formatted(date: .long, time: .shortened))
             }

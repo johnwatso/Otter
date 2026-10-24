@@ -5559,3 +5559,206 @@ final class OnboardingRenderTests: XCTestCase {
         XCTAssertLessThan(dark.brightnessComponent, 0.3)
     }
 }
+
+
+final class WebUIDiscoveryTests: XCTestCase {
+    func testPrefersHTTPSRegardlessOfResponseOrder() async {
+        let discovery = WebUIDiscoveryService(
+            resolver: WebUIStubHostResolver(addresses: ["192.0.2.10"]),
+            probe: StubWebUIProbe(available: ["https://192.0.2.10:5001/", "http://192.0.2.10/"])
+        )
+        let url = await discovery.discover(host: "nas.local")
+        XCTAssertEqual(url?.absoluteString, "https://192.0.2.10:5001/")
+    }
+
+    func testFindsHTTPOnALiteralIPWithoutDNS() async {
+        let discovery = WebUIDiscoveryService(
+            resolver: WebUIStubHostResolver(addresses: []),
+            probe: StubWebUIProbe(available: ["http://192.0.2.10:8080/"])
+        )
+        let url = await discovery.discover(host: "192.0.2.10")
+        XCTAssertEqual(url?.absoluteString, "http://192.0.2.10:8080/")
+    }
+
+    func testChecksAlternateAddressWhenFirstHasNoWebUI() async {
+        let discovery = WebUIDiscoveryService(
+            resolver: WebUIStubHostResolver(addresses: ["192.0.2.10", "192.0.2.11"]),
+            probe: StubWebUIProbe(available: ["https://192.0.2.11/"])
+        )
+        let url = await discovery.discover(host: "nas.local")
+        XCTAssertEqual(url?.absoluteString, "https://192.0.2.11/")
+    }
+
+    func testUnresolvedOrNonWebServersHaveNoButtonURL() async {
+        let discovery = WebUIDiscoveryService(
+            resolver: WebUIStubHostResolver(addresses: []), probe: StubWebUIProbe(available: [])
+        )
+        let unresolved = await discovery.discover(host: "missing.local")
+        let noWebUI = await discovery.discover(host: "192.0.2.10")
+        XCTAssertNil(unresolved)
+        XCTAssertNil(noWebUI)
+    }
+
+    func testIPv6URLsAndInputValidation() {
+        XCTAssertEqual(WebUIDiscoveryService.candidates(for: "[2001:db8::1]").first?.absoluteString,
+                       "https://[2001:db8::1]/")
+        XCTAssertTrue(WebUIDiscoveryService.candidates(for: "nas.local/path").isEmpty)
+    }
+
+    func testCancelledDiscoveryDoesNotPublishAURL() async {
+        let task = Task {
+            await WebUIDiscoveryService(
+                resolver: WebUIStubHostResolver(addresses: []),
+                probe: StubWebUIProbe(available: ["https://192.0.2.10/"])
+            ).discover(host: "192.0.2.10")
+        }
+        task.cancel()
+        let url = await task.value
+        XCTAssertNil(url)
+    }
+
+    func testProbeRecognizesHTTPResponsesIncludingLoginAndRedirects() async {
+        for status in [200, 301, 401, 403, 404, 405, 503] {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [WebUIProbeURLProtocol.self]
+            let responds = await WebUIHTTPProbe().responds(
+                at: URL(string: "http://127.0.0.1/\(status)")!, configuration: configuration
+            )
+            XCTAssertTrue(responds, "HTTP \(status) establishes a web endpoint")
+        }
+    }
+
+    func testProbeRecognizesSelfSignedHTTPSButRejectsConnectionFailures() async {
+        for (path, expected) in [("certificate", true), ("refused", false)] {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [WebUIProbeURLProtocol.self]
+            let responds = await WebUIHTTPProbe().responds(
+                at: URL(string: "https://127.0.0.1/\(path)")!, configuration: configuration
+            )
+            XCTAssertEqual(responds, expected)
+        }
+    }
+}
+
+private struct StubWebUIProbe: WebUIProbing {
+    let available: Set<String>
+
+    func responds(at url: URL) async -> Bool {
+        // HTTP can win the race, but must not override a detected HTTPS URL.
+        if url.scheme == "https" { try? await Task.sleep(for: .milliseconds(10)) }
+        return available.contains(url.absoluteString)
+    }
+}
+
+private final class WebUIProbeURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        guard let url = request.url else { return }
+        if let status = Int(url.lastPathComponent) {
+            let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: [:])!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocolDidFinishLoading(self)
+        } else {
+            let code: URLError.Code = url.lastPathComponent == "certificate"
+                ? .serverCertificateUntrusted : .cannotConnectToHost
+            client?.urlProtocol(self, didFailWithError: URLError(code))
+        }
+    }
+    override func stopLoading() {}
+}
+
+private struct WebUIStubHostResolver: HostResolving {
+    let addresses: [String]
+    func resolveIPAddresses(for hostname: String) async -> [String] { addresses }
+}
+
+
+final class ActivityEventRunTests: XCTestCase {
+    private let repo = UUID()
+    private let vault = UUID()
+    private let other = UUID()
+    private let date = Date(timeIntervalSince1970: 1_700_000_000)
+
+    private var servers: [UUID: String] { [repo: "nas", vault: "nas", other: "other-nas"] }
+
+    private func event(_ share: UUID, _ kind: ShareEventKind = .mounted,
+                       secondsAgo: TimeInterval = 0, detail: String? = nil) -> ShareEvent {
+        ShareEvent(id: UUID(), shareID: share, date: date.addingTimeInterval(-secondsAgo),
+                   kind: kind, detail: detail)
+    }
+
+    func testMatchingEventsForRepoAndVaultBecomeOneServerEntry() {
+        let events = [event(repo), event(vault, secondsAgo: 2)]
+        let runs = ActivityEventRun.runs(from: events, serverIdentities: servers)
+        XCTAssertEqual(runs.count, 1)
+        XCTAssertEqual(runs[0].events, events)
+        XCTAssertEqual(runs[0].id, events[0].id)
+    }
+
+    func testInterleavedEventsFromOtherSharesDoNotPreventGrouping() {
+        let events = [event(repo), event(other, .connectionLost, secondsAgo: 1),
+                      event(vault, secondsAgo: 2)]
+        let runs = ActivityEventRun.runs(from: events, serverIdentities: servers)
+        XCTAssertEqual(runs.map { $0.events.count }, [2, 1])
+        XCTAssertEqual(runs[0].events.map(\.shareID), [repo, vault])
+    }
+
+    func testDifferentServersRemainSeparate() {
+        let runs = ActivityEventRun.runs(from: [event(repo), event(other)], serverIdentities: servers)
+        XCTAssertEqual(runs.count, 2)
+    }
+
+    func testDifferentEventKindsAndDetailsRemainSeparate() {
+        let events = [event(repo), event(vault, .disconnected, secondsAgo: 1),
+                      event(vault, secondsAgo: 2, detail: "Different reason")]
+        XCTAssertEqual(ActivityEventRun.runs(from: events, serverIdentities: servers).count, 3)
+    }
+
+    func testSeparateIncidentsOutsideTheBurstRemainSeparate() {
+        let events = [event(repo), event(vault, secondsAgo: 31)]
+        XCTAssertEqual(ActivityEventRun.runs(from: events, serverIdentities: servers).count, 2)
+    }
+
+    func testBurstWindowDoesNotGrowWithEachAdditionalShare() {
+        let third = UUID()
+        var identities = servers
+        identities[third] = "nas"
+        let events = [event(repo), event(vault, secondsAgo: 20), event(third, secondsAgo: 40)]
+        let runs = ActivityEventRun.runs(from: events, serverIdentities: identities)
+        XCTAssertEqual(runs.map { $0.events.count }, [2, 1])
+    }
+
+    func testRepeatedAttemptsOnOneShareRemainSeparateInServerLog() {
+        let events = [event(repo), event(repo, secondsAgo: 2), event(vault, secondsAgo: 3)]
+        let runs = ActivityEventRun.runs(from: events, serverIdentities: servers)
+        XCTAssertEqual(runs.map { $0.events.count }, [1, 2])
+    }
+
+    func testInterveningTransitionPreventsMergingDifferentAttempts() {
+        let events = [event(repo), event(vault, .disconnected, secondsAgo: 1),
+                      event(vault, secondsAgo: 2)]
+        XCTAssertEqual(ActivityEventRun.runs(from: events, serverIdentities: servers).count, 3)
+    }
+
+    func testMatchingErrorsGroupWhileRetainingEverySharesDetails() {
+        let events = [event(repo, .mountFailed, detail: "Server unavailable"),
+                      event(vault, .mountFailed, secondsAgo: 2, detail: "Server unavailable")]
+        let runs = ActivityEventRun.runs(from: events, serverIdentities: servers)
+        XCTAssertEqual(runs.count, 1)
+        XCTAssertEqual(runs[0].events, events)
+    }
+
+    func testUnknownServerIdentitiesDoNotMerge() {
+        let events = [event(repo), event(vault)]
+        XCTAssertEqual(ActivityEventRun.runs(from: events, serverIdentities: [:]).count, 2)
+    }
+
+    func testShareAndGlobalLogsRetainPerShareRunsAndIndividualErrors() {
+        let events = [event(repo), event(repo, secondsAgo: 2), event(vault, secondsAgo: 3),
+                      event(repo, .mountFailed, secondsAgo: 4),
+                      event(repo, .mountFailed, secondsAgo: 5)]
+        let runs = ActivityEventRun.runs(from: events)
+        XCTAssertEqual(runs.map { $0.events.count }, [2, 1, 1, 1])
+    }
+}
