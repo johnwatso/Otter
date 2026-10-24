@@ -4,11 +4,11 @@
         <title>Otter</title>
         <item>
             <title>1.0.1</title>
-            <pubDate>Fri, 23 Oct 2026 13:16:22 +1300</pubDate>
+            <pubDate>Sun, 25 Oct 2026 01:19:21 +1300</pubDate>
             <sparkle:version>2026102001</sparkle:version>
             <sparkle:shortVersionString>1.0.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/johnwatso/Otter/releases/download/v1.0.1/Otter-1.0.1.zip" length="10377971" type="application/octet-stream" sparkle:edSignature="evil+DRY9YB7Uau9m31vJa6dI5wMnOqldJqwheE3F/WJyXa5KQ0j6DoB/FCHfqVB75ntgBaVsEH6OHpYOafMBA=="/>
+            <enclosure url="https://github.com/johnwatso/Otter/releases/download/v1.0.1/Otter-1.0.1.zip" length="10406977" type="application/octet-stream" sparkle:edSignature="ZSWA/84S9m6bnNuoIRfaqEmXydK6BXZdaNMgnkD3zTqGh+DmZpoELX/WsrBGYtd8X2F51Q7m1t5OklHbhQw0CA=="/>
         </item>
     </channel>
 </rss>
